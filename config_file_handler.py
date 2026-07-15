@@ -38,7 +38,7 @@ class ConfigFileHandler:
 
         >>> config = ConfigFileHandler("./config_file_example.yml")
         >>> config.read_file().keys()
-        {'edges', 'nodes'}
+        dict_keys(['nodes', 'edges'])
         """
         with open(self.path, "r") as file:
             return yaml.safe_load(file)
@@ -49,6 +49,7 @@ class ConfigFileHandler:
         :return:
         >>> config = ConfigFileHandler("./config_file_example.yml")
         >>> config.validate_file()
+
         #TODO make UNIT tests
         """
         content = self.read_file()
