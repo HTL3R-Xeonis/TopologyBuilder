@@ -1,0 +1,50 @@
+name: Python CI (Ruff & Doctests)
+
+on:
+  push:
+  pull_request:
+
+env:
+  PYTHON_VERSION: "3.14"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - &checkout
+        uses: actions/checkout@v5.0.1
+
+      - &setup_python
+        name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - &setup_dependencies
+        name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r ./py_cicd/requirements.txt
+
+      - name: Test with pytest
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          pytest ./* --doctest-modules
+
+  linter:
+    runs-on: ubuntu-latest
+
+    steps:
+      - *checkout
+      - *setup_python
+      - *setup_dependencies
+
+      - name: Ruff Lint
+        run: ruff check --output-format=github --target-version=py314 .
+
+      - name: Ruff Format (Check)
+        run: |
+          ruff format --diff --target-version=py314 .
+          ruff format --check --target-version=py314 .
