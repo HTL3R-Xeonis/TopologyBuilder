@@ -31,6 +31,7 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
+          pip install pytest
           pytest ./* --doctest-modules
 
   linter:
@@ -42,7 +43,9 @@ jobs:
       - *setup_dependencies
 
       - name: Ruff Lint
-        run: ruff check --output-format=github --target-version=py314 .
+        run: | 
+          pip install ruff
+          ruff check --output-format=github --target-version=py314 .
 
       - name: Ruff Format (Check)
         run: |
