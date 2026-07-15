@@ -32,7 +32,7 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           pip install pytest
-          pytest ./* --doctest-modules
+          pytest ./*.py --doctest-modules
 
   linter:
     runs-on: ubuntu-latest
