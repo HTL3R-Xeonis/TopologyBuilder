@@ -11,6 +11,7 @@ nodes:
     names:
       - PC4
 
+
   - image: Rocky Linux 8.10
     role: LINUX
     names:
@@ -41,21 +42,21 @@ nodes:
       - FW-C1-2
 
 edges:
-  - [PC1, gi0/0, SW-C1, gi0/2]
-  - [PC2, gi0/0, SW-C1, gi0/3]
-  - [FW-C1-1, gi0/0, SW-C1, gi0/0]
-  - [FW-C1-2, gi0/1, SW-C1, gi0/1]
-  - [FW-C1-2, gi0/0, POP-ISP1-1, gi0/0]
-  - [FW-C1-1, gi0/1, POP-ISP1-1, gi0/1]
-  - [ISP2, gi0/1, POP-ISP1-1, gi0/3]
-  - [ISP1-BB1, gi0/2, POP-ISP1-1, gi0/2]
-  - [ISP1-BB1, gi0/0, ISP1-BB2, gi0/0]
-  - [ISP1-BB3, gi0/1, ISP1-BB2, gi0/1]
-  - [POP-ISP1-2, gi0/0, ISP1-BB3, gi0/0]
-  - [POP-ISP1-2, gi0/3, PC5, gi0/0]
-  - [POP-ISP1-2, gi0/1, ISP3, gi0/0]
-  - [POP-ISP1-2, gi0/2, ISP2, gi0/0]
-  - [ISP2, gi0/2, FW-C2, gi0/2]
-  - [FW-C2, gi0/0, PC3, gi0/0]
-  - [ISP3, gi0/1, FW-C3, gi0/1]
-  - [FW-C3, gi0/0, PC4, gi0/0]
+  - [ PC1, gi0/0, SW-C1, gi0/2 ]
+  - [ PC2, gi0/0, SW-C1, gi0/3 ]
+  - [ FW-C1-1, gi0/0, SW-C1, gi0/0 ]
+  - [ FW-C1-2, gi0/1, SW-C1, gi0/1 ]
+  - [ FW-C1-2, gi0/0, POP-ISP1-1, gi0/0 ]
+  - [ FW-C1-1, gi0/1, POP-ISP1-1, gi0/1 ]
+  - [ ISP2, gi0/1, POP-ISP1-1, gi0/3 ]
+  - [ ISP1-BB1, gi0/2, POP-ISP1-1, gi0/2 ]
+  - [ ISP1-BB1, gi0/0, ISP1-BB2, gi0/0 ]
+  - [ ISP1-BB3, gi0/1, ISP1-BB2, gi0/1 ]
+  - [ POP-ISP1-2, gi0/0, ISP1-BB3, gi0/0 ]
+  - [ POP-ISP1-2, gi0/3, PC5, gi0/0 ]
+  - [ POP-ISP1-2, gi0/1, ISP3, gi0/0 ]
+  - [ POP-ISP1-2, gi0/2, ISP2, gi0/0 ]
+  - [ ISP2, gi0/2, FW-C2, gi0/2 ]
+  - [ FW-C2, gi0/0, PC3, gi0/0 ]
+  - [ ISP3, gi0/1, FW-C3, gi0/1 ]
+  - [ FW-C3, gi0/0, PC4, gi0/0 ]
