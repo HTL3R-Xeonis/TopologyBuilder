@@ -10,8 +10,8 @@ if [ ! -x "$PYTHON" ]; then
 fi
 
 echo "Code Formatieren ..."
-"$PYTHON" -m ruff check --fix .
-"$PYTHON" -m ruff format .
+"$PYTHON" -m ruff check --fix --target-version=py314 .
+"$PYTHON" -m ruff format --target-version=py314 .
 
 echo "requirements.txt wird erstellt ..."
 "$PYTHON" -m pip freeze > requirements.txt
