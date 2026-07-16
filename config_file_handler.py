@@ -47,8 +47,11 @@ class ConfigFileHandler:
         >>> config.read_file().keys()
         dict_keys(['nodes', 'edges'])
         """
-        with open(self.path, "r") as file:
-            return yaml.safe_load(file)
+        try:
+            with open(self.path, "r") as file:
+                return yaml.safe_load(file)
+        except Exception as e:
+            raise logger.alert(e, f"Error reading file: {self.path}")
 
     def validate_file(self) -> None:
         """
@@ -69,6 +72,17 @@ class ConfigFileHandler:
         self.nodes = content["nodes"]
         self.edges = content["edges"]
 
+        if not isinstance(self.nodes, list):
+            raise logger.alert(
+                TypeError,
+                f"'nodes' must be of type list. Current type: {type(self.nodes)}",
+            )
+        if not isinstance(self.edges, list):
+            raise logger.alert(
+                TypeError,
+                f"'edges' must be of type list. Current type: {type(self.edges)}",
+            )
+
         for node_groupe in self.nodes:
             self.__validate_node_group(node_groupe)
         for edge in self.edges:
@@ -81,10 +95,22 @@ class ConfigFileHandler:
         :return:
         #TODO make UNIT tests
         """
+        if not isinstance(node_group, dict):
+            raise logger.alert(
+                TypeError,
+                f"Node group must be of type dict. Current type: {type(node_group)}",
+            )
         if not {"image", "role", "names"} <= node_group.keys():
             raise logger.alert(
                 KeyError,
                 f"Key 'image', 'role' or 'names' not found in configuration file under 'nodes'. Current keys: {node_group.keys()}",
+            )
+        if node_group["image"] is None:
+            raise logger.alert(ValueError, "Image must be defined in config_file")
+        if not isinstance(node_group["image"], str):
+            raise logger.alert(
+                TypeError,
+                f"Image must be of type string. Current type: {type(node_group['image'])}",
             )
         if node_group["role"] not in self.__VALID_ROLES:
             raise logger.alert(
@@ -95,7 +121,17 @@ class ConfigFileHandler:
         names = node_group["names"]
         if names is None:
             return
-
+        if not isinstance(names, list):
+            raise logger.alert(
+                TypeError,
+                f"Names must be of type list or None. Current type: {type(names)}",
+            )
+        for name in names:
+            if not isinstance(name, str):
+                raise logger.alert(
+                    TypeError,
+                    f"Entries of 'names' must be of type str. Current type: {type(name)}",
+                )
         if not len(names) == len(set(names)):
             raise logger.alert(
                 ValueError,

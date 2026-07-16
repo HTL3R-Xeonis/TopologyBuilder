@@ -21,3 +21,6 @@
 2026-07-16 11:34:47,813 - ERROR :: [ValueError] Node names must be distinct. Not unique names: ['FW-C3', 'FW-C3']
 2026-07-16 11:35:28,394 - ERROR :: [ValueError] Node names must be distinct. Not unique names: {'FW-C3'}
 2026-07-16 11:35:47,775 - ERROR :: [ValueError] Node names must be distinct. Not unique names: {'FW-C3'}
+2026-07-16 11:56:25,619 - ERROR :: [ValueError] None is not a valid role. Valid roles: ['PC', 'LINUX', 'ROUTER', 'SWITCH', 'FW']
+2026-07-16 12:05:55,476 - ERROR :: [TypeError] Entries of 'names' must be of type str. Current type: {type(name)}
+2026-07-16 12:06:07,547 - ERROR :: [TypeError] Entries of 'names' must be of type str. Current type: <class 'NoneType'>
