@@ -1,0 +1,19 @@
+2026-07-16 10:20:50,622 - __main__ - ERROR :: asd
+2026-07-16 10:23:33,070 - __main__ - ERROR :: asd
+2026-07-16 10:23:46,023 - __main__ - ERROR :: asd
+2026-07-16 10:24:18,621 - __main__ - ERROR :: [TypeError] asd
+2026-07-16 10:25:15,818 - ERROR :: [TypeError] asd
+2026-07-16 10:32:35,549 - ERROR :: [TypeError] asd
+2026-07-16 10:33:08,523 - ERROR :: [TypeError] asd
+2026-07-16 10:36:55,532 - ERROR :: [TypeError] asd
+2026-07-16 10:37:35,442 - ERROR :: [TypeError] asd
+2026-07-16 10:37:44,837 - ERROR :: [TypeError] asd
+2026-07-16 10:37:55,873 - ERROR :: [TypeError] asd
+2026-07-16 10:38:14,395 - ERROR :: [TypeError] asd
+2026-07-16 10:41:42,425 - ERROR :: [TypeError] asd
+2026-07-16 10:41:59,516 - ERROR :: [TypeError] asd
+2026-07-16 10:42:17,405 - ERROR :: [TypeError] asd
+2026-07-16 10:42:24,781 - ERROR :: [TypeError] asd
+2026-07-16 10:43:13,484 - ERROR :: [TypeError] asd
+2026-07-16 10:46:52,700 - ERROR :: [TypeError] asd
+2026-07-16 10:46:59,760 - ERROR :: [TypeError] Test
