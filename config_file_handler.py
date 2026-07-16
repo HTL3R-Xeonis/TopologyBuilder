@@ -45,7 +45,7 @@ class ConfigFileHandler:
 
     def validate_file(self) -> None:
         """
-        Validates the contents of the YAML-file as defined
+        Validates the contents of the YAML-file as defined and makes nodes and edges available.
         :return:
         >>> config = ConfigFileHandler("./config_file_example.yml")
         >>> config.validate_file()
