@@ -9,6 +9,9 @@ __status__ = "In development"
 
 from pathlib import Path
 import yaml
+from logger_adapter import get_logger
+
+logger = get_logger()
 
 
 class ConfigFileHandler:
@@ -26,9 +29,13 @@ class ConfigFileHandler:
         >>> config = ConfigFileHandler("./config_file_example.yml")
         """
         if not isinstance(path, str):
-            raise TypeError
+            raise logger.alert(
+                TypeError, f"Path must be a string. Current type: {type(path)}"
+            )
         if not Path(path).exists():
-            raise FileNotFoundError()
+            raise logger.alert(
+                FileNotFoundError, f"File does not exists. Current path: {path}"
+            )
         self.path = Path(path)
 
     def read_file(self) -> dict:
@@ -54,7 +61,10 @@ class ConfigFileHandler:
         """
         content = self.read_file()
         if not {"edges", "nodes"} <= content.keys():
-            raise KeyError
+            raise logger.alert(
+                KeyError,
+                f"Key 'edges' or 'nodes' not found in configuration file. Current keys: {content.keys()}",
+            )
 
         self.nodes = content["nodes"]
         self.edges = content["edges"]
@@ -72,17 +82,30 @@ class ConfigFileHandler:
         #TODO make UNIT tests
         """
         if not {"image", "role", "names"} <= node_group.keys():
-            raise KeyError
+            raise logger.alert(
+                KeyError,
+                f"Key 'image', 'role' or 'names' not found in configuration file under 'nodes'. Current keys: {node_group.keys()}",
+            )
         if node_group["role"] not in self.__VALID_ROLES:
-            raise ValueError
+            raise logger.alert(
+                ValueError,
+                f"{node_group['role']} is not a valid role. Valid roles: {self.__VALID_ROLES}",
+            )
 
         names = node_group["names"]
         if names is None:
             return
+
         if not len(names) == len(set(names)):
-            raise ValueError
+            raise logger.alert(
+                ValueError,
+                f"Node names must be distinct. Not unique names: {set([n for n in names if names.count(n) > 1])}",
+            )
         if set(names) & self.__NODE_NAMES:
-            raise ValueError
+            raise logger.alert(
+                ValueError,
+                f"Node names must be distinct. Not unique names: {set(names) & self.__NODE_NAMES}",
+            )
         self.__NODE_NAMES.update(names)
 
     def __validate_edges(self, edge: list) -> None:
@@ -93,7 +116,9 @@ class ConfigFileHandler:
         #TODO make UNIT tests
         """
         if len(edge) != 4:
-            raise ValueError
+            raise logger.alert(ValueError, "List of 'edges' must be of length 4")
         if not {edge[0], edge[2]} <= self.__NODE_NAMES:
-            raise ValueError
+            raise logger.alert(
+                ValueError, f"Name not defined in 'nodes': {edge[0]}, {edge[2]}"
+            )
         # TODO validate Interfaces, if ip-Address and option is set

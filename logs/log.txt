@@ -17,3 +17,7 @@
 2026-07-16 10:43:13,484 - ERROR :: [TypeError] asd
 2026-07-16 10:46:52,700 - ERROR :: [TypeError] asd
 2026-07-16 10:46:59,760 - ERROR :: [TypeError] Test
+2026-07-16 11:23:35,961 - ERROR :: [ValueError] Node names must be distinct. Not unique names: set()
+2026-07-16 11:34:47,813 - ERROR :: [ValueError] Node names must be distinct. Not unique names: ['FW-C3', 'FW-C3']
+2026-07-16 11:35:28,394 - ERROR :: [ValueError] Node names must be distinct. Not unique names: {'FW-C3'}
+2026-07-16 11:35:47,775 - ERROR :: [ValueError] Node names must be distinct. Not unique names: {'FW-C3'}
