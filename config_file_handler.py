@@ -19,7 +19,7 @@ class ConfigFileHandler:
     Class to handle and validate the contents of the config file
     """
 
-    __VALID_ROLES = ["PC", "LINUX", "ROUTER", "SWITCH", "FW"]
+    __VALID_ROLES = ["PC", "VM", "ROUTER", "SWITCH", "FW"]
     __NODE_NAMES = set()
 
     def __init__(self, path: str) -> None:
@@ -158,3 +158,9 @@ class ConfigFileHandler:
                 ValueError, f"Name not defined in 'nodes': {edge[0]}, {edge[2]}"
             )
         # TODO validate Interfaces, if ip-Address and option is set
+        # TODO validate if no two same edges exist / validate if interface was not already used
+
+
+if __name__ == "__main__":
+    config = ConfigFileHandler("./config_file_example.yml")
+    config.validate_file()
