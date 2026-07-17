@@ -7,13 +7,13 @@ nodes:
       - PC3
 
   - image: Ubuntu 22.04.4 Live Server
-    role: LINUX
+    role: VM
     names:
       - PC4
 
 
   - image: Rocky Linux 8.10
-    role: LINUX
+    role: VM
     names:
       - PC5
 

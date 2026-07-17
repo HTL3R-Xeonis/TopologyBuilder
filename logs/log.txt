@@ -24,3 +24,7 @@
 2026-07-16 11:56:25,619 - ERROR :: [ValueError] None is not a valid role. Valid roles: ['PC', 'LINUX', 'ROUTER', 'SWITCH', 'FW']
 2026-07-16 12:05:55,476 - ERROR :: [TypeError] Entries of 'names' must be of type str. Current type: {type(name)}
 2026-07-16 12:06:07,547 - ERROR :: [TypeError] Entries of 'names' must be of type str. Current type: <class 'NoneType'>
+2026-07-17 11:56:36,158 - ERROR :: [ValueError] VM is not a valid role. Valid roles: ['PC', 'LINUX', 'ROUTER', 'SWITCH', 'FW']
+2026-07-17 11:56:48,123 - ERROR :: [ValueError] Name not defined in 'nodes': FW-C3, PC8
+2026-07-17 17:34:51,382 - ERROR :: [FileNotFoundError] File does not exists. Current path: /config_file_example.yml
+2026-07-17 17:35:07,981 - ERROR :: [ValueError] Name not defined in 'nodes': FW-C3, PC8
