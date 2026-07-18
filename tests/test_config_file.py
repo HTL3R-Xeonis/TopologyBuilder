@@ -24,7 +24,7 @@ def add_folder_path(path: str) -> str:
 @allure.feature("config_file")
 @allure.severity(allure.severity_level.CRITICAL)
 def CONF_FILE_001() -> None:
-    c = ConfigFileHandler(add_folder_path("./config_file_001.yml"))
+    c = ConfigFileHandler(add_folder_path("config_file_001.yml"))
     c.validate_file()
 
 
@@ -37,7 +37,7 @@ def CONF_FILE_001() -> None:
 @allure.feature("config_file")
 @allure.severity(allure.severity_level.MINOR)
 def CONF_FILE_002() -> None:
-    c = ConfigFileHandler(add_folder_path("./config_file_002.yml"))
+    c = ConfigFileHandler(add_folder_path("config_file_002.yml"))
     with pytest.raises(
         KeyError,
         match=r"Key .+ or .+ not found in configuration file. Current keys: .+",
@@ -54,7 +54,7 @@ def CONF_FILE_002() -> None:
 @allure.feature("config_file")
 @allure.severity(allure.severity_level.MINOR)
 def CONF_FILE_003() -> None:
-    c = ConfigFileHandler(add_folder_path("./config_file_003.yml"))
+    c = ConfigFileHandler(add_folder_path("config_file_003.yml"))
     with pytest.raises(
         KeyError,
         match=r"Key .+ or .+ not found in configuration file. Current keys: .+",
