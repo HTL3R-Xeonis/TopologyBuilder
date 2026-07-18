@@ -83,3 +83,11 @@
 2026-07-18 19:04:14,426 - ERROR :: [TypeError] Test
 2026-07-18 19:04:14,801 - ERROR :: [KeyError] Key 'edges' or 'nodes' not found in configuration file. Current keys: ['edges']
 2026-07-18 19:04:14,803 - ERROR :: [KeyError] Key 'edges' or 'nodes' not found in configuration file. Current keys: ['nodes']
+2026-07-18 19:07:24,657 - ERROR :: [TypeError] Test
+2026-07-18 19:07:24,657 - ERROR :: [TypeError] Test
+2026-07-18 19:07:24,660 - ERROR :: [TypeError] Test
+2026-07-18 19:07:24,660 - ERROR :: [TypeError] Test
+2026-07-18 19:07:24,660 - ERROR :: [TypeError] Test
+2026-07-18 19:07:25,033 - ERROR :: [FileNotFoundError] File does not exists. Current path: ./tests/filesconfig_file_001.yml
+2026-07-18 19:07:25,082 - ERROR :: [FileNotFoundError] File does not exists. Current path: ./tests/filesconfig_file_002.yml
+2026-07-18 19:07:25,086 - ERROR :: [FileNotFoundError] File does not exists. Current path: ./tests/filesconfig_file_003.yml

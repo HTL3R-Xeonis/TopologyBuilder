@@ -3,7 +3,7 @@ import pytest
 
 from config_file_handler import ConfigFileHandler
 
-TEST_FILE_FOLDER = "./tests/files"
+TEST_FILE_FOLDER = "./tests/files/"
 
 
 def add_folder_path(path: str) -> str:
