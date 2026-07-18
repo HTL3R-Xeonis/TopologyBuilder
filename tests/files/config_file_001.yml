@@ -1,4 +1,4 @@
-nods:
+nodes:
   - image: VPC
     role: PC
     names:
