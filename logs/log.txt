@@ -33,3 +33,4 @@
 2026-07-18 17:45:12,474 - ERROR :: [ValueError] Name not defined in 'nodes': PC1f, SW-C1
 2026-07-18 17:45:34,699 - ERROR :: [ValueError] Name not defined in 'nodes': PC1f, SW-C1
 2026-07-18 17:45:46,645 - ERROR :: [ValueError] Name not defined in 'nodes': PC1f, SW-C1
+2026-07-18 18:31:02,230 - ERROR :: [KeyError] Key 'edges' or 'nodes' not found in configuration file. Current keys: ['nods', 'edges']

@@ -66,7 +66,7 @@ class ConfigFileHandler:
         if not {"edges", "nodes"} <= content.keys():
             raise logger.alert(
                 KeyError,
-                f"Key 'edges' or 'nodes' not found in configuration file. Current keys: {content.keys()}",
+                f"Key 'edges' or 'nodes' not found in configuration file. Current keys: {list(content.keys())}",
             )
 
         self.nodes = content["nodes"]
