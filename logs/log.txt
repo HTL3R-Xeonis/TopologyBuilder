@@ -72,3 +72,5 @@
 2026-07-18 18:55:09,187 - ERROR :: [KeyError] Key 'edges' or 'nodes' not found in configuration file. Current keys: ['nodes']
 2026-07-18 18:55:28,968 - ERROR :: [KeyError] Key 'edges' or 'nodes' not found in configuration file. Current keys: ['edges']
 2026-07-18 18:55:28,971 - ERROR :: [KeyError] Key 'edges' or 'nodes' not found in configuration file. Current keys: ['nodes']
+2026-07-18 18:56:14,875 - ERROR :: [KeyError] Key 'edges' or 'nodes' not found in configuration file. Current keys: ['edges']
+2026-07-18 18:56:14,878 - ERROR :: [KeyError] Key 'edges' or 'nodes' not found in configuration file. Current keys: ['nodes']
