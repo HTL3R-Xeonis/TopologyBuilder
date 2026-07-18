@@ -28,3 +28,8 @@
 2026-07-17 11:56:48,123 - ERROR :: [ValueError] Name not defined in 'nodes': FW-C3, PC8
 2026-07-17 17:34:51,382 - ERROR :: [FileNotFoundError] File does not exists. Current path: /config_file_example.yml
 2026-07-17 17:35:07,981 - ERROR :: [ValueError] Name not defined in 'nodes': FW-C3, PC8
+2026-07-18 17:15:51,387 - ERROR :: [FileNotFoundError] File does not exists. Current path: ../config_file_example.yml
+2026-07-18 17:44:16,190 - ERROR :: [ValueError] Name not defined in 'nodes': PC1f, SW-C1
+2026-07-18 17:45:12,474 - ERROR :: [ValueError] Name not defined in 'nodes': PC1f, SW-C1
+2026-07-18 17:45:34,699 - ERROR :: [ValueError] Name not defined in 'nodes': PC1f, SW-C1
+2026-07-18 17:45:46,645 - ERROR :: [ValueError] Name not defined in 'nodes': PC1f, SW-C1

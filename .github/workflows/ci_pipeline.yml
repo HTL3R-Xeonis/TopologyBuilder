@@ -24,13 +24,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r ./requirements.txt
 
-      # DOCTESTS
+      # TESTS
       - name: Execute doctests with pytest module
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           pip install pytest
           pytest ./*.py --doctest-modules
+          python -m pytest ./tests
 
       # LINTER
       - name: Ruff installieren
