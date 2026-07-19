@@ -20,7 +20,6 @@ class ConfigFileHandler:
     """
 
     __VALID_ROLES = ["PC", "VM", "ROUTER", "SWITCH", "FW"]
-    __NODE_NAMES = set()
 
     def __init__(self, path: str) -> None:
         """
@@ -36,7 +35,16 @@ class ConfigFileHandler:
             raise logger.alert(
                 FileNotFoundError, f"File does not exists. Current path: {path}"
             )
+        if not Path(path).is_file() and not (
+            path.endswith(".yml") or path.endswith(".yaml")
+        ):
+            raise logger.alert(
+                ValueError,
+                f"Path does not link to *.yaml or *.yml file. Current path: {path}",
+            )
         self.path = Path(path)
+        self.__NODE_NAMES = set()
+        self.__node_map = {}
 
     def read_file(self) -> dict:
         """
@@ -105,12 +113,16 @@ class ConfigFileHandler:
                 KeyError,
                 f"Key 'image', 'role' or 'names' not found in configuration file under 'nodes'. Current keys: {node_group.keys()}",
             )
-        if node_group["image"] is None:
-            raise logger.alert(ValueError, "Image must be defined in config_file")
+
         if not isinstance(node_group["image"], str):
             raise logger.alert(
                 TypeError,
                 f"Image must be of type string. Current type: {type(node_group['image'])}",
+            )
+        if not isinstance(node_group["role"], str):
+            raise logger.alert(
+                TypeError,
+                f"Role must be of type string. Current type: {type(node_group['role'])}",
             )
         if node_group["role"] not in self.__VALID_ROLES:
             raise logger.alert(
@@ -153,12 +165,31 @@ class ConfigFileHandler:
         """
         if len(edge) != 4:
             raise logger.alert(ValueError, "List of 'edges' must be of length 4")
+        if not all(isinstance(v, str) for v in edge):
+            raise logger.alert(
+                ValueError, f"Contents of 'edge' must be of type str: {edge}"
+            )
         if not {edge[0], edge[2]} <= self.__NODE_NAMES:
             raise logger.alert(
                 ValueError, f"Name not defined in 'nodes': {edge[0]}, {edge[2]}"
             )
-        # TODO validate Interfaces, if ip-Address and option is set
-        # TODO validate if no two same edges exist / validate if interface was not already used
+
+        intf_list_1 = self.__node_map.get(edge[0], [])
+        intf_list_2 = self.__node_map.get(edge[2], [])
+        if edge[1] in intf_list_1:
+            raise logger.alert(
+                ValueError,
+                f"Interface {edge[1]} is used twice in edges of {edge[0]} node",
+            )
+        if edge[3] in intf_list_2:
+            raise logger.alert(
+                ValueError,
+                f"Interface {edge[3]} is used twice in edges of {edge[2]} node",
+            )
+        intf_list_1.append(edge[1])
+        intf_list_2.append(edge[3])
+        self.__node_map[edge[0]] = intf_list_1
+        self.__node_map[edge[2]] = intf_list_2
 
 
 if __name__ == "__main__":

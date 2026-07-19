@@ -12,6 +12,8 @@ from pathlib import Path
 
 
 class LoggerAdapter(logging.Logger):
+    is_test_run = False
+
     def alert(self, error: type[Exception], message: str) -> Exception:
         """
         Logs given error message and returns given exception with message.
@@ -25,7 +27,8 @@ class LoggerAdapter(logging.Logger):
         ...
         TypeError: Test
         """
-        self.error(f"[{error.__name__}] {message}")
+        if not self.is_test_run:
+            self.error(f"[{error.__name__}] {message}")
         return error(message)
 
 
