@@ -1,0 +1,21 @@
+2026-07-19 10:47:17,142 - ERROR :: [TypeError] Path must be a string. Current type: <class 'int'>
+2026-07-19 10:47:17,143 - ERROR :: [FileNotFoundError] File does not exists. Current path: ./not_existing_file
+2026-07-19 10:47:17,166 - ERROR :: [KeyError] Key 'edges' or 'nodes' not found in configuration file. Current keys: ['edges']
+2026-07-19 10:47:17,171 - ERROR :: [KeyError] Key 'edges' or 'nodes' not found in configuration file. Current keys: ['nodes']
+2026-07-19 10:49:28,245 - ERROR :: [TypeError] Path must be a string. Current type: <class 'int'>
+2026-07-19 10:49:28,246 - ERROR :: [FileNotFoundError] File does not exists. Current path: ./not_existing_file
+2026-07-19 10:49:28,252 - ERROR :: [KeyError] Key 'edges' or 'nodes' not found in configuration file. Current keys: ['edges']
+2026-07-19 10:49:28,262 - ERROR :: [KeyError] Key 'edges' or 'nodes' not found in configuration file. Current keys: ['nodes']
+2026-07-19 10:49:47,163 - ERROR :: [TypeError] Path must be a string. Current type: <class 'int'>
+2026-07-19 10:49:47,163 - ERROR :: [TypeError] Path must be a string. Current type: <class 'int'>
+2026-07-19 10:49:47,164 - ERROR :: [FileNotFoundError] File does not exists. Current path: ./not_existing_file
+2026-07-19 10:49:47,164 - ERROR :: [FileNotFoundError] File does not exists. Current path: ./not_existing_file
+2026-07-19 10:49:47,170 - ERROR :: [KeyError] Key 'edges' or 'nodes' not found in configuration file. Current keys: ['edges']
+2026-07-19 10:49:47,170 - ERROR :: [KeyError] Key 'edges' or 'nodes' not found in configuration file. Current keys: ['edges']
+2026-07-19 10:49:47,172 - ERROR :: [KeyError] Key 'edges' or 'nodes' not found in configuration file. Current keys: ['nodes']
+2026-07-19 10:49:47,172 - ERROR :: [KeyError] Key 'edges' or 'nodes' not found in configuration file. Current keys: ['nodes']
+2026-07-19 12:44:48,758 - ERROR :: [TypeError] Test
+2026-07-19 12:44:48,758 - ERROR :: [TypeError] Test
+2026-07-19 12:44:48,760 - ERROR :: [TypeError] Test
+2026-07-19 12:44:48,760 - ERROR :: [TypeError] Test
+2026-07-19 12:44:48,760 - ERROR :: [TypeError] Test

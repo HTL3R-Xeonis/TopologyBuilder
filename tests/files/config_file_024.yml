@@ -1,0 +1,62 @@
+nodes:
+  - image: VPC
+    role: PC
+    names:
+      - PC1
+      - PC2
+      - PC3
+
+  - image: Ubuntu 22.04.4 Live Server
+    role: VM
+    names:
+      - PC4
+
+
+  - image: Rocky Linux 8.10
+    role: VM
+    names:
+      - PC5
+
+  - image: Cisco IOSvL2 15.2(20200924:215240)
+    role: SWITCH
+    names:
+      - SW-C1
+
+  - image: Cisco IOSv 15.7(3)M3
+    role: ROUTER
+    names:
+      - POP-ISP1-1
+      - ISP1-BB1
+      - ISP1-BB2
+      - ISP1-BB3
+      - POP-ISP1-2
+      - ISP2
+      - ISP3
+
+  - image: Cisco IOSv 15.7(3)M3
+    role: FW
+    names:
+      - FW-C3
+      - FW-C2
+      - FW-C1-1
+      - FW-C1-2
+
+edges:
+  - [ PC1, gi0/0, [], gi0/2 ]
+  - [ PC2, gi0/0, SW-C1, gi0/3 ]
+  - [ FW-C1-1, gi0/0, SW-C1, gi0/0 ]
+  - [ FW-C1-2, gi0/1, SW-C1, gi0/1 ]
+  - [ FW-C1-2, gi0/0, POP-ISP1-1, gi0/0 ]
+  - [ FW-C1-1, gi0/1, POP-ISP1-1, gi0/1 ]
+  - [ ISP2, gi0/1, POP-ISP1-1, gi0/3 ]
+  - [ ISP1-BB1, gi0/2, POP-ISP1-1, gi0/2 ]
+  - [ ISP1-BB1, gi0/0, ISP1-BB2, gi0/0 ]
+  - [ ISP1-BB3, gi0/1, ISP1-BB2, gi0/1 ]
+  - [ POP-ISP1-2, gi0/0, ISP1-BB3, gi0/0 ]
+  - [ POP-ISP1-2, gi0/3, PC5, gi0/0 ]
+  - [ POP-ISP1-2, gi0/1, ISP3, gi0/0 ]
+  - [ POP-ISP1-2, gi0/2, ISP2, gi0/0 ]
+  - [ ISP2, gi0/2, FW-C2, gi0/2 ]
+  - [ FW-C2, gi0/0, PC3, gi0/0 ]
+  - [ ISP3, gi0/1, FW-C3, gi0/1 ]
+  - [ FW-C3, gi0/0, PC4, gi0/0 ]

@@ -67,8 +67,6 @@ class ConfigFileHandler:
         :return:
         >>> config = ConfigFileHandler("./config_file_example.yml")
         >>> config.validate_file()
-
-        #TODO make UNIT tests
         """
         content = self.read_file()
         if not {"edges", "nodes"} <= content.keys():
@@ -101,7 +99,6 @@ class ConfigFileHandler:
         Helper-methode for validate_file. Validates the nodegroup of given node.
         :param node_group: Dictionary entry of nodes. Contains the image, role and names.
         :return:
-        #TODO make UNIT tests
         """
         if not isinstance(node_group, dict):
             raise logger.alert(
@@ -161,7 +158,6 @@ class ConfigFileHandler:
         Helper-methode for validate_file. Validates the entries of given edge.
         :param edge: List entry of edges. Contains the connections between the nodes.
         :return:
-        #TODO make UNIT tests
         """
         if len(edge) != 4:
             raise logger.alert(ValueError, "List of 'edges' must be of length 4")
