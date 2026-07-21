@@ -1,3 +1,12 @@
+"""
+Tests to validate functionality of config_file_handler.py
+"""
+
+__autor__ = "Leon Eiböck"
+__date__ = "19/07/2026"
+__license__ = "GNU GPLv3"
+__status__ = "In development"
+
 import allure
 import pytest
 from src import logger_adapter
@@ -373,3 +382,15 @@ def conf_file_024() -> None:
         match=r"Contents of .edge. must be of type str: ",
     ):
         c.validate_file()
+
+
+@allure.title("Doppelte node_groups vorhanden")
+@allure.description(
+    "Testet ob es funktioniert, dass man zwei gleiche Node Groups in der file angibt, mit verschiedenen Namen"
+)
+@allure.tag("user-input", "positiv-test", "config-file")
+@allure.feature("config_file")
+@allure.severity(allure.severity_level.MINOR)
+def conf_file_025() -> None:
+    c = ConfigFileHandler(add_folder_path("config_file_025.yml"))
+    c.validate_file()
