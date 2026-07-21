@@ -9,7 +9,7 @@ __status__ = "In development"
 
 from pathlib import Path
 import yaml
-from logger_adapter import get_logger
+from src.logger_adapter import get_logger
 
 logger = get_logger()
 
@@ -186,8 +186,3 @@ class ConfigFileHandler:
         intf_list_2.append(edge[3])
         self.__node_map[edge[0]] = intf_list_1
         self.__node_map[edge[2]] = intf_list_2
-
-
-if __name__ == "__main__":
-    config = ConfigFileHandler("./config_file_example.yml")
-    config.validate_file()
