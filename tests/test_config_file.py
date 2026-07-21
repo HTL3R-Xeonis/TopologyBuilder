@@ -1,7 +1,7 @@
 import allure
 import pytest
-import logger_adapter
-from config_file_handler import ConfigFileHandler
+from src import logger_adapter
+from src.config_file_handler import ConfigFileHandler
 
 logger_adapter.LoggerAdapter.is_test_run = True
 TEST_FILE_FOLDER = "./tests/files/"

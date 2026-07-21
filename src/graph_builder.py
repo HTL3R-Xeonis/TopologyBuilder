@@ -3,7 +3,7 @@ __date__ = "17/07/2026"
 __license__ = "GNU GPLv3"
 __status__ = "In development"
 
-from factories import NodeFactory, EdgeFactory, GenericNode
+from src.factories import NodeFactory, EdgeFactory, GenericNode
 
 
 class GraphBuilder:
@@ -54,12 +54,3 @@ class GraphBuilder:
         self._build_nodes()
         self._build_edges()
         return self._nodes
-
-
-if __name__ == "__main__":
-    import config_file_handler as cfh
-
-    c = cfh.ConfigFileHandler("./config_file_example.yml")
-    c.validate_file()
-    g = GraphBuilder(c.nodes, c.edges)
-    print(g.build()["POP-ISP1-1"]._interfaces)

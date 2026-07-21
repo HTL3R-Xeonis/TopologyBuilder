@@ -48,7 +48,7 @@ def get_logger():
     logger.setLevel(logging.DEBUG)
 
     formatter = logging.Formatter("%(asctime)s - %(levelname)s :: %(message)s")
-    log_file = Path("logs/log.txt")
+    log_file = Path("../logs/log.txt")
     log_file.parent.mkdir(parents=True, exist_ok=True)
 
     file_handler = logging.FileHandler(log_file, encoding="utf-8")
