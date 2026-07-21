@@ -3,19 +3,21 @@ nodes:
     role: PC
     names:
       - PC1
-      - PC2
-      - PC3
 
   - image: VPC
     role: PC
     names:
-       # Names Empty
+      - PC2
+
+  - image: VPC
+    role: PC
+    names:
+      - PC3
 
   - image: Ubuntu 22.04.4 Live Server
     role: VM
     names:
       - PC4
-
 
   - image: Rocky Linux 8.10
     role: VM

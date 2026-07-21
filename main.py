@@ -14,4 +14,7 @@ if __name__ == "__main__":
     c = ConfigFileHandler("./config_file_example.yml")
     c.validate_file()
     g = GraphBuilder(c.nodes, c.edges)
-    print(g.build()["POP-ISP1-1"]._interfaces)
+    nodes = g.build()
+    from src.factories import Router
+
+    print(nodes["ISP3"].__class__ == Router)

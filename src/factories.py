@@ -139,6 +139,9 @@ class Edge:
     Object which is used to connect interfaces of nodes
     """
 
+    incidence_1 = None
+    incidence_2 = None
+
     def __init__(self, interface_1: Interface, interface_2: Interface):
         """
         Initializes the Edge class
@@ -181,6 +184,30 @@ class GenericNode:
         self.image = image
         self.name = name
         self._interfaces = {}
+
+    @property
+    def interfaces(self):
+        return self._interfaces
+
+    def get_neighbour(self, intf):
+        """
+        Finds the node which is connected to given interface
+        :param intf: connection to look for neighbour
+        :return: Node object
+        """
+        if intf not in self._interfaces:
+            raise ValueError(f"Interface {intf} does not exist on node {self.name}")
+        i: Interface = self._interfaces[intf]
+
+        if i.edge is None:
+            raise ValueError(f"Edge on {i} does not exist on node {self.name}")
+        if i.edge.incidence_1 is None or i.edge.incidence_2 is None:
+            raise ValueError(f"Edge is partially connected {self.name}/{i}")
+
+        if not i == i.edge.incidence_1:
+            return i.edge.incidence_1.node
+        if not i == i.edge.incidence_2:
+            return i.edge.incidence_2.node
 
     def add_interface(self, if_name: str) -> Interface:
         """
