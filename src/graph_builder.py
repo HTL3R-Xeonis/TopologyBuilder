@@ -3,7 +3,7 @@ __date__ = "17/07/2026"
 __license__ = "GNU GPLv3"
 __status__ = "In development"
 
-from src.factories import NodeFactory, EdgeFactory, GenericNode
+from src.factories import NodeFactory, GenericNode
 
 
 class GraphBuilder:
@@ -42,7 +42,9 @@ class GraphBuilder:
         if not self._nodes:
             raise ValueError("No nodes created. Use first NodeFactory.build_nodes()")
         for edge in self._config_edges:
-            EdgeFactory().create_edge(edge, self._nodes)
+            intf_1 = self._nodes[edge[0]].add_interface(edge[1])
+            intf_2 = self._nodes[edge[2]].add_interface(edge[3])
+            NodeFactory().create_edge(intf_1, intf_2)
 
     def build(self) -> dict[str, GenericNode]:
         """
