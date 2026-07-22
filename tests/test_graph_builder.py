@@ -16,7 +16,6 @@ from src.graph_builder import GraphBuilder
 
 
 logger_adapter.LoggerAdapter.is_test_run = True
-TEST_FILE_FOLDER = "./tests/files/"
 PATH = "./config_file_example.yml"
 
 
