@@ -7,6 +7,37 @@ __date__ = "17/07/2026"
 __license__ = "GNU GPLv3"
 __status__ = "In development"
 
+from enum import Enum
+from typing import Literal
+
+from src.logger_adapter import get_logger
+
+logger = get_logger()
+
+
+class Environment(Enum):
+    ON_NOTHING = 0
+    ON_ESXI = 1
+    ON_GNS3 = 2
+
+    def get_environment(
+        image: str,
+    ) -> Literal[Environment.ON_GNS3, Environment.ON_ESXI, Environment.ON_NOTHING]:
+        """
+        #@TODO add description and tests
+        :param image:
+        :return:
+        """
+        if image in [
+            "VPC",
+            "Cisco IOSvL2 15.2(20200924:215240)",
+            "Cisco IOSv 15.7(3)M3",
+        ]:
+            return Environment.ON_GNS3
+        if image in ["Ubuntu 22.04.4 Live Server", "Rocky Linux 8.10"]:
+            return Environment.ON_ESXI
+        return Environment.ON_NOTHING
+
 
 class NodeFactory:
     """
@@ -74,6 +105,13 @@ class Interface:
         self._if_name = if_name
         self._node = node
         self._edge = None
+        self._esxi_vlan = None
+        if node.env == Environment.ON_ESXI:
+            self._esxi_vlan = f"{node.name}_{if_name}"
+
+    @property
+    def esxi_vlan(self) -> str | None:
+        return self._esxi_vlan
 
     @property
     def name(self) -> str:
@@ -167,10 +205,16 @@ class GenericNode:
         Initializes the Node class
         :param image: which image to use for this node
         :param name: which name to use for this node
+
+        @TODO add tests for self.env variable
         """
         self.image = image
         self.name = name
         self._interfaces = {}
+
+        self.env = Environment.get_environment(image)
+        if self.env == Environment.ON_NOTHING:
+            raise logger.alert(ValueError, f"Image {image} not found on ESXi nor GNS3.")
 
     @property
     def interfaces(self):
