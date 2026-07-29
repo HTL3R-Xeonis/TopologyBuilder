@@ -1,5 +1,5 @@
 """
-Handles the creation of the configuration file for the subinterfaces of the GNS3 VM
+Provides a class for the creation of the configuration file for the subinterfaces of the GNS3 VM.
 """
 
 __autor__ = "Leon Eiböck"
@@ -9,12 +9,10 @@ __status__ = "In development"
 
 from pathlib import Path
 
-import paramiko
-from paramiko import SSHClient
-
+from src.connections_handler import SSHConnection
+from src.factories import Environment
 from src.factories import GenericNode
 from src.logger_adapter import get_logger
-from src.factories import Environment
 
 logger = get_logger()
 
@@ -25,48 +23,16 @@ class GNS3VMInterfaceSetup:
     This is done by subinterfaces with vlans on the GNS3 VM which correspond with the VLANs of the vSwitch on the ESXi host.
     """
 
-    def __init__(self, gns3_vm_name: str = "GNS3"):
+    def __init__(self, gns3_connection: SSHConnection) -> None:
         """
         Initialize the GNS3 VM interface setup class
-        :param gns3_vm_name: Name of the GNS3 VM on the ESXi host
-
+        :param gns3_connection: SSH connection to the GNS3 VM
         @TODO create pytest
         """
-        self.gns3_vm_name = gns3_vm_name
-        self.ssh_gns3_client = None
-
-    def connect(self, ip_address: str | None) -> SSHClient:
-        """
-        Establishes an SSH connection to the given GNS3 VM IPv4 address
-        :param ip_address: IPv4 address
-        :return: Connection to the GNS3 VM
-
-        @TODO create pytest
-        """
-        if self.ssh_gns3_client is not None:
-            return self.ssh_gns3_client
-        gns3_ip = ip_address
-
-        if gns3_ip is None:
-            raise logger.alert(
-                ConnectionError,
-                "Cannot connect to GNS3 VM. No IP address or VM was found.",
-            )
-
-        client = paramiko.SSHClient()
-        client.load_system_host_keys()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-
-        client.connect(
-            hostname=gns3_ip,
-            port=22,
-            username="gns3",
-            password="gns3",
-            timeout=10,
+        self.gns3_connection = gns3_connection
+        self.configuration_file_path = Path(
+            f"./esxi_instances/config_i{gns3_connection.ip_address[-1]}_gns3.txt"
         )
-
-        self.ssh_gns3_client = client
-        return client
 
     def _get_subinterfaces(self, interface: str) -> list[str]:
         """
@@ -76,49 +42,48 @@ class GNS3VMInterfaceSetup:
 
         @TODO create pytest
         """
-        lines = self.ssh_gns3_client.exec_command(
+        lines = self.gns3_connection.exec_command(
             f"ip -br link show type vlan | grep @{interface} | awk '{{sub(/@.*/, \"\", $1); print $1}}'"
         )[1].readlines()
         lines = [line.strip() for line in lines]
         return lines
 
-    @staticmethod
-    def _write_command(path: Path, command: str) -> None:
+    def _write_command(self, command: str) -> None:
         """
-        Appends the given command to the given file
-        :param path: path to the file to write to
+        Appends the given command to the a file which is located in ./esxi_instances/
         :param command: string to write
         :return:
         @TODO create pytest
         """
-        if not path.exists():
-            logger.alert(FileNotFoundError, f"File not found: {path}")
-        with open(path, "a") as f:
+        if not self.configuration_file_path.exists():
+            logger.alert(
+                FileNotFoundError, f"File not found: {self.configuration_file_path}"
+            )
+        with open(self.configuration_file_path, "a") as f:
             f.write(f"{command}\n")
 
-    def _reset_subinterfaces_commands(self, path: Path, interface: str) -> None:
+    def _reset_subinterfaces_commands(self, interface: str) -> None:
         """
-        Writes the commands to given file, to delete the subinterfaces
-        :param path: path to file
+        Writes the commands to a file, which is located in ./esxi_instances/, to delete the subinterfaces
         :param interface: name of interface, from which the subinterfaces are
         :return:
         @TODO create pytest
         """
         for si in self._get_subinterfaces(interface):
-            self._write_command(path, f"ip link delete {si}")
+            self._write_command(f"ip link delete {si}")
 
     def _create_subinterfaces_commands(
-        self, path: Path, interface_name: str, nodes: dict[str, GenericNode]
+        self, interface_name: str, nodes: dict[str, GenericNode]
     ) -> None:
         """
-        Writes the commands to given file, to create and turn up the needed subinterfaces accordingly to the topology
-        :param path: path to file
+        Writes the commands to a file, which is located in ./esxi_instances/, to create and turn up the needed subinterfaces accordingly to the topology
         :param interface_name: name of interface to which to add the subinterfaces
         :param nodes: built topology of the nodes
         :return:
         @TODO create pytest
         """
         vlan_id = 2
+        commands = ""
         for node in nodes.values():
             if not node.env == Environment.ON_ESXI:
                 continue
@@ -128,33 +93,27 @@ class GNS3VMInterfaceSetup:
                         ValueError,
                         "VLANs on ESXi exceed the limit of 4094. Reduce the number of interfaces on VMs on ESXi",
                     )
-                self._write_command(
-                    path,
+                commands += (
                     f"ip link add link {interface_name} name {node_interface.esxi_vlan} type vlan id {vlan_id}\n"
-                    f"ip link set {node_interface.esxi_vlan} up",
+                    + f"ip link set {node_interface.esxi_vlan} up\n"
                 )
-                vlan_id += 1
 
-    def write_config_file(
-        self, nodes: dict[str, GenericNode], gns3_ip_address: str | None
-    ) -> None:
+                vlan_id += 1
+        self._write_command(commands)
+
+    def write_config_file(self, nodes: dict[str, GenericNode]) -> None:
         """
         Writes the config file for the GNS3 VM to delete and create the needed subinterfaces.
         :param nodes: built topology of the nodes
-        :param gns3_ip_address: IPv4 address
         :return:
         @TODO create pytest
         """
-        if self.ssh_gns3_client is None:
-            self.connect(gns3_ip_address)
 
-        config_file_path = Path(
-            f"./esxi_instances/config_i{gns3_ip_address[-1]}_gns3.txt"
-        )
+        config_file_path = self.configuration_file_path
         config_file_path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(config_file_path, "w") as f:
-            f.write("sudo su\n")
+            f.write("#!/bin/bash\nsudo su\n")
 
-        self._reset_subinterfaces_commands(config_file_path, "eth1")
-        self._create_subinterfaces_commands(config_file_path, "eth1", nodes)
+        self._reset_subinterfaces_commands("eth1")
+        self._create_subinterfaces_commands("eth1", nodes)

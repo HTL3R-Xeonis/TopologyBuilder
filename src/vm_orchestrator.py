@@ -1,5 +1,6 @@
 """
-File for handling SSH Connections, to rule them all
+Provides a class to make the provisioning of the GNS3 and ESXi VMs easier and setting certain
+settings accordingly to the built topology.
 """
 
 __autor__ = "Leon Eiböck"
@@ -7,92 +8,45 @@ __date__ = "28/07/2026"
 __license__ = "GNU GPLv3"
 __status__ = "In development"
 
-import atexit
-import ipaddress
-import ssl
-from typing import Optional
+from src.connections_handler import SSHConnection, ESXiConnection
+from src.logger_adapter import get_logger
+from src.gns3_vm_interface_setup import GNS3VMInterfaceSetup
+from src.factories import GenericNode
 
-from pyVim.connect import Disconnect, SmartConnect
-from pyVmomi import vim
+logger = get_logger()
 
 
 class VMOrchestrator:
     """
-    Handles the SSH connections between the ESXi host and the GNS3 VM.
-    @TODO recreate class
+    Provides methods for the whole process of provisioning the VMs on GNS3 and ESXi.
+    As well as for creating certain parts of needed components and for setting the settings of the GNS3 VM.
+    @TODO create pytest
     """
 
-    def __init__(
-        self,
-        host: str,
-        port: int = 443,
-        username: str = None,
-        password: str = None,
-        verify_ssl: bool = False,
-    ):
+    def __init__(self, esxi_host: str, username: str, password: str) -> None:
         """
-        Initialise the connection with the ESXi host
-        :param host:
-        :param port:
-        :param username:
-        :param password:
-        :param verify_ssl:
+        Initializes the VMOrchestrator class and creates a connection to the ESXi host.
+        :param esxi_host: IPv4 address of the ESXi host
+        :param username: username of the ESXi host
+        :param password: corresponding password for user
+        @TODO create pytest
         """
-        self.host = host
-        self.port = port
+        self.esxi_connection = ESXiConnection(esxi_host, username, password)
 
-        ssl_context = ssl.create_default_context()
-
-        if not verify_ssl:
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_NONE
-
-        instance = SmartConnect(
-            host=host, user=username, pwd=password, port=port, sslContext=ssl_context
-        )
-
-        atexit.register(Disconnect, instance)
-        self.conn = instance
-
-    def get_vm(self, vm_name: str) -> Optional[vim.VirtualMachine]:
+    def create_gns3_configuration_file(self, nodes: dict[str, GenericNode]) -> None:
         """
-        Searches for a VM with given name.
-        :param vm_name: Name of VM to look for
-        :return: Returns Virtual Machine if found, else None
+        Writes the config file for the GNS3 VM to delete and create the needed subinterfaces.
+        :param nodes: built topology of the nodes
+        :return:
+        @TODO create pytest
         """
-        content = self.conn.RetrieveContent()
+        gns3_ip_address = self.esxi_connection.get_vm_ip_address("GNS3")
+        if gns3_ip_address is None:
+            raise logger.alert(
+                ConnectionError,
+                "Cannot connect to GNS3 VM. No IP address or VM was found.",
+            )
 
-        container_view = content.viewManager.CreateContainerView(
-            content.rootFolder, [vim.VirtualMachine], True
-        )
-
-        try:
-            for vm in container_view.view:
-                if vm.name == vm_name:
-                    return vm
-        finally:
-            container_view.Destroy()
-
-        return None
-
-    def get_vm_ip_address(self, vm_name: str) -> Optional[str]:
-        """
-        Returns the first IPv4 Address it finds on the VM with given name.
-        Ignores loopback, link locals and multicast addresses.
-        :param vm_name: Name of VM to look on
-        :return: IPv4 Address if found, else None.
-        """
-        for nic in self.get_vm(vm_name).guest.net or []:
-            for address in nic.ipAddress or []:
-                try:
-                    parsed = ipaddress.ip_address(address)
-                except ValueError:
-                    continue
-
-                if parsed.version != 4:
-                    continue
-
-                if parsed.is_loopback or parsed.is_link_local or parsed.is_multicast:
-                    continue
-                return address
-        return None
+        gns3_connection = SSHConnection(gns3_ip_address, "gns3", "gns3")
+        gns3_settings_setter = GNS3VMInterfaceSetup(gns3_connection)
+        gns3_settings_setter.write_config_file(nodes)
