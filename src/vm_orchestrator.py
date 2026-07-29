@@ -1,3 +1,12 @@
+"""
+File for handling SSH Connections, to rule them all
+"""
+
+__autor__ = "Leon Eiböck"
+__date__ = "28/07/2026"
+__license__ = "GNU GPLv3"
+__status__ = "In development"
+
 import atexit
 import ipaddress
 import ssl
@@ -8,6 +17,11 @@ from pyVmomi import vim
 
 
 class VMOrchestrator:
+    """
+    Handles the SSH connections between the ESXi host and the GNS3 VM.
+    @TODO recreate class
+    """
+
     def __init__(
         self,
         host: str,
@@ -16,6 +30,14 @@ class VMOrchestrator:
         password: str = None,
         verify_ssl: bool = False,
     ):
+        """
+        Initialise the connection with the ESXi host
+        :param host:
+        :param port:
+        :param username:
+        :param password:
+        :param verify_ssl:
+        """
         self.host = host
         self.port = port
 
@@ -33,6 +55,11 @@ class VMOrchestrator:
         self.conn = instance
 
     def get_vm(self, vm_name: str) -> Optional[vim.VirtualMachine]:
+        """
+        Searches for a VM with given name.
+        :param vm_name: Name of VM to look for
+        :return: Returns Virtual Machine if found, else None
+        """
         content = self.conn.RetrieveContent()
 
         container_view = content.viewManager.CreateContainerView(
@@ -49,6 +76,12 @@ class VMOrchestrator:
         return None
 
     def get_vm_ip_address(self, vm_name: str) -> Optional[str]:
+        """
+        Returns the first IPv4 Address it finds on the VM with given name.
+        Ignores loopback, link locals and multicast addresses.
+        :param vm_name: Name of VM to look on
+        :return: IPv4 Address if found, else None.
+        """
         for nic in self.get_vm(vm_name).guest.net or []:
             for address in nic.ipAddress or []:
                 try:
