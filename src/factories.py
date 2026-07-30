@@ -8,9 +8,11 @@ __license__ = "GNU GPLv3"
 __status__ = "In development"
 
 from enum import Enum
-from typing import Literal
+from functools import lru_cache
+from typing import Literal, Tuple
 
 from src.logger_adapter import get_logger
+from src.connections_handler import APIFunctions
 
 logger = get_logger()
 
@@ -20,21 +22,30 @@ class Environment(Enum):
     ON_ESXI = 1
     ON_GNS3 = 2
 
+    @staticmethod
+    @lru_cache(maxsize=1)
+    def get_templates() -> Tuple[frozenset, frozenset]:
+        """
+        Returns a tuple Frozen-sets with the available template names on GNS3 and ESXi
+        :return: Tupel with two Frozen-sets. First index is for GNS3, second is for ESXi
+        """
+        gns3_templates = frozenset(APIFunctions.get_gns3_template_names())
+        esxi_templates = frozenset(APIFunctions.get_esxi_template_names())
+        return gns3_templates, esxi_templates
+
+    @staticmethod
     def get_environment(
         image: str,
     ) -> Literal[Environment.ON_GNS3, Environment.ON_ESXI, Environment.ON_NOTHING]:
         """
+        Returns the environment based on the image
         #@TODO add description and tests
-        :param image:
-        :return:
+        :param image: image to judge the environment on
+        :return: Either returns ON_ESXI or ON_GNS3. When the template-name isn't on either then it returns ON_NOTHING
         """
-        if image in [
-            "VPC",
-            "Cisco IOSvL2 15.2(20200924:215240)",
-            "Cisco IOSv 15.7(3)M3",
-        ]:
+        if image in Environment.get_templates()[0]:
             return Environment.ON_GNS3
-        if image in ["Ubuntu 22.04.4 Live Server", "Rocky Linux 8.10"]:
+        if image in Environment.get_templates()[1]:
             return Environment.ON_ESXI
         return Environment.ON_NOTHING
 
@@ -214,7 +225,7 @@ class GenericNode:
 
         self.env = Environment.get_environment(image)
         if self.env == Environment.ON_NOTHING:
-            raise logger.alert(ValueError, f"Image {image} not found on ESXi nor GNS3.")
+            raise logger.alert(ValueError, f"Image {image} not found on ESXi or GNS3.")
 
     @property
     def interfaces(self):

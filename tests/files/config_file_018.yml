@@ -1,5 +1,5 @@
 nodes:
-  - image: VPC
+  - image: VPCS
     role: PC
     names:
       - PC1
@@ -7,7 +7,7 @@ nodes:
       - PC3
       - PC4
 
-  - image: Ubuntu 22.04.4 Live Server
+  - image: Ubuntu-Server
     role: VM
     names:
       - PC4
