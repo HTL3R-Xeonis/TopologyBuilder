@@ -1,9 +1,0 @@
-#!/bin/bash
-sudo su
-ip link delete eth1.10
-ip link delete eth1.20
-ip link add link eth1 name PC4_gi0/0 type vlan id 2
-ip link set PC4_gi0/0 up
-ip link add link eth1 name PC5_gi0/0 type vlan id 3
-ip link set PC5_gi0/0 up
-

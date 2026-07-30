@@ -1,5 +1,5 @@
 nodes:
-  - image: VPC
+  - image: VPCS
     role: PC
 
   - image: Ubuntu 22.04.4 Live Server

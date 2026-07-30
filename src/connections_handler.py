@@ -11,13 +11,57 @@ __status__ = "In development"
 import atexit
 import ipaddress
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Optional, Any
 
 import paramiko
 import ssl
-
+import requests
 from pyVim.connect import SmartConnect, Disconnect
 from pyVmomi import vim
+from pyVmomi.VmomiSupport import ManagedObject
+from src.settings import Settings
+
+
+class APIFunctions:
+    """
+    Provides various methods for API calls.
+    """
+
+    @staticmethod
+    def _send_get_request(url: str) -> dict[str, Any] | str:
+        """
+        General method to make an API GET request
+        :param url: API url
+        :return:
+        """
+        response = requests.get(url)
+        response.raise_for_status()
+        try:
+            return response.json()
+        except not ValueError:
+            return response.text
+
+    @staticmethod
+    def get_esxi_template_names():
+        """
+        Returns a set of available template names for ESXi
+        :return:
+        """
+        if Settings.Testing.GithubWorkflow.LITERAL_API_VALUES:
+            return Settings.Testing.GithubWorkflow.LITERAL_ESXI_TEMPLATES
+        json = APIFunctions._send_get_request("http://10.20.20.171:8000/api/templates")
+        return {template["name"] for template in json["templates"]}
+
+    @staticmethod
+    def get_gns3_template_names():
+        """
+        Returns a set of available template names for GNS3
+        :return:
+        """
+        if Settings.Testing.GithubWorkflow.LITERAL_API_VALUES:
+            return Settings.Testing.GithubWorkflow.LITERAL_GNS3_TEMPLATES
+        json = APIFunctions._send_get_request("http://10.20.20.171:8001/api/templates")
+        return {template["name"] for template in json["templates"]}
 
 
 class GenericConnection(ABC):
@@ -52,7 +96,7 @@ class GenericConnection(ABC):
         return self._password
 
     @property
-    def connection(self) -> GenericConnection:
+    def connection(self):
         return self._connection
 
     @abstractmethod
@@ -88,6 +132,11 @@ class GNS3Connection(GenericConnection):
 
 
 class ESXiConnection(GenericConnection):
+    def __init__(self, ip_address: str, username: str, password: str | None):
+        super().__init__(ip_address, username, password)
+
+        self.content: vim.ServiceInstanceContent = self.connection.RetrieveContent()
+
     def connect(self) -> vim.ServiceInstance:
         """
         Connect to the ESXi API.
@@ -109,17 +158,15 @@ class ESXiConnection(GenericConnection):
         atexit.register(Disconnect, instance)
         return instance
 
-    def get_vm(self, vm_name: str) -> Optional[vim.VirtualMachine]:
+    def get_vm(self, vm_name: str) -> Optional[ManagedObject]:
         """
         Searches for a VM with given name.
         :param vm_name: Name of VM to look for
         :return: Returns Virtual Machine if found, else None
         @TODO create pytest
         """
-        content = self.connection.RetrieveContent()
-
-        container_view = content.viewManager.CreateContainerView(
-            content.rootFolder, [vim.VirtualMachine], True
+        container_view = self.content.viewManager.CreateContainerView(
+            self.content.rootFolder, [vim.VirtualMachine], True
         )
 
         try:
@@ -139,7 +186,8 @@ class ESXiConnection(GenericConnection):
         :return: IPv4 Address if found, else None.
         @TODO create pytest
         """
-        for nic in self.get_vm(vm_name).guest.net or []:
+        vm = self.get_vm(vm_name)
+        for nic in [] if vm is None else vm.guest.net:
             for address in nic.ipAddress or []:
                 try:
                     parsed = ipaddress.ip_address(address)

@@ -65,86 +65,86 @@ def graph_builder_001() -> None:
     nodes = g.build()
 
     assert (
-        (cn := nodes["PC1"]).__class__ == PC and cn.image == "VPC" and cn.name == "PC1"
+        (cn := nodes["PC1"]).__class__ == PC and cn.image == "VPCS" and cn.name == "PC1"
     )
     assert (
-        (cn := nodes["PC2"]).__class__ == PC and cn.image == "VPC" and cn.name == "PC2"
+        (cn := nodes["PC2"]).__class__ == PC and cn.image == "VPCS" and cn.name == "PC2"
     )
     assert (
-        (cn := nodes["PC3"]).__class__ == PC and cn.image == "VPC" and cn.name == "PC3"
+        (cn := nodes["PC3"]).__class__ == PC and cn.image == "VPCS" and cn.name == "PC3"
     )
 
     assert (
         (cn := nodes["PC4"]).__class__ == VM
-        and cn.image == "Ubuntu 22.04.4 Live Server"
+        and cn.image == "Ubuntu-Server"
         and cn.name == "PC4"
     )
     assert (
         (cn := nodes["PC5"]).__class__ == VM
-        and cn.image == "Rocky Linux 8.10"
+        and cn.image == "Rocky 9.2"
         and cn.name == "PC5"
     )
 
     assert (
         (cn := nodes["SW-C1"]).__class__ == Switch
-        and cn.image == "Cisco IOSvL2 15.2(20200924:215240)"
+        and cn.image == "Cisco IOSvL2 15.2.1"
         and cn.name == "SW-C1"
     )
 
     assert (
         (cn := nodes["POP-ISP1-1"]).__class__ == Router
-        and cn.image == "Cisco IOSv 15.7(3)M3"
+        and cn.image == "Cisco IOSv 15.6(1)T"
         and cn.name == "POP-ISP1-1"
     )
     assert (
         (cn := nodes["POP-ISP1-2"]).__class__ == Router
-        and cn.image == "Cisco IOSv 15.7(3)M3"
+        and cn.image == "Cisco IOSv 15.6(1)T"
         and cn.name == "POP-ISP1-2"
     )
     assert (
         (cn := nodes["ISP1-BB1"]).__class__ == Router
-        and cn.image == "Cisco IOSv 15.7(3)M3"
+        and cn.image == "Cisco IOSv 15.6(1)T"
         and cn.name == "ISP1-BB1"
     )
     assert (
         (cn := nodes["ISP1-BB2"]).__class__ == Router
-        and cn.image == "Cisco IOSv 15.7(3)M3"
+        and cn.image == "Cisco IOSv 15.6(1)T"
         and cn.name == "ISP1-BB2"
     )
     assert (
         (cn := nodes["ISP1-BB3"]).__class__ == Router
-        and cn.image == "Cisco IOSv 15.7(3)M3"
+        and cn.image == "Cisco IOSv 15.6(1)T"
         and cn.name == "ISP1-BB3"
     )
     assert (
         (cn := nodes["ISP2"]).__class__ == Router
-        and cn.image == "Cisco IOSv 15.7(3)M3"
+        and cn.image == "Cisco IOSv 15.6(1)T"
         and cn.name == "ISP2"
     )
     assert (
         (cn := nodes["ISP3"]).__class__ == Router
-        and cn.image == "Cisco IOSv 15.7(3)M3"
+        and cn.image == "Cisco IOSv 15.6(1)T"
         and cn.name == "ISP3"
     )
 
     assert (
         (cn := nodes["FW-C3"]).__class__ == Firewall
-        and cn.image == "Cisco IOSv 15.7(3)M3"
+        and cn.image == "Cisco IOSv 15.6(1)T"
         and cn.name == "FW-C3"
     )
     assert (
         (cn := nodes["FW-C2"]).__class__ == Firewall
-        and cn.image == "Cisco IOSv 15.7(3)M3"
+        and cn.image == "Cisco IOSv 15.6(1)T"
         and cn.name == "FW-C2"
     )
     assert (
         (cn := nodes["FW-C1-1"]).__class__ == Firewall
-        and cn.image == "Cisco IOSv 15.7(3)M3"
+        and cn.image == "Cisco IOSv 15.6(1)T"
         and cn.name == "FW-C1-1"
     )
     assert (
         (cn := nodes["FW-C1-2"]).__class__ == Firewall
-        and cn.image == "Cisco IOSv 15.7(3)M3"
+        and cn.image == "Cisco IOSv 15.6(1)T"
         and cn.name == "FW-C1-2"
     )
 

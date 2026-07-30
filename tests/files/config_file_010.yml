@@ -1,5 +1,5 @@
 nodes:
-  - image: VPC
+  - image: VPCS
     names:
       - PC1
       - PC2

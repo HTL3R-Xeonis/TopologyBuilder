@@ -10,6 +10,7 @@ __status__ = "In development"
 from pathlib import Path
 import yaml
 from src.logger_adapter import get_logger
+from src.connections_handler import APIFunctions
 
 logger = get_logger()
 
@@ -45,6 +46,23 @@ class ConfigFileHandler:
         self.path = Path(path)
         self.__NODE_NAMES = set()
         self.__node_map = {}
+        self.available_templates = self.get_available_templates()
+
+    @staticmethod
+    def get_available_templates() -> set[str]:
+        """
+        Returns a set of all available templates which can be used as node images.
+        Templates with same name on GNS3 and ESXi are not allowed, hence an ValueError will be raised.
+        :return: Set of all available templates names.
+        """
+        esxi_templates = APIFunctions.get_esxi_template_names()
+        gns3_templates = APIFunctions.get_gns3_template_names()
+        if esxi_templates & gns3_templates:
+            raise logger.alert(
+                ValueError,
+                f"Templates with the same name in GNS3 and ESXi are not allowed: {esxi_templates & gns3_templates}",
+            )
+        return esxi_templates | gns3_templates
 
     def read_file(self) -> dict:
         """
@@ -89,8 +107,8 @@ class ConfigFileHandler:
                 f"'edges' must be of type list. Current type: {type(self.edges)}",
             )
 
-        for node_groupe in self.nodes:
-            self.__validate_node_group(node_groupe)
+        for node_group in self.nodes:
+            self.__validate_node_group(node_group)
         for edge in self.edges:
             self.__validate_edges(edge)
 
@@ -116,6 +134,12 @@ class ConfigFileHandler:
                 TypeError,
                 f"Image must be of type string. Current type: {type(node_group['image'])}",
             )
+        if self.available_templates is not None:
+            if node_group["image"] not in self.available_templates:
+                raise logger.alert(
+                    ValueError, f"Image {node_group['image']} not found on ESXi or GNS3"
+                )
+
         if not isinstance(node_group["role"], str):
             raise logger.alert(
                 TypeError,

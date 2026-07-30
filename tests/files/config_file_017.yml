@@ -1,5 +1,5 @@
 nodes:
-  - image: VPC
+  - image: VPCS
     role: PC
     names:
       - PC1

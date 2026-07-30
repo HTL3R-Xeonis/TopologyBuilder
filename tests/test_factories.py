@@ -80,20 +80,22 @@ def factories_002() -> None:
     cfh.validate_file()
     nf = NodeFactory()
 
-    node = nf.create_node("VPC", "SWITCH", "Test-SWITCH")
+    node = nf.create_node("VPCS", "SWITCH", "Test-SWITCH")
     assert (
-        node.__class__ == Switch and node.name == "Test-SWITCH" and node.image == "VPC"
+        node.__class__ == Switch and node.name == "Test-SWITCH" and node.image == "VPCS"
     )
-    node = nf.create_node("VPC", "PC", "Test-PC")
-    assert node.__class__ == PC and node.name == "Test-PC" and node.image == "VPC"
-    node = nf.create_node("VPC", "VM", "Test-VM")
-    assert node.__class__ == VM and node.name == "Test-VM" and node.image == "VPC"
-    node = nf.create_node("VPC", "ROUTER", "Test-ROUTER")
+    node = nf.create_node("VPCS", "PC", "Test-PC")
+    assert node.__class__ == PC and node.name == "Test-PC" and node.image == "VPCS"
+    node = nf.create_node("VPCS", "VM", "Test-VM")
+    assert node.__class__ == VM and node.name == "Test-VM" and node.image == "VPCS"
+    node = nf.create_node("VPCS", "ROUTER", "Test-ROUTER")
     assert (
-        node.__class__ == Router and node.name == "Test-ROUTER" and node.image == "VPC"
+        node.__class__ == Router and node.name == "Test-ROUTER" and node.image == "VPCS"
     )
-    node = nf.create_node("VPC", "FW", "Test-FW")
-    assert node.__class__ == Firewall and node.name == "Test-FW" and node.image == "VPC"
+    node = nf.create_node("VPCS", "FW", "Test-FW")
+    assert (
+        node.__class__ == Firewall and node.name == "Test-FW" and node.image == "VPCS"
+    )
 
 
 @allure.title("Unregistrierte Rolle angeben")
@@ -111,7 +113,7 @@ def factories_003() -> None:
         ValueError,
         match=r"Role Test-Role registered",
     ):
-        nf.create_node("VPC", "Test-Role", "Test-Test")
+        nf.create_node("VPCS", "Test-Role", "Test-Test")
 
 
 @allure.title("Edge erstellen")
@@ -126,8 +128,8 @@ def factories_004() -> None:
     cfh.validate_file()
     nf = NodeFactory()
     nodes = {}
-    nodes["PC"] = nf.create_node("VPC", "PC", "PC")
-    nodes["SWITCH"] = nf.create_node("VPC", "SWITCH", "SWITCH")
+    nodes["PC"] = nf.create_node("VPCS", "PC", "PC")
+    nodes["SWITCH"] = nf.create_node("VPCS", "SWITCH", "SWITCH")
 
     edge: Edge = NodeFactory.create_edge(
         nodes["PC"].add_interface("ens160"), nodes["SWITCH"].add_interface("gi0/0")
@@ -159,7 +161,7 @@ def factories_004() -> None:
 @allure.severity(allure.severity_level.NORMAL)
 def factories_005() -> None:
     nf = NodeFactory()
-    node = nf.create_node("VPC", "PC", "PC")
+    node = nf.create_node("VPCS", "PC", "PC")
     intf = Interface("gi0/0", node)
 
     assert intf.name == "gi0/0"
@@ -179,7 +181,7 @@ def factories_005() -> None:
 @allure.severity(allure.severity_level.NORMAL)
 def factories_006() -> None:
     nf = NodeFactory()
-    node = nf.create_node("VPC", "PC", "PC")
+    node = nf.create_node("VPCS", "PC", "PC")
     intf_1 = Interface("gi0/0", node)
     intf_2 = Interface("gi0/1", node)
     edge = Edge(intf_1, intf_2)
@@ -198,7 +200,7 @@ def factories_006() -> None:
 @allure.severity(allure.severity_level.NORMAL)
 def factories_007() -> None:
     nf = NodeFactory()
-    node = nf.create_node("VPC", "PC", "PC")
+    node = nf.create_node("VPCS", "PC", "PC")
     intf_1 = Interface("gi0/0", node)
     with pytest.raises(
         ValueError,
@@ -215,10 +217,10 @@ def factories_007() -> None:
 @allure.feature("factory")
 @allure.severity(allure.severity_level.NORMAL)
 def factories_008() -> None:
-    node = GenericNode("VPC", "PC")
-    assert node.name == "PC" and node.image == "VPC"
+    node = GenericNode("VPCS", "PC")
+    assert node.name == "PC" and node.image == "VPCS"
     assert node.interfaces == {}
-    assert repr(node) == "GenericNode('VPC', 'PC')"
+    assert repr(node) == "GenericNode('VPCS', 'PC')"
     assert str(node) == "PC"
 
 
@@ -230,7 +232,7 @@ def factories_008() -> None:
 @allure.feature("factory")
 @allure.severity(allure.severity_level.NORMAL)
 def factories_009() -> None:
-    node = GenericNode("VPC", "PC")
+    node = GenericNode("VPCS", "PC")
     node.add_interface("gi0/0")
     node.add_interface("gi0/1")
     node.add_interface("gi0/2")
@@ -243,7 +245,7 @@ def factories_009() -> None:
 @allure.feature("factory")
 @allure.severity(allure.severity_level.NORMAL)
 def factories_010() -> None:
-    node = GenericNode("VPC", "PC")
+    node = GenericNode("VPCS", "PC")
     node.add_interface("gi0/0")
     with pytest.raises(
         ValueError,
@@ -260,8 +262,8 @@ def factories_010() -> None:
 @allure.feature("factory")
 @allure.severity(allure.severity_level.NORMAL)
 def factories_011() -> None:
-    node_1 = GenericNode("VPC", "PC1")
-    node_2 = GenericNode("VPC", "PC2")
+    node_1 = GenericNode("VPCS", "PC1")
+    node_2 = GenericNode("VPCS", "PC2")
 
     NodeFactory.create_edge(
         node_1.add_interface("gi0/0"), node_2.add_interface("gi0/0")
