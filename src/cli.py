@@ -16,6 +16,7 @@ import typer
 from src.cli_config import load_cli_config
 from src.config_file_handler import ConfigFileHandler
 from src.graph_builder import GraphBuilder
+from src.graph_visualizer import write_graph
 from src.logger_adapter import set_console_level
 from src.topology_generator_client import DEFAULT_BASE_URL, generate_topology
 from src.vm_orchestrator import VMOrchestrator
@@ -102,7 +103,17 @@ def validate(config_path: str = CONFIG_ARG) -> None:
 
 
 @app.command()
-def build(config_path: str = CONFIG_ARG) -> None:
+def build(
+    config_path: str = CONFIG_ARG,
+    graph_output: Optional[str] = typer.Option(
+        None,
+        "--graph",
+        "-g",
+        help="Write a visualization of the topology to this path. A '.dot' "
+        "extension writes raw Graphviz source; '.png'/'.svg'/'.pdf' render "
+        "an image (requires the Graphviz 'dot' command to be installed).",
+    ),
+) -> None:
     """
     Validate a config file and build the in-memory topology graph, printing a summary.
     """
@@ -114,6 +125,10 @@ def build(config_path: str = CONFIG_ARG) -> None:
     typer.echo(f"Built {len(nodes)} node(s):")
     for name in nodes:
         typer.echo(f"  - {name}")
+
+    if graph_output:
+        write_graph(nodes, graph_output)
+        typer.echo(f"Wrote topology graph to {graph_output}")
 
 
 @app.command()
