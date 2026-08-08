@@ -8,6 +8,7 @@ __license__ = "GNU GPLv3"
 __status__ = "In development"
 
 import logging
+from pathlib import Path
 from typing import Optional
 
 import typer
@@ -15,6 +16,7 @@ import typer
 from src.config_file_handler import ConfigFileHandler
 from src.graph_builder import GraphBuilder
 from src.logger_adapter import set_console_level
+from src.topology_generator_client import DEFAULT_BASE_URL, generate_topology
 from src.vm_orchestrator import VMOrchestrator
 
 app = typer.Typer(
@@ -50,6 +52,40 @@ def main(
     else:
         index = min(verbose, len(_VERBOSITY_LEVELS) - 1)
         set_console_level(_VERBOSITY_LEVELS[index])
+
+
+@app.command()
+def generate(
+    prompt: str = typer.Argument(
+        ..., help="Natural-language description of the desired topology."
+    ),
+    output: str = typer.Option(
+        "./config_file_example.yml",
+        "--output",
+        "-o",
+        help="Path to write the generated config file to.",
+    ),
+    generator_url: str = typer.Option(
+        DEFAULT_BASE_URL,
+        envvar="TOPOLOGY_GENERATOR_URL",
+        help="Base URL of the Topology Generator API.",
+    ),
+) -> None:
+    """
+    Generate a topology config file from a natural-language prompt via the
+    Topology Generator API.
+    """
+    result = generate_topology(prompt, generator_url)
+
+    for warning in result.get("warnings", []):
+        typer.echo(f"Warning: {warning}", err=True)
+
+    if not result.get("valid"):
+        typer.echo("Topology generation failed; no config file written.", err=True)
+        raise typer.Exit(code=1)
+
+    Path(output).write_text(result["yaml"])
+    typer.echo(f"Wrote generated config to {output}")
 
 
 @app.command()
