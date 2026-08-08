@@ -53,10 +53,13 @@ def _layout(
 ) -> dict[str, tuple[float, float]]:
     """
     Computes 2D node positions with a Fruchterman-Reingold-style force-directed
-    layout: nodes repel each other, connected nodes attract each other.
+    layout: nodes repel each other, connected nodes attract each other. The
+    simulation itself is unbounded (no walls); the result is rescaled to fit
+    [0, width] x [0, height] afterwards. Simulating with hard walls causes
+    nodes pushed to an edge to pile up there instead of spreading out.
     :param adjacency: adjacency map of node names to their connected neighbours
-    :param width: layout width
-    :param height: layout height
+    :param width: target layout width, used only for the final rescale
+    :param height: target layout height, used only for the final rescale
     :return: map of node names to (x, y) positions within [0, width] x [0, height]
     """
     names = list(adjacency)
@@ -64,12 +67,12 @@ def _layout(
         return {}
 
     rng = random.Random(_SEED)
+    spread = math.sqrt(width * height)
     positions = {
-        name: (rng.uniform(0, width), rng.uniform(0, height)) for name in names
+        name: (rng.uniform(0, spread), rng.uniform(0, spread)) for name in names
     }
 
-    area = width * height
-    k = math.sqrt(area / len(names))
+    k = spread / math.sqrt(len(names))
 
     for iteration in range(_ITERATIONS):
         temperature = max(width, height) * 0.1 * (1 - iteration / _ITERATIONS)
@@ -112,11 +115,39 @@ def _layout(
             dist = math.hypot(dx, dy) or 0.01
             limited = min(dist, temperature)
             x, y = positions[name]
-            x = min(width, max(0.0, x + dx / dist * limited))
-            y = min(height, max(0.0, y + dy / dist * limited))
-            positions[name] = (x, y)
+            positions[name] = (x + dx / dist * limited, y + dy / dist * limited)
 
-    return positions
+    return _rescale(positions, width, height)
+
+
+def _rescale(
+    positions: dict[str, tuple[float, float]], width: float, height: float
+) -> dict[str, tuple[float, float]]:
+    """
+    Uniformly rescales and centers a set of positions to fit within
+    [0, width] x [0, height], preserving their relative shape (the same
+    scale factor is used for both axes, so the layout isn't stretched).
+    """
+    xs = [x for x, _ in positions.values()]
+    ys = [y for _, y in positions.values()]
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+    extent = max(max_x - min_x, max_y - min_y) or 1.0
+
+    margin = min(width, height) * 0.08
+    usable = max(width, height) - 2 * margin
+    scale = usable / extent
+
+    x_offset = (width - (max_x - min_x) * scale) / 2
+    y_offset = (height - (max_y - min_y) * scale) / 2
+
+    return {
+        name: (
+            (x - min_x) * scale + x_offset,
+            (y - min_y) * scale + y_offset,
+        )
+        for name, (x, y) in positions.items()
+    }
 
 
 def _draw_line(grid: list[list[str]], x0: int, y0: int, x1: int, y1: int) -> None:
