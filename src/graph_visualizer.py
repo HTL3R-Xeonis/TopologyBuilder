@@ -17,6 +17,7 @@ from src.factories import GenericNode
 
 _ITERATIONS = 200
 _SEED = 42
+_CHAR_ASPECT_RATIO = 2.0  # terminal character cells are roughly twice as tall as wide
 
 
 def _build_adjacency(nodes: dict[str, GenericNode]) -> dict[str, set[str]]:
@@ -169,9 +170,14 @@ def render_graph(nodes: dict[str, GenericNode]) -> str:
 
     terminal_width, _ = shutil.get_terminal_size(fallback=(100, 24))
     width = max(60, min(terminal_width - 2, 160))
-    height = max(20, len(adjacency) * 2)
 
-    positions = _layout(adjacency, float(width - 12), float(height - 2))
+    # Lay out nodes in a square "visual" space, then compress the vertical
+    # axis by the terminal's character aspect ratio (cells are taller than
+    # wide) when mapping to grid rows - otherwise the topology renders far
+    # too tall and narrow.
+    logical_size = float(width - 12)
+    positions = _layout(adjacency, logical_size, logical_size)
+    height = max(20, round(logical_size / _CHAR_ASPECT_RATIO) + 4)
 
     # Resolve each node to a unique grid cell (nudging down on collision) before
     # drawing anything, so edges, markers and labels all agree on node positions.
@@ -179,7 +185,7 @@ def render_graph(nodes: dict[str, GenericNode]) -> str:
     node_cell: dict[str, tuple[int, int]] = {}
     for name, (x, y) in positions.items():
         cell_x = min(width - 1, max(0, round(x)))
-        cell_y = min(height - 1, max(0, round(y)))
+        cell_y = min(height - 1, max(0, round(y / _CHAR_ASPECT_RATIO)))
         while (cell_x, cell_y) in occupied and cell_y < height - 1:
             cell_y += 1
         occupied.add((cell_x, cell_y))
