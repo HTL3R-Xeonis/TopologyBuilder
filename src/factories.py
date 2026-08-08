@@ -2,6 +2,8 @@
 Module which contains multiple classes for creating graph elements
 """
 
+from __future__ import annotations
+
 __autor__ = "Leon Eiböck"
 __date__ = "17/07/2026"
 __license__ = "GNU GPLv3"
@@ -14,7 +16,7 @@ from typing import Literal, Tuple
 from src.logger_adapter import get_logger
 from src.connections_handler import APIFunctions
 
-logger = get_logger()
+logger = get_logger(__name__)
 
 
 class Environment(Enum):

@@ -1,5 +1,7 @@
 .idea
 .venv
+.claude
 __pycache__
 *.py[cod]
+*.egg-info/
 esxi_instances/*

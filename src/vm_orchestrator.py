@@ -13,7 +13,7 @@ from src.logger_adapter import get_logger
 from src.gns3_vm_interface_setup import GNS3VMInterfaceSetup
 from src.factories import GenericNode
 
-logger = get_logger()
+logger = get_logger(__name__)
 
 
 class VMOrchestrator:
@@ -31,7 +31,9 @@ class VMOrchestrator:
         :param password: corresponding password for user
         @TODO create pytest
         """
+        logger.info(f"Connecting to ESXi host {esxi_host} as {username}")
         self.esxi_connection = ESXiConnection(esxi_host, username, password)
+        logger.info(f"Connected to ESXi host {esxi_host}")
 
     def create_gns3_configuration_file(self, nodes: dict[str, GenericNode]) -> None:
         """
@@ -40,13 +42,16 @@ class VMOrchestrator:
         :return:
         @TODO create pytest
         """
+        logger.debug("Looking up IP address of GNS3 VM")
         gns3_ip_address = self.esxi_connection.get_vm_ip_address("GNS3")
         if gns3_ip_address is None:
             raise logger.alert(
                 ConnectionError,
                 "Cannot connect to GNS3 VM. No IP address or VM was found.",
             )
+        logger.info(f"GNS3 VM found at {gns3_ip_address}")
 
         gns3_connection = SSHConnection(gns3_ip_address, "gns3", "gns3")
         gns3_settings_setter = GNS3VMInterfaceSetup(gns3_connection)
         gns3_settings_setter.write_config_file(nodes)
+        logger.info(f"Wrote GNS3 configuration for {len(nodes)} node(s)")

@@ -12,7 +12,7 @@ import yaml
 from src.logger_adapter import get_logger
 from src.connections_handler import APIFunctions
 
-logger = get_logger()
+logger = get_logger(__name__)
 
 
 class ConfigFileHandler:
@@ -86,6 +86,7 @@ class ConfigFileHandler:
         >>> config = ConfigFileHandler("./config_file_example.yml")
         >>> config.validate_file()
         """
+        logger.info(f"Validating config file {self.path}")
         content = self.read_file()
         if not {"edges", "nodes"} <= content.keys():
             raise logger.alert(

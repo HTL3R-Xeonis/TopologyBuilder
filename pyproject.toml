@@ -1,0 +1,22 @@
+[project]
+name = "topologybuilder"
+version = "0.1.0"
+description = "Build and deploy network topologies to GNS3/ESXi from a YAML config file."
+requires-python = ">=3.10"
+dependencies = [
+    "typer>=0.16",
+    "PyYAML>=6.0",
+    "paramiko>=3.4",
+    "pyvmomi>=8.0",
+    "requests>=2.31",
+]
+
+[project.scripts]
+topologybuilder = "src.cli:app"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["src"]

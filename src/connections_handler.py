@@ -19,7 +19,10 @@ import requests
 from pyVim.connect import SmartConnect, Disconnect
 from pyVmomi import vim
 from pyVmomi.VmomiSupport import ManagedObject
+from src.logger_adapter import get_logger
 from src.settings import Settings
+
+logger = get_logger(__name__)
 
 
 class APIFunctions:
@@ -34,11 +37,12 @@ class APIFunctions:
         :param url: API url
         :return:
         """
+        logger.debug(f"GET {url}")
         response = requests.get(url)
         response.raise_for_status()
         try:
             return response.json()
-        except not ValueError:
+        except ValueError:
             return response.text
 
     @staticmethod
@@ -111,6 +115,7 @@ class SSHConnection(GenericConnection, paramiko.SSHClient):
         :return: Returns the client
         @TODO create pytest
         """
+        logger.debug(f"Opening SSH connection to {self.ip_address} as {self.username}")
         client = paramiko.SSHClient()
         client.load_system_host_keys()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -122,6 +127,7 @@ class SSHConnection(GenericConnection, paramiko.SSHClient):
             password=self.password,
             timeout=10,
         )
+        logger.debug(f"SSH connection to {self.ip_address} established")
 
         return client
 
@@ -143,6 +149,7 @@ class ESXiConnection(GenericConnection):
         :return: Returns the client
         @TODO create pytest
         """
+        logger.debug(f"Opening ESXi API connection to {self.ip_address} as {self.username}")
         ssl_context = ssl.create_default_context()
         ssl_context.check_hostname = False
         ssl_context.verify_mode = ssl.CERT_NONE
@@ -154,6 +161,7 @@ class ESXiConnection(GenericConnection):
             port=443,
             sslContext=ssl_context,
         )
+        logger.debug(f"ESXi API connection to {self.ip_address} established")
 
         atexit.register(Disconnect, instance)
         return instance

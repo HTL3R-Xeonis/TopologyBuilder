@@ -20,4 +20,5 @@ pyvmomi==9.1.0.0
 PyYAML==6.0.3
 requests==2.34.2
 ruff==0.15.21
+typer==0.27.1
 urllib3==2.7.0

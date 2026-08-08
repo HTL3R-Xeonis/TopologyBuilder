@@ -14,7 +14,7 @@ from src.factories import Environment
 from src.factories import GenericNode
 from src.logger_adapter import get_logger
 
-logger = get_logger()
+logger = get_logger(__name__)
 
 
 class GNS3VMInterfaceSetup:
