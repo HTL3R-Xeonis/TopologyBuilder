@@ -30,10 +30,8 @@ Install the required system packages:
 sudo apt update
 ```
 ```bash
-sudo apt install -y python3 python3-venv python3-pip graphviz
+sudo apt install -y python3 python3-venv python3-pip
 ```
-
-`graphviz` provides the `dot` command, needed only if you want to render topology graphs as `.png`/`.svg`/`.pdf` (see [src/graph_visualizer.py](src/graph_visualizer.py)); it's optional if you only need the raw `.dot` output.
 
 Create and activate a virtual environment:
 
