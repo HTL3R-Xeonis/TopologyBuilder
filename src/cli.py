@@ -80,8 +80,12 @@ def build(config_path: str = CONFIG_ARG) -> None:
 @app.command()
 def deploy(
     config_path: str = CONFIG_ARG,
-    esxi_host: str = typer.Option(..., envvar="ESXI_HOST", help="IPv4 address of the ESXi host."),
-    esxi_username: str = typer.Option(..., envvar="ESXI_USERNAME", help="Username for the ESXi host."),
+    esxi_host: str = typer.Option(
+        ..., envvar="ESXI_HOST", help="IPv4 address of the ESXi host."
+    ),
+    esxi_username: str = typer.Option(
+        ..., envvar="ESXI_USERNAME", help="Username for the ESXi host."
+    ),
     esxi_password: Optional[str] = typer.Option(
         None,
         envvar="ESXI_PASSWORD",

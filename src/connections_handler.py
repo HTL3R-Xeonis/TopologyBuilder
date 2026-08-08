@@ -149,7 +149,9 @@ class ESXiConnection(GenericConnection):
         :return: Returns the client
         @TODO create pytest
         """
-        logger.debug(f"Opening ESXi API connection to {self.ip_address} as {self.username}")
+        logger.debug(
+            f"Opening ESXi API connection to {self.ip_address} as {self.username}"
+        )
         ssl_context = ssl.create_default_context()
         ssl_context.check_hostname = False
         ssl_context.verify_mode = ssl.CERT_NONE
