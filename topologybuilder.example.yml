@@ -1,0 +1,9 @@
+# Default values for `topologybuilder` CLI options.
+# Copy this file to topologybuilder.yml (kept out of git) to set your own defaults.
+# CLI flags and environment variables always take precedence over this file.
+# The ESXi password is intentionally not supported here - use --esxi-password,
+# ESXI_PASSWORD, or the interactive prompt instead.
+
+generator_url: http://10.20.20.172:8002
+esxi_host: 10.20.20.201
+esxi_username: root

@@ -13,6 +13,7 @@ from typing import Optional
 
 import typer
 
+from src.cli_config import load_cli_config
 from src.config_file_handler import ConfigFileHandler
 from src.graph_builder import GraphBuilder
 from src.logger_adapter import set_console_level
@@ -26,6 +27,8 @@ app = typer.Typer(
 )
 
 CONFIG_ARG = typer.Argument(..., help="Path to the YAML topology config file.")
+
+_CLI_CONFIG = load_cli_config()
 
 _VERBOSITY_LEVELS = [logging.WARNING, logging.INFO, logging.DEBUG]
 
@@ -66,7 +69,7 @@ def generate(
         help="Path to write the generated config file to.",
     ),
     generator_url: str = typer.Option(
-        DEFAULT_BASE_URL,
+        _CLI_CONFIG.get("generator_url", DEFAULT_BASE_URL),
         envvar="TOPOLOGY_GENERATOR_URL",
         help="Base URL of the Topology Generator API.",
     ),
@@ -116,21 +119,36 @@ def build(config_path: str = CONFIG_ARG) -> None:
 @app.command()
 def deploy(
     config_path: str = CONFIG_ARG,
-    esxi_host: str = typer.Option(
-        ..., envvar="ESXI_HOST", help="IPv4 address of the ESXi host."
+    esxi_host: Optional[str] = typer.Option(
+        _CLI_CONFIG.get("esxi_host"),
+        envvar="ESXI_HOST",
+        help="IPv4 address of the ESXi host.",
     ),
-    esxi_username: str = typer.Option(
-        ..., envvar="ESXI_USERNAME", help="Username for the ESXi host."
+    esxi_username: Optional[str] = typer.Option(
+        _CLI_CONFIG.get("esxi_username"),
+        envvar="ESXI_USERNAME",
+        help="Username for the ESXi host.",
     ),
     esxi_password: Optional[str] = typer.Option(
         None,
         envvar="ESXI_PASSWORD",
-        help="Password for the ESXi host. Prompted for if not provided.",
+        help="Password for the ESXi host. Prompted for if not provided. "
+        "Not readable from the config file for security reasons.",
     ),
 ) -> None:
     """
     Validate a config file, build the topology, and deploy it to GNS3/ESXi.
     """
+    if esxi_host is None:
+        raise typer.BadParameter(
+            "Missing ESXi host. Pass --esxi-host, set ESXI_HOST, "
+            "or add 'esxi_host' to topologybuilder.yml."
+        )
+    if esxi_username is None:
+        raise typer.BadParameter(
+            "Missing ESXi username. Pass --esxi-username, set ESXI_USERNAME, "
+            "or add 'esxi_username' to topologybuilder.yml."
+        )
     if esxi_password is None:
         esxi_password = typer.prompt("ESXi password", hide_input=True)
 
