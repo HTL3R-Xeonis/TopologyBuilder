@@ -2,10 +2,7 @@
 Tests to validate functionality of config_file_handler.py
 """
 
-__autor__ = "Leon Eiböck"
-__date__ = "19/07/2026"
 __license__ = "GNU GPLv3"
-__status__ = "In development"
 
 import allure
 import pytest

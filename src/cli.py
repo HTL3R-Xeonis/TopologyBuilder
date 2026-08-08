@@ -2,10 +2,7 @@
 Command line interface for TopologyBuilder.
 """
 
-__autor__ = "Leon Eiböck"
-__date__ = "08/08/2026"
 __license__ = "GNU GPLv3"
-__status__ = "In development"
 
 import logging
 from pathlib import Path

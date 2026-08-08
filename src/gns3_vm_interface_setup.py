@@ -2,10 +2,7 @@
 Provides a class for the creation of the configuration file for the subinterfaces of the GNS3 VM.
 """
 
-__autor__ = "Leon Eiböck"
-__date__ = "28/07/2026"
 __license__ = "GNU GPLv3"
-__status__ = "In development"
 
 from pathlib import Path
 

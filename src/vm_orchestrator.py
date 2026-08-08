@@ -3,10 +3,7 @@ Provides a class to make the provisioning of the GNS3 and ESXi VMs easier and se
 settings accordingly to the built topology.
 """
 
-__autor__ = "Leon Eiböck"
-__date__ = "28/07/2026"
 __license__ = "GNU GPLv3"
-__status__ = "In development"
 
 from src.connections_handler import SSHConnection, ESXiConnection
 from src.logger_adapter import get_logger

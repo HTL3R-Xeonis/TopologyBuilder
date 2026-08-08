@@ -1,7 +1,4 @@
-__autor__ = "Leon Eiböck"
-__date__ = "17/07/2026"
 __license__ = "GNU GPLv3"
-__status__ = "In development"
 
 from src.factories import NodeFactory, GenericNode
 

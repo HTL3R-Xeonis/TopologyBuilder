@@ -4,10 +4,7 @@ Module which contains multiple classes for creating graph elements
 
 from __future__ import annotations
 
-__autor__ = "Leon Eiböck"
-__date__ = "17/07/2026"
 __license__ = "GNU GPLv3"
-__status__ = "In development"
 
 from enum import Enum
 from functools import lru_cache

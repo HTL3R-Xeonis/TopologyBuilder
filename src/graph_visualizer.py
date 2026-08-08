@@ -4,10 +4,7 @@ Node positions are computed with a small pure-Python force-directed layout
 (no external graphing/plotting libraries involved).
 """
 
-__autor__ = "Leon Eiböck"
-__date__ = "08/08/2026"
 __license__ = "GNU GPLv3"
-__status__ = "In development"
 
 import math
 import random

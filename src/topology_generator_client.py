@@ -3,10 +3,7 @@ Client for the local Topology Generator API, which uses an LLM to produce a topo
 config YAML from a natural-language prompt.
 """
 
-__autor__ = "Leon Eiböck"
-__date__ = "08/08/2026"
 __license__ = "GNU GPLv3"
-__status__ = "In development"
 
 import requests
 

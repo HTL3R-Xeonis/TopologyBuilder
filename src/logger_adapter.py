@@ -4,10 +4,7 @@ Configures a package-wide logger hierarchy with a rotating file handler (always 
 console handler whose verbosity can be adjusted at runtime, e.g. from the CLI's --verbose flag.
 """
 
-__autor__ = "Leon Eiböck"
-__date__ = "16/07/2026"
 __license__ = "GNU GPLv3"
-__status__ = "In development"
 
 import logging
 import os

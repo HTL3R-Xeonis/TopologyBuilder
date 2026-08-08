@@ -2,10 +2,7 @@
 Loads optional user-level default values for CLI options from a YAML config file.
 """
 
-__autor__ = "Leon Eiböck"
-__date__ = "08/08/2026"
 __license__ = "GNU GPLv3"
-__status__ = "In development"
 
 import os
 from pathlib import Path

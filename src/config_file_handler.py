@@ -2,10 +2,7 @@
 Module which contains classes and functions to handle and validate the contents of the config file
 """
 
-__autor__ = "Leon Eiböck"
-__date__ = "15/07/2026"
 __license__ = "GNU GPLv3"
-__status__ = "In development"
 
 from pathlib import Path
 import yaml

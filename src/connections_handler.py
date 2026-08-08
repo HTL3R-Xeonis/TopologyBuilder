@@ -3,10 +3,7 @@ Provides classes for connection types like SSH or the API connections to GNS3 an
 These classes have methods which can be used to operate these APIs.
 """
 
-__autor__ = "Leon Eiböck"
-__date__ = "28/07/2026"
 __license__ = "GNU GPLv3"
-__status__ = "In development"
 
 import atexit
 import ipaddress
