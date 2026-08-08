@@ -5,6 +5,7 @@ description = "Build and deploy network topologies to GNS3/ESXi from a YAML conf
 requires-python = ">=3.10"
 dependencies = [
     "typer>=0.16",
+    "rich>=13.0",
     "PyYAML>=6.0",
     "paramiko>=3.4",
     "pyvmomi>=8.0",

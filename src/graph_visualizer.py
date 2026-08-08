@@ -13,6 +13,9 @@ import math
 import random
 import shutil
 
+from rich.console import Console
+from rich.tree import Tree
+
 from src.factories import GenericNode
 
 _ITERATIONS = 200
@@ -221,3 +224,37 @@ def render_graph(nodes: dict[str, GenericNode]) -> str:
             grid[y][label_x] = char
 
     return "\n".join("".join(row).rstrip() for row in grid if "".join(row).strip())
+
+
+def print_connection_tree(nodes: dict[str, GenericNode]) -> None:
+    """
+    Prints a colored tree listing each device and the devices it is connected
+    to, via its interfaces.
+    :param nodes: built topology of nodes, as returned by GraphBuilder.build()
+    """
+    tree = Tree("[bold]Topology[/bold]")
+
+    for name, node in nodes.items():
+        device = tree.add(f"[bold cyan]{name}[/bold cyan] [dim]({node.image})[/dim]")
+
+        interfaces = list(node.interfaces.items())
+        if not interfaces:
+            device.add("[dim](no interfaces)[/dim]")
+            continue
+
+        for if_name, interface in interfaces:
+            edge = interface.edge
+            if edge is None:
+                device.add(f"[yellow]{if_name}[/yellow] [dim]-- unconnected[/dim]")
+                continue
+
+            other_interface = (
+                edge.incidence_2 if edge.incidence_1 is interface else edge.incidence_1
+            )
+            device.add(
+                f"[yellow]{if_name}[/yellow] [dim]->[/dim] "
+                f"[bold green]{other_interface.node.name}[/bold green]"
+                f"[dim]:{other_interface.name}[/dim]"
+            )
+
+    Console().print(tree)

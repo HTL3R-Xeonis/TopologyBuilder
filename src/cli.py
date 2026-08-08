@@ -16,7 +16,7 @@ import typer
 from src.cli_config import load_cli_config
 from src.config_file_handler import ConfigFileHandler
 from src.graph_builder import GraphBuilder
-from src.graph_visualizer import render_graph
+from src.graph_visualizer import print_connection_tree, render_graph
 from src.logger_adapter import set_console_level
 from src.topology_generator_client import DEFAULT_BASE_URL, generate_topology
 from src.vm_orchestrator import VMOrchestrator
@@ -111,6 +111,12 @@ def build(
         "-g",
         help="Print a visualization of the topology to the terminal.",
     ),
+    list_connections: bool = typer.Option(
+        False,
+        "--list",
+        "-l",
+        help="Print a tree listing each device and what it's connected to.",
+    ),
 ) -> None:
     """
     Validate a config file and build the in-memory topology graph, printing a summary.
@@ -127,6 +133,10 @@ def build(
     if graph:
         typer.echo()
         typer.echo(render_graph(nodes))
+
+    if list_connections:
+        typer.echo()
+        print_connection_tree(nodes)
 
 
 @app.command()
