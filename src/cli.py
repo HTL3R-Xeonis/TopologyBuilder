@@ -12,6 +12,7 @@ import typer
 
 from src.cli_config import load_cli_config
 from src.config_file_handler import ConfigFileHandler
+from src.connections_handler import ESXiConnection
 from src.graph_builder import GraphBuilder
 from src.graph_visualizer import print_connection_tree, render_graph
 from src.logger_adapter import set_console_level
@@ -29,6 +30,49 @@ CONFIG_ARG = typer.Argument(..., help="Path to the YAML topology config file.")
 _CLI_CONFIG = load_cli_config()
 
 _VERBOSITY_LEVELS = [logging.WARNING, logging.INFO, logging.DEBUG]
+
+ESXI_HOST_OPTION = typer.Option(
+    _CLI_CONFIG.get("esxi_host"),
+    "--esxi-host",
+    envvar="ESXI_HOST",
+    help="IPv4 address of the ESXi host.",
+)
+ESXI_USERNAME_OPTION = typer.Option(
+    _CLI_CONFIG.get("esxi_username"),
+    "--esxi-username",
+    envvar="ESXI_USERNAME",
+    help="Username for the ESXi host.",
+)
+ESXI_PASSWORD_OPTION = typer.Option(
+    None,
+    "--esxi-password",
+    envvar="ESXI_PASSWORD",
+    help="Password for the ESXi host. Prompted for if not provided. "
+    "Not readable from the config file for security reasons.",
+)
+
+
+def _resolve_esxi_credentials(
+    esxi_host: Optional[str], esxi_username: Optional[str], esxi_password: Optional[str]
+) -> tuple[str, str, str]:
+    """
+    Validates ESXi credentials gathered from CLI flags/env vars/config file,
+    prompting for the password if it wasn't supplied any other way.
+    :return: (esxi_host, esxi_username, esxi_password), all guaranteed non-None
+    """
+    if esxi_host is None:
+        raise typer.BadParameter(
+            "Missing ESXi host. Pass --esxi-host, set ESXI_HOST, "
+            "or add 'esxi_host' to topologybuilder.yml."
+        )
+    if esxi_username is None:
+        raise typer.BadParameter(
+            "Missing ESXi username. Pass --esxi-username, set ESXI_USERNAME, "
+            "or add 'esxi_username' to topologybuilder.yml."
+        )
+    if esxi_password is None:
+        esxi_password = typer.prompt("ESXi password", hide_input=True)
+    return esxi_host, esxi_username, esxi_password
 
 
 @app.callback()
@@ -139,38 +183,16 @@ def build(
 @app.command()
 def deploy(
     config_path: str = CONFIG_ARG,
-    esxi_host: Optional[str] = typer.Option(
-        _CLI_CONFIG.get("esxi_host"),
-        envvar="ESXI_HOST",
-        help="IPv4 address of the ESXi host.",
-    ),
-    esxi_username: Optional[str] = typer.Option(
-        _CLI_CONFIG.get("esxi_username"),
-        envvar="ESXI_USERNAME",
-        help="Username for the ESXi host.",
-    ),
-    esxi_password: Optional[str] = typer.Option(
-        None,
-        envvar="ESXI_PASSWORD",
-        help="Password for the ESXi host. Prompted for if not provided. "
-        "Not readable from the config file for security reasons.",
-    ),
+    esxi_host: Optional[str] = ESXI_HOST_OPTION,
+    esxi_username: Optional[str] = ESXI_USERNAME_OPTION,
+    esxi_password: Optional[str] = ESXI_PASSWORD_OPTION,
 ) -> None:
     """
     Validate a config file, build the topology, and deploy it to GNS3/ESXi.
     """
-    if esxi_host is None:
-        raise typer.BadParameter(
-            "Missing ESXi host. Pass --esxi-host, set ESXI_HOST, "
-            "or add 'esxi_host' to topologybuilder.yml."
-        )
-    if esxi_username is None:
-        raise typer.BadParameter(
-            "Missing ESXi username. Pass --esxi-username, set ESXI_USERNAME, "
-            "or add 'esxi_username' to topologybuilder.yml."
-        )
-    if esxi_password is None:
-        esxi_password = typer.prompt("ESXi password", hide_input=True)
+    esxi_host, esxi_username, esxi_password = _resolve_esxi_credentials(
+        esxi_host, esxi_username, esxi_password
+    )
 
     handler = ConfigFileHandler(config_path)
     handler.validate_file()
@@ -180,6 +202,26 @@ def deploy(
     orchestrator = VMOrchestrator(esxi_host, esxi_username, esxi_password)
     orchestrator.create_gns3_configuration_file(nodes)
     typer.echo("Deployment complete.")
+
+
+@app.command()
+def portgroups(
+    esxi_host: Optional[str] = ESXI_HOST_OPTION,
+    esxi_username: Optional[str] = ESXI_USERNAME_OPTION,
+    esxi_password: Optional[str] = ESXI_PASSWORD_OPTION,
+) -> None:
+    """
+    List the port groups configured on the ESXi host's vSwitches.
+    """
+    esxi_host, esxi_username, esxi_password = _resolve_esxi_credentials(
+        esxi_host, esxi_username, esxi_password
+    )
+
+    esxi_connection = ESXiConnection(esxi_host, esxi_username, esxi_password)
+    for portgroup in esxi_connection.list_port_groups():
+        typer.echo(
+            f"{portgroup['name']} (VLAN {portgroup['vlan_id']}) on {portgroup['vswitch']}"
+        )
 
 
 if __name__ == "__main__":

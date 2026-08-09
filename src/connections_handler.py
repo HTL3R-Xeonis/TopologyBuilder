@@ -251,3 +251,18 @@ class ESXiConnection(GenericConnection):
         logger.info(
             f"Created ESXi port group '{name}' (VLAN {vlan_id}) on {vswitch_name}"
         )
+
+    def list_port_groups(self) -> list[dict[str, str | int]]:
+        """
+        Lists the port groups configured on the ESXi host's vSwitches.
+        :return: list of {"name", "vlan_id", "vswitch"} dicts
+        """
+        network_system = self._get_host_system().configManager.networkSystem
+        return [
+            {
+                "name": portgroup.spec.name,
+                "vlan_id": portgroup.spec.vlanId,
+                "vswitch": portgroup.spec.vswitchName,
+            }
+            for portgroup in network_system.networkInfo.portgroup
+        ]

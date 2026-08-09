@@ -6,6 +6,8 @@ from __future__ import annotations
 
 __license__ = "GNU GPLv3"
 
+import re
+import zlib
 from enum import Enum
 from functools import lru_cache
 from typing import Literal, Tuple
@@ -14,6 +16,26 @@ from src.logger_adapter import get_logger
 from src.connections_handler import APIFunctions
 
 logger = get_logger(__name__)
+
+_LINUX_IFNAME_MAX_LENGTH = 15  # kernel's IFNAMSIZ - 1
+
+
+def _sanitize_ifname(raw: str, max_length: int = _LINUX_IFNAME_MAX_LENGTH) -> str:
+    """
+    Sanitizes a string into a name valid for a Linux network interface: only
+    alphanumerics, hyphens and underscores, at most `max_length` characters.
+    Names that need truncating get a short hash suffix appended, so distinct
+    inputs that would otherwise collide after truncation stay unique.
+    :param raw: the string to sanitize (e.g. "PC4_gi0/0")
+    :param max_length: maximum length of the result
+    :return: a valid, unique-enough interface name
+    """
+    sanitized = re.sub(r"[^A-Za-z0-9_-]", "-", raw)
+    if len(sanitized) <= max_length:
+        return sanitized
+
+    suffix = format(zlib.crc32(raw.encode()) & 0xFFFF, "04x")
+    return f"{sanitized[: max_length - len(suffix) - 1]}-{suffix}"
 
 
 class Environment(Enum):
@@ -142,7 +164,7 @@ class Interface:
         self._edge = None
         self._esxi_vlan = None
         if node.env == Environment.ON_ESXI:
-            self._esxi_vlan = f"{node.name}_{if_name}"
+            self._esxi_vlan = _sanitize_ifname(f"{node.name}_{if_name}")
 
     @property
     def esxi_vlan(self) -> str | None:
