@@ -208,3 +208,46 @@ class ESXiConnection(GenericConnection):
                     continue
                 return address
         return None
+
+    def _get_host_system(self) -> vim.HostSystem:
+        """
+        Returns the ESXi host system. Assumes a standalone host connection
+        (one datacenter, one compute resource, one host), which is what
+        SmartConnect gives us when connecting directly to an ESXi host rather
+        than through vCenter.
+        :return: the ESXi HostSystem
+        """
+        datacenter = self.content.rootFolder.childEntity[0]
+        compute_resource = datacenter.hostFolder.childEntity[0]
+        return compute_resource.host[0]
+
+    def ensure_port_group(
+        self, name: str, vlan_id: int, vswitch_name: str = "vSwitch0"
+    ) -> None:
+        """
+        Ensures a port group with the given name and VLAN ID exists on the
+        ESXi host's vSwitch, creating it if it's missing. Used to keep the
+        ESXi vSwitch in sync with the GNS3 VM's VLAN subinterfaces, so ESXi
+        VMs' vNICs on this port group reach the matching GNS3 topology link.
+        :param name: name of the port group, also used as its identifying label
+        :param vlan_id: VLAN ID to tag the port group with
+        :param vswitch_name: name of the vSwitch to attach the port group to
+        :return:
+        """
+        network_system = self._get_host_system().configManager.networkSystem
+        existing_names = {
+            portgroup.spec.name for portgroup in network_system.networkInfo.portgroup
+        }
+        if name in existing_names:
+            return
+
+        port_group_spec = vim.host.PortGroup.Specification()
+        port_group_spec.name = name
+        port_group_spec.vlanId = vlan_id
+        port_group_spec.vswitchName = vswitch_name
+        port_group_spec.policy = vim.host.NetworkPolicy()
+
+        network_system.AddPortGroup(portgrp=port_group_spec)
+        logger.info(
+            f"Created ESXi port group '{name}' (VLAN {vlan_id}) on {vswitch_name}"
+        )

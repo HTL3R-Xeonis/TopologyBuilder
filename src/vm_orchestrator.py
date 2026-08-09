@@ -8,7 +8,7 @@ __license__ = "GNU GPLv3"
 from src.connections_handler import SSHConnection, ESXiConnection
 from src.logger_adapter import get_logger
 from src.gns3_vm_interface_setup import GNS3VMInterfaceSetup
-from src.factories import GenericNode
+from src.factories import GenericNode, compute_esxi_vlan_assignments
 
 logger = get_logger(__name__)
 
@@ -34,11 +34,18 @@ class VMOrchestrator:
 
     def create_gns3_configuration_file(self, nodes: dict[str, GenericNode]) -> None:
         """
-        Writes the config file for the GNS3 VM to delete and create the needed subinterfaces.
+        Ensures the ESXi vSwitch has a port group for every ESXi-hosted
+        interface's VLAN, then applies the matching subinterface configuration
+        to the GNS3 VM so the two sides of the bridge agree on VLAN numbering.
         :param nodes: built topology of the nodes
         :return:
         @TODO create pytest
         """
+        vlan_assignments = compute_esxi_vlan_assignments(nodes)
+        for esxi_vlan_name, vlan_id in vlan_assignments.items():
+            self.esxi_connection.ensure_port_group(esxi_vlan_name, vlan_id)
+        logger.info(f"Ensured {len(vlan_assignments)} ESXi port group(s)")
+
         logger.debug("Looking up IP address of GNS3 VM")
         gns3_ip_address = self.esxi_connection.get_vm_ip_address("GNS3")
         if gns3_ip_address is None:

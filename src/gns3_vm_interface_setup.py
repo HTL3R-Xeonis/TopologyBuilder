@@ -7,8 +7,7 @@ __license__ = "GNU GPLv3"
 from pathlib import Path
 
 from src.connections_handler import SSHConnection
-from src.factories import Environment
-from src.factories import GenericNode
+from src.factories import GenericNode, compute_esxi_vlan_assignments
 from src.logger_adapter import get_logger
 
 logger = get_logger(__name__)
@@ -47,7 +46,8 @@ class GNS3VMInterfaceSetup:
 
     def _write_command(self, command: str) -> None:
         """
-        Appends the given command to the a file which is located in ./esxi_instances/
+        Appends the given command to the a file which is located in ./esxi_instances/,
+        kept as a human-readable record of what was applied to the GNS3 VM.
         :param command: string to write
         :return:
         @TODO create pytest
@@ -59,48 +59,61 @@ class GNS3VMInterfaceSetup:
         with open(self.configuration_file_path, "a") as f:
             f.write(f"{command}\n")
 
+    def _apply_command(self, command: str) -> None:
+        """
+        Records the given command in the local audit file and executes it on the
+        GNS3 VM over the existing SSH connection, with 'sudo -n' since the
+        official GNS3 VM appliance grants its default user passwordless sudo.
+        Raises if the remote command exits with a non-zero status.
+        :param command: shell command to apply on the GNS3 VM
+        :return:
+        @TODO create pytest
+        """
+        self._write_command(command)
+
+        _, stdout, stderr = self.gns3_connection.exec_command(f"sudo -n {command}")
+        exit_status = stdout.channel.recv_exit_status()
+        if exit_status != 0:
+            raise logger.alert(
+                RuntimeError,
+                f"Command failed on GNS3 VM (exit {exit_status}): {command}\n"
+                f"{stderr.read().decode().strip()}",
+            )
+
     def _reset_subinterfaces_commands(self, interface: str) -> None:
         """
-        Writes the commands to a file, which is located in ./esxi_instances/, to delete the subinterfaces
+        Deletes the existing subinterfaces of given interface on the GNS3 VM.
         :param interface: name of interface, from which the subinterfaces are
         :return:
         @TODO create pytest
         """
         for si in self._get_subinterfaces(interface):
-            self._write_command(f"ip link delete {si}")
+            self._apply_command(f"ip link delete {si}")
 
     def _create_subinterfaces_commands(
         self, interface_name: str, nodes: dict[str, GenericNode]
     ) -> None:
         """
-        Writes the commands to a file, which is located in ./esxi_instances/, to create and turn up the needed subinterfaces accordingly to the topology
+        Creates and turns up the needed subinterfaces on the GNS3 VM, accordingly
+        to the topology. VLAN IDs are assigned by compute_esxi_vlan_assignments,
+        so they stay in sync with the matching ESXi vSwitch port groups.
         :param interface_name: name of interface to which to add the subinterfaces
         :param nodes: built topology of the nodes
         :return:
         @TODO create pytest
         """
-        vlan_id = 2
-        commands = ""
-        for node in nodes.values():
-            if not node.env == Environment.ON_ESXI:
-                continue
-            for node_interface in node.interfaces.values():
-                if vlan_id >= 4094:
-                    logger.alert(
-                        ValueError,
-                        "VLANs on ESXi exceed the limit of 4094. Reduce the number of interfaces on VMs on ESXi",
-                    )
-                commands += (
-                    f"ip link add link {interface_name} name {node_interface.esxi_vlan} type vlan id {vlan_id}\n"
-                    + f"ip link set {node_interface.esxi_vlan} up\n"
-                )
-
-                vlan_id += 1
-        self._write_command(commands)
+        for esxi_vlan_name, vlan_id in compute_esxi_vlan_assignments(nodes).items():
+            self._apply_command(
+                f"ip link add link {interface_name} name {esxi_vlan_name} type vlan id {vlan_id}"
+            )
+            self._apply_command(f"ip link set {esxi_vlan_name} up")
 
     def write_config_file(self, nodes: dict[str, GenericNode]) -> None:
         """
-        Writes the config file for the GNS3 VM to delete and create the needed subinterfaces.
+        Applies the VLAN subinterface configuration to the GNS3 VM: deletes the
+        existing subinterfaces and creates the ones needed for the given
+        topology. Also keeps a human-readable record of the applied commands
+        in ./esxi_instances/.
         :param nodes: built topology of the nodes
         :return:
         @TODO create pytest
@@ -110,7 +123,7 @@ class GNS3VMInterfaceSetup:
         config_file_path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(config_file_path, "w") as f:
-            f.write("#!/bin/bash\nsudo su\n")
+            f.write("# Commands applied to the GNS3 VM via SSH:\n")
 
         self._reset_subinterfaces_commands("eth1")
         self._create_subinterfaces_commands("eth1", nodes)

@@ -49,6 +49,31 @@ class Environment(Enum):
         return Environment.ON_NOTHING
 
 
+def compute_esxi_vlan_assignments(nodes: dict[str, GenericNode]) -> dict[str, int]:
+    """
+    Assigns a sequential VLAN ID (starting at 2) to every interface of every
+    ESXi-hosted node in the topology. Deterministic for a given `nodes` dict,
+    so independent callers (the GNS3 VM's subinterfaces, the ESXi vSwitch port
+    groups) can derive the same VLAN numbering without sharing state.
+    :param nodes: built topology of nodes, as returned by GraphBuilder.build()
+    :return: map of Interface.esxi_vlan name to its assigned VLAN ID
+    """
+    assignments: dict[str, int] = {}
+    vlan_id = 2
+    for node in nodes.values():
+        if node.env != Environment.ON_ESXI:
+            continue
+        for interface in node.interfaces.values():
+            if vlan_id >= 4094:
+                raise logger.alert(
+                    ValueError,
+                    "VLANs on ESXi exceed the limit of 4094. Reduce the number of interfaces on VMs on ESXi",
+                )
+            assignments[interface.esxi_vlan] = vlan_id
+            vlan_id += 1
+    return assignments
+
+
 class NodeFactory:
     """
     Class which creates nodes based on node groups
