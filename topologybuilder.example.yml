@@ -7,3 +7,9 @@
 generator_url: http://10.20.20.172:8002
 esxi_host: 10.20.20.201
 esxi_username: root
+
+# Only needed with `deploy --fresh-gns3-vm`:
+gns3_ova_path: /mnt/nfs-share/gns3.ova
+gns3_datastore: datastore1
+gns3_mgmt_network: PG-MGMT
+gns3_trunk_network: PG-GNS3-TRUNK

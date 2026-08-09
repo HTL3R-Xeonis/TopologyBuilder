@@ -186,6 +186,35 @@ def deploy(
     esxi_host: Optional[str] = ESXI_HOST_OPTION,
     esxi_username: Optional[str] = ESXI_USERNAME_OPTION,
     esxi_password: Optional[str] = ESXI_PASSWORD_OPTION,
+    fresh_gns3_vm: bool = typer.Option(
+        False,
+        "--fresh-gns3-vm",
+        help="Replace the existing GNS3 VM with a freshly imported one from "
+        "--gns3-ova-path before deploying. The old VM is powered off and "
+        "renamed as a timestamped backup, not deleted.",
+    ),
+    gns3_ova_path: Optional[str] = typer.Option(
+        _CLI_CONFIG.get("gns3_ova_path"),
+        "--gns3-ova-path",
+        help="Local filesystem path to the GNS3 OVA. Required with --fresh-gns3-vm.",
+    ),
+    gns3_datastore: Optional[str] = typer.Option(
+        _CLI_CONFIG.get("gns3_datastore"),
+        "--gns3-datastore",
+        help="ESXi datastore to place the fresh GNS3 VM on. Required with --fresh-gns3-vm.",
+    ),
+    gns3_mgmt_network: Optional[str] = typer.Option(
+        _CLI_CONFIG.get("gns3_mgmt_network"),
+        "--gns3-mgmt-network",
+        help="ESXi port group for the fresh GNS3 VM's management NIC (must be "
+        "the OVA's first-added network adapter). Required with --fresh-gns3-vm.",
+    ),
+    gns3_trunk_network: Optional[str] = typer.Option(
+        _CLI_CONFIG.get("gns3_trunk_network"),
+        "--gns3-trunk-network",
+        help="ESXi port group for the fresh GNS3 VM's VLAN trunk NIC (must be "
+        "the OVA's second-added network adapter). Required with --fresh-gns3-vm.",
+    ),
 ) -> None:
     """
     Validate a config file, build the topology, and deploy it to GNS3/ESXi.
@@ -194,12 +223,34 @@ def deploy(
         esxi_host, esxi_username, esxi_password
     )
 
+    if fresh_gns3_vm:
+        missing = [
+            flag
+            for flag, value in (
+                ("--gns3-ova-path", gns3_ova_path),
+                ("--gns3-datastore", gns3_datastore),
+                ("--gns3-mgmt-network", gns3_mgmt_network),
+                ("--gns3-trunk-network", gns3_trunk_network),
+            )
+            if value is None
+        ]
+        if missing:
+            raise typer.BadParameter(
+                f"--fresh-gns3-vm also requires: {', '.join(missing)}"
+            )
+
     handler = ConfigFileHandler(config_path)
     handler.validate_file()
     graph_builder = GraphBuilder(handler.nodes, handler.edges)
     nodes = graph_builder.build()
 
     orchestrator = VMOrchestrator(esxi_host, esxi_username, esxi_password)
+
+    if fresh_gns3_vm:
+        orchestrator.deploy_fresh_gns3_vm(
+            gns3_ova_path, gns3_datastore, gns3_mgmt_network, gns3_trunk_network
+        )
+
     orchestrator.create_gns3_configuration_file(nodes)
     typer.echo("Deployment complete.")
 

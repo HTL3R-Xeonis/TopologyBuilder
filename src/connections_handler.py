@@ -7,6 +7,7 @@ __license__ = "GNU GPLv3"
 
 import atexit
 import ipaddress
+import time
 from abc import ABC, abstractmethod
 from typing import Optional, Any
 
@@ -209,7 +210,7 @@ class ESXiConnection(GenericConnection):
                 return address
         return None
 
-    def _get_host_system(self) -> vim.HostSystem:
+    def get_host_system(self) -> vim.HostSystem:
         """
         Returns the ESXi host system. Assumes a standalone host connection
         (one datacenter, one compute resource, one host), which is what
@@ -234,7 +235,7 @@ class ESXiConnection(GenericConnection):
         :param vswitch_name: name of the vSwitch to attach the port group to
         :return:
         """
-        network_system = self._get_host_system().configManager.networkSystem
+        network_system = self.get_host_system().configManager.networkSystem
         existing_names = {
             portgroup.spec.name for portgroup in network_system.networkInfo.portgroup
         }
@@ -257,7 +258,7 @@ class ESXiConnection(GenericConnection):
         Lists the port groups configured on the ESXi host's vSwitches.
         :return: list of {"name", "vlan_id", "vswitch"} dicts
         """
-        network_system = self._get_host_system().configManager.networkSystem
+        network_system = self.get_host_system().configManager.networkSystem
         return [
             {
                 "name": portgroup.spec.name,
@@ -266,3 +267,113 @@ class ESXiConnection(GenericConnection):
             }
             for portgroup in network_system.networkInfo.portgroup
         ]
+
+    def find_datastore(self, name: str) -> vim.Datastore:
+        """
+        Finds a datastore by name.
+        :param name: name of the datastore
+        :return: the matching Datastore
+        """
+        container_view = self.content.viewManager.CreateContainerView(
+            self.content.rootFolder, [vim.Datastore], True
+        )
+        try:
+            for datastore in container_view.view:
+                if datastore.name == name:
+                    return datastore
+        finally:
+            container_view.Destroy()
+        raise logger.alert(ValueError, f"Datastore '{name}' not found")
+
+    def find_network(self, name: str) -> vim.Network:
+        """
+        Finds a network (port group) by name.
+        :param name: name of the port group
+        :return: the matching Network
+        """
+        container_view = self.content.viewManager.CreateContainerView(
+            self.content.rootFolder, [vim.Network], True
+        )
+        try:
+            for network in container_view.view:
+                if network.name == name:
+                    return network
+        finally:
+            container_view.Destroy()
+        raise logger.alert(ValueError, f"Network/port group '{name}' not found")
+
+    @staticmethod
+    def _wait_for_task(task: vim.Task) -> None:
+        """
+        Blocks until the given vSphere task finishes, raising if it errors out.
+        :param task: the task to wait for
+        :return:
+        """
+        while task.info.state not in (
+            vim.TaskInfo.State.success,
+            vim.TaskInfo.State.error,
+        ):
+            time.sleep(0.5)
+        if task.info.state == vim.TaskInfo.State.error:
+            raise logger.alert(RuntimeError, f"vSphere task failed: {task.info.error}")
+
+    def get_vm_mac_address(self, vm: vim.VirtualMachine) -> Optional[str]:
+        """
+        Returns the MAC address of the VM's first Ethernet network adapter.
+        :param vm: the VM to inspect
+        :return: MAC address string, or None if it has no network adapter
+        """
+        for device in vm.config.hardware.device:
+            if isinstance(device, vim.vm.device.VirtualEthernetCard):
+                return device.macAddress
+        return None
+
+    def set_vm_mac_address(self, vm: vim.VirtualMachine, mac_address: str) -> None:
+        """
+        Sets the MAC address of the VM's first Ethernet network adapter to a
+        fixed, manually-assigned value.
+        :param vm: the VM to reconfigure
+        :param mac_address: MAC address to assign
+        :return:
+        """
+        for device in vm.config.hardware.device:
+            if isinstance(device, vim.vm.device.VirtualEthernetCard):
+                device.macAddress = mac_address
+                device.addressType = "manual"
+                device_spec = vim.vm.device.VirtualDeviceSpec(
+                    operation=vim.vm.device.VirtualDeviceSpec.Operation.edit,
+                    device=device,
+                )
+                config_spec = vim.vm.ConfigSpec(deviceChange=[device_spec])
+                self._wait_for_task(vm.ReconfigVM_Task(spec=config_spec))
+                return
+        raise logger.alert(
+            ValueError, f"VM '{vm.name}' has no network adapter to set a MAC on"
+        )
+
+    def power_off_vm(self, vm: vim.VirtualMachine) -> None:
+        """
+        Powers off the given VM, if it isn't already.
+        :param vm: the VM to power off
+        :return:
+        """
+        if vm.runtime.powerState != vim.VirtualMachine.PowerState.poweredOff:
+            self._wait_for_task(vm.PowerOffVM_Task())
+
+    def power_on_vm(self, vm: vim.VirtualMachine) -> None:
+        """
+        Powers on the given VM, if it isn't already.
+        :param vm: the VM to power on
+        :return:
+        """
+        if vm.runtime.powerState != vim.VirtualMachine.PowerState.poweredOn:
+            self._wait_for_task(vm.PowerOnVM_Task())
+
+    def rename_vm(self, vm: vim.VirtualMachine, new_name: str) -> None:
+        """
+        Renames the given VM.
+        :param vm: the VM to rename
+        :param new_name: new name for the VM
+        :return:
+        """
+        self._wait_for_task(vm.Rename_Task(newName=new_name))
