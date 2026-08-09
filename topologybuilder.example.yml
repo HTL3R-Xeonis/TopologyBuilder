@@ -4,6 +4,13 @@
 # The ESXi password is intentionally not supported here - use --esxi-password,
 # ESXI_PASSWORD, or the interactive prompt instead.
 
+# Default topology config file for validate/build/deploy, if none is given
+# as a command-line argument.
+config_path: ./config_file_example.yml
+
+# Default output path for `generate`.
+output: ./config_file_example.yml
+
 generator_url: http://10.20.20.172:8002
 esxi_host: 10.20.20.201
 esxi_username: root

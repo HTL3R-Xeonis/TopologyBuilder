@@ -25,9 +25,13 @@ app = typer.Typer(
     add_completion=False,
 )
 
-CONFIG_ARG = typer.Argument(..., help="Path to the YAML topology config file.")
-
 _CLI_CONFIG = load_cli_config()
+
+CONFIG_ARG = typer.Argument(
+    _CLI_CONFIG.get("config_path"),
+    help="Path to the YAML topology config file. Falls back to 'config_path' "
+    "in topologybuilder.yml if omitted.",
+)
 
 _VERBOSITY_LEVELS = [logging.WARNING, logging.INFO, logging.DEBUG]
 
@@ -75,6 +79,20 @@ def _resolve_esxi_credentials(
     return esxi_host, esxi_username, esxi_password
 
 
+def _resolve_config_path(config_path: Optional[str]) -> str:
+    """
+    Validates the topology config file path gathered from the CLI argument or
+    the config file's own 'config_path' entry.
+    :return: config_path, guaranteed non-None
+    """
+    if config_path is None:
+        raise typer.BadParameter(
+            "Missing topology config file path. Pass it as an argument, "
+            "or add 'config_path' to topologybuilder.yml."
+        )
+    return config_path
+
+
 @app.callback()
 def main(
     verbose: int = typer.Option(
@@ -105,7 +123,7 @@ def generate(
         ..., help="Natural-language description of the desired topology."
     ),
     output: str = typer.Option(
-        "./config_file_example.yml",
+        _CLI_CONFIG.get("output", "./config_file_example.yml"),
         "--output",
         "-o",
         help="Path to write the generated config file to.",
@@ -134,10 +152,11 @@ def generate(
 
 
 @app.command()
-def validate(config_path: str = CONFIG_ARG) -> None:
+def validate(config_path: Optional[str] = CONFIG_ARG) -> None:
     """
     Validate a topology config file without building or deploying anything.
     """
+    config_path = _resolve_config_path(config_path)
     handler = ConfigFileHandler(config_path)
     handler.validate_file()
     typer.echo(f"{config_path} is valid.")
@@ -145,7 +164,7 @@ def validate(config_path: str = CONFIG_ARG) -> None:
 
 @app.command()
 def build(
-    config_path: str = CONFIG_ARG,
+    config_path: Optional[str] = CONFIG_ARG,
     graph: bool = typer.Option(
         False,
         "--graph",
@@ -162,6 +181,7 @@ def build(
     """
     Validate a config file and build the in-memory topology graph, printing a summary.
     """
+    config_path = _resolve_config_path(config_path)
     handler = ConfigFileHandler(config_path)
     handler.validate_file()
     graph_builder = GraphBuilder(handler.nodes, handler.edges)
@@ -182,7 +202,7 @@ def build(
 
 @app.command()
 def deploy(
-    config_path: str = CONFIG_ARG,
+    config_path: Optional[str] = CONFIG_ARG,
     esxi_host: Optional[str] = ESXI_HOST_OPTION,
     esxi_username: Optional[str] = ESXI_USERNAME_OPTION,
     esxi_password: Optional[str] = ESXI_PASSWORD_OPTION,
@@ -219,6 +239,7 @@ def deploy(
     """
     Validate a config file, build the topology, and deploy it to GNS3/ESXi.
     """
+    config_path = _resolve_config_path(config_path)
     esxi_host, esxi_username, esxi_password = _resolve_esxi_credentials(
         esxi_host, esxi_username, esxi_password
     )
