@@ -7,6 +7,8 @@ subinterfaces src/gns3_vm_interface_setup.py sets up).
 
 __license__ = "GNU GPLv3"
 
+import re
+
 import requests
 
 from src.factories import Environment, GenericNode, normalize_template_name
@@ -207,24 +209,56 @@ class GNS3Client:
         return node
 
     @staticmethod
+    def _trailing_number(name: str) -> int | None:
+        """
+        Extracts the trailing digit run from a port name, e.g. 'gi0/2' -> 2,
+        'Ethernet2' -> 2. Returns None if the name doesn't end in digits.
+        """
+        match = re.search(r"(\d+)$", name)
+        return int(match.group(1)) if match else None
+
+    @staticmethod
     def _find_port(node: dict, interface_name: str) -> dict:
         """
-        Finds a node's port matching the given interface name, case-insensitively.
-        If the node has exactly one port, that port is used regardless of the
-        requested name - single-port node types (e.g. VPCS's 'Ethernet0') often
-        don't share the topology config's generic interface naming convention
-        (e.g. 'gi0/0'), but there's no ambiguity when there's only one port.
+        Finds a node's port matching the given interface name. Tries, in order:
+        1. exact match, case-insensitively;
+        2. if the node has exactly one port, that port regardless of name -
+           single-port node types (e.g. VPCS's 'Ethernet0') often don't share
+           the topology config's interface naming convention (e.g. 'gi0/0'),
+           but there's no ambiguity when there's only one port;
+        3. a port whose trailing number matches the requested name's trailing
+           number, if exactly one candidate matches - different GNS3 installs
+           have been observed to use different naming conventions entirely
+           (e.g. this config's 'gi0/2' vs. a template using plain 'Ethernet2'),
+           but both still encode the same port index at the end.
         """
         ports = node.get("ports", [])
         for port in ports:
             if port.get("name", "").lower() == interface_name.lower():
                 return port
+
         if len(ports) == 1:
             logger.warning(
                 f"Node '{node.get('name')}' has no port named '{interface_name}', "
                 f"using its only port '{ports[0].get('name')}' instead"
             )
             return ports[0]
+
+        requested_number = GNS3Client._trailing_number(interface_name)
+        if requested_number is not None:
+            matches = [
+                port
+                for port in ports
+                if GNS3Client._trailing_number(port.get("name", "")) == requested_number
+            ]
+            if len(matches) == 1:
+                logger.warning(
+                    f"Node '{node.get('name')}' has no port named "
+                    f"'{interface_name}', using port '{matches[0].get('name')}' "
+                    f"instead (matched by port number)"
+                )
+                return matches[0]
+
         available = [port.get("name") for port in ports]
         raise logger.alert(
             ValueError,
