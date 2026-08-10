@@ -250,15 +250,16 @@ def deploy(
         "changes/forged transmits, which GNS3's Cloud nodes need to bridge "
         "topology devices through it.",
     ),
-    gns3_trunk_interface: str = typer.Option(
-        _CLI_CONFIG.get("gns3_trunk_interface", "eth1"),
+    gns3_trunk_interface: Optional[str] = typer.Option(
+        _CLI_CONFIG.get("gns3_trunk_interface"),
         "--gns3-trunk-interface",
         help="Name of the GNS3 VM's own guest-OS network interface for its "
         "VLAN trunk NIC (not the ESXi port group - see --gns3-trunk-network "
-        "for that). Not guaranteed to be 'eth1' on every GNS3 VM build, "
-        "e.g. after --fresh-gns3-vm imports a single-NIC OVA and a second "
-        "NIC gets added on top. If wrong, the error lists the VM's actual "
-        "interfaces.",
+        "for that). Auto-detected if omitted - excludes the management "
+        "interface and known virtual interfaces, and only picks one "
+        "automatically if exactly one candidate remains. Not guaranteed to "
+        "be 'eth1' on every GNS3 VM build, e.g. after --fresh-gns3-vm "
+        "imports a single-NIC OVA and a second NIC gets added on top.",
     ),
     gns3_project: Optional[str] = typer.Option(
         _CLI_CONFIG.get("gns3_project"),

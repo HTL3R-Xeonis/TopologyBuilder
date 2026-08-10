@@ -12,6 +12,11 @@ from src.logger_adapter import get_logger
 
 logger = get_logger(__name__)
 
+# Guest-side interface name prefixes that are never a VMware vNIC, so never
+# a candidate for the trunk NIC - Docker/libvirt bridges, veth pairs, tun/tap
+# devices, and loopback.
+_VIRTUAL_INTERFACE_PREFIXES = ("lo", "docker", "virbr", "veth", "br-", "tun", "tap")
+
 
 class GNS3VMInterfaceSetup:
     """
@@ -111,6 +116,50 @@ class GNS3VMInterfaceSetup:
             f"the trunk NIC isn't named '{interface_name}' on this VM.",
         )
 
+    def _detect_trunk_interface(self) -> str:
+        """
+        Auto-detects the GNS3 VM's trunk NIC by querying its interfaces and
+        excluding the management interface (the one carrying the IP this
+        SSH connection is on) and known virtual/non-VMware interfaces
+        (loopback, Docker/libvirt bridges, veth pairs, ...). Used when no
+        --gns3-trunk-interface is given, since the name isn't guaranteed to
+        be 'eth1' across different GNS3 VM builds. Only auto-picks when
+        exactly one candidate remains - refuses to guess otherwise, same as
+        ESXiConnection.find_gns3_vm does for the VM name itself.
+        :return: the detected trunk interface name
+        """
+        _, stdout, _ = self.gns3_connection.exec_command("ip -br addr show")
+        addr_lines = [line.strip() for line in stdout.readlines() if line.strip()]
+
+        mgmt_interface = None
+        for line in addr_lines:
+            if self.gns3_connection.ip_address in line:
+                mgmt_interface = line.split()[0]
+                break
+
+        _, stdout, _ = self.gns3_connection.exec_command("ip -br link show")
+        all_interfaces = [
+            line.split()[0] for line in stdout.readlines() if line.strip()
+        ]
+
+        candidates = [
+            name
+            for name in all_interfaces
+            if name != mgmt_interface
+            and not name.lower().startswith(_VIRTUAL_INTERFACE_PREFIXES)
+        ]
+
+        if len(candidates) == 1:
+            logger.info(f"Auto-detected GNS3 VM trunk interface '{candidates[0]}'")
+            return candidates[0]
+
+        raise logger.alert(
+            ValueError,
+            f"Could not auto-detect the GNS3 VM's trunk interface "
+            f"(management interface: '{mgmt_interface}', other candidate(s): "
+            f"{candidates}). Specify --gns3-trunk-interface.",
+        )
+
     def _reset_subinterfaces_commands(self, interface: str) -> None:
         """
         Deletes the existing subinterfaces of given interface on the GNS3 VM.
@@ -140,7 +189,7 @@ class GNS3VMInterfaceSetup:
             self._apply_command(f"ip link set {esxi_vlan_name} up")
 
     def write_config_file(
-        self, nodes: dict[str, GenericNode], trunk_interface: str = "eth1"
+        self, nodes: dict[str, GenericNode], trunk_interface: str | None = None
     ) -> None:
         """
         Applies the VLAN subinterface configuration to the GNS3 VM: deletes the
@@ -149,11 +198,17 @@ class GNS3VMInterfaceSetup:
         in ./esxi_instances/.
         :param nodes: built topology of the nodes
         :param trunk_interface: name of the GNS3 VM's trunk NIC to create
-            VLAN subinterfaces on. Verified to exist before use - see
-            _verify_interface_exists.
+            VLAN subinterfaces on, or None to auto-detect it (see
+            _detect_trunk_interface) - not guaranteed to be 'eth1' across
+            different GNS3 VM builds. Verified to exist before use either
+            way (auto-detection already guarantees this; an explicitly
+            given name is checked via _verify_interface_exists).
         :return:
         """
-        self._verify_interface_exists(trunk_interface)
+        if trunk_interface is None:
+            trunk_interface = self._detect_trunk_interface()
+        else:
+            self._verify_interface_exists(trunk_interface)
 
         config_file_path = self.configuration_file_path
         config_file_path.parent.mkdir(parents=True, exist_ok=True)

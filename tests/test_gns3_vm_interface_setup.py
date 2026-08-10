@@ -114,7 +114,7 @@ def gns3_vm_interface_setup_002(
     vm.add_interface("ens160")
     nodes = {"VM1": vm}
 
-    setup.write_config_file(nodes)
+    setup.write_config_file(nodes, trunk_interface="eth1")
 
     commands = [
         call.args[0] for call in setup.gns3_connection.exec_command.call_args_list
@@ -159,3 +159,103 @@ def gns3_vm_interface_setup_003(
     # _reset_subinterfaces_commands/_create_subinterfaces_commands, which
     # never ran.
     assert setup.gns3_connection.exec_command.call_count == 2
+
+
+@allure.title("Trunk-Interface wird automatisch erkannt")
+@allure.description(
+    "Überprüft, dass _detect_trunk_interface das Management-Interface (das "
+    "die IP der SSH-Verbindung trägt) und virtuelle Interfaces ausschließt "
+    "und das einzig verbleibende Interface als Trunk-NIC erkennt"
+)
+@allure.tag("positiv-test", "gns3_vm_interface_setup")
+@allure.feature("gns3_vm_interface_setup")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_vm_interface_setup_004() -> None:
+    setup = _make_setup(
+        {
+            "ip -br addr show": (
+                0,
+                [
+                    "lo               UNKNOWN        127.0.0.1/8",
+                    "eth0             UP             10.20.20.231/24",
+                    "eth1             UP             10.20.20.240/24",
+                ],
+            ),
+            "ip -br link show": (
+                0,
+                ["lo", "eth0", "eth1", "docker0", "virbr0"],
+            ),
+        }
+    )
+    assert setup._detect_trunk_interface() == "eth1"
+
+
+@allure.title("Mehrdeutige Trunk-Interface-Erkennung wirft Fehler")
+@allure.description(
+    "Überprüft, dass _detect_trunk_interface einen ValueError wirft, statt "
+    "zu raten, wenn nach Ausschluss des Management-Interfaces und "
+    "virtueller Interfaces mehr als ein Kandidat übrig bleibt"
+)
+@allure.tag("negativ-test", "gns3_vm_interface_setup")
+@allure.feature("gns3_vm_interface_setup")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_vm_interface_setup_005() -> None:
+    setup = _make_setup(
+        {
+            "ip -br addr show": (
+                0,
+                ["eth0             UP             10.20.20.231/24"],
+            ),
+            "ip -br link show": (0, ["lo", "eth0", "eth1", "eth2"]),
+        }
+    )
+    with pytest.raises(
+        ValueError,
+        match=r"Could not auto-detect.*management interface: 'eth0'.*\['eth1', 'eth2'\]",
+    ):
+        setup._detect_trunk_interface()
+
+
+@allure.title("write_config_file nutzt die automatische Erkennung ohne Angabe")
+@allure.description(
+    "Überprüft, dass write_config_file ohne angegebenes trunk_interface "
+    "automatisch erkennt und die Subinterfaces auf dem erkannten Interface "
+    "anlegt"
+)
+@allure.tag("positiv-test", "gns3_vm_interface_setup")
+@allure.feature("gns3_vm_interface_setup")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_vm_interface_setup_006(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    setup = _make_setup(
+        {
+            "ip -br addr show": (
+                0,
+                [
+                    "eth0             UP             10.20.20.231/24",
+                    "ens224           UP             10.20.20.240/24",
+                ],
+            ),
+            "ip -br link show type vlan": (0, []),
+            "ip -br link show": (0, ["lo", "eth0", "ens224"]),
+            "ip link add link ens224": (0, []),
+            "ip link set": (0, []),
+        }
+    )
+
+    nf = NodeFactory()
+    vm: GenericNode = nf.create_node("Ubuntu-Server", "VM", "VM1")
+    vm.add_interface("ens160")
+    nodes = {"VM1": vm}
+
+    setup.write_config_file(nodes)
+
+    commands = [
+        call.args[0] for call in setup.gns3_connection.exec_command.call_args_list
+    ]
+    assert any(
+        f"ip link add link ens224 name {vm.interfaces['ens160'].esxi_vlan}" in c
+        for c in commands
+    )
