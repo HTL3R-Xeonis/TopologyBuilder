@@ -1,5 +1,5 @@
 """
-TopologyBuilder: #TODO beschreibung einfügen
+TopologyBuilder
 """
 
 __license__ = "GNU GPLv3"

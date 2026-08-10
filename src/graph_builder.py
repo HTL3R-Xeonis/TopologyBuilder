@@ -37,7 +37,7 @@ class GraphBuilder:
         :return:
         """
         if not self._nodes:
-            raise ValueError("No nodes created. Use first NodeFactory.build_nodes()")
+            raise ValueError("No nodes created. Call _build_nodes() first.")
         for edge in self._config_edges:
             intf_1 = self._nodes[edge[0]].add_interface(edge[1])
             intf_2 = self._nodes[edge[2]].add_interface(edge[3])

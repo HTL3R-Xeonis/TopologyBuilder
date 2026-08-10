@@ -194,7 +194,7 @@ class OVAImporter:
                 disk_stream = ova.extractfile(member)
 
                 # Pass the file-like object itself as the body, rather than
-                # our own chunking generator - requests can determine a
+                # our own chunking generator - requests CANNOT determine a
                 # generator's length, so passing one alongside an explicit
                 # Content-Length header (previously done here) makes it ALSO
                 # add 'Transfer-Encoding: chunked' on top of that
@@ -202,8 +202,8 @@ class OVAImporter:
                 # ESXi's streamVmdk endpoint doesn't dechunk it and instead
                 # reads the chunk-framing bytes as VMDK data, failing
                 # immediately. A seekable file-like object lets requests
-                # determine the real length itself and send a plain,
-                # non-chunked body - still streamed internally, never
+                # determine the real length itself (via seek/tell) and send a
+                # plain, non-chunked body - still streamed internally, never
                 # buffered fully in memory.
                 headers = {"Content-Type": "application/x-vnd.vmware-streamVmdk"}
                 method = session.put if file_item.create else session.post

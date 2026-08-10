@@ -1,5 +1,13 @@
 """
-Module which contains multiple classes for creating graph elements
+Factories and graph primitives used to build topology graphs.
+
+This module provides:
+
+- name sanitization helpers for Linux interface names,
+- environment/template lookup utilities,
+- VLAN assignment logic for ESXi-hosted interfaces,
+- factory helpers for creating nodes and edges,
+- lightweight graph element classes (`GenericNode`, `Interface`, `Edge`).
 """
 
 from __future__ import annotations
