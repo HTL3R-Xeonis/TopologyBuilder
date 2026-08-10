@@ -64,10 +64,14 @@ class OVAImporter:
             mounted locally works fine here, it's just a path)
         :param vm_name: name to give the new VM
         :param datastore_name: datastore to place the VM's files on
-        :param network_names: ESXi port group for each network the OVF declares,
-            in the same order the source VM's adapters were added (e.g. the
-            first-added adapter's network first). Must have exactly as many
-            entries as the OVF declares networks.
+        :param network_names: ESXi port group for each network adapter the
+            new VM should end up with, in the same order the source VM's
+            adapters were added (e.g. the first-added adapter's network
+            first). Must have at least as many entries as the OVF declares
+            networks - the first len(parse_result.network) are mapped
+            positionally during import; any extra entries are added as new
+            network adapters afterward (e.g. a single-NIC OVA that still
+            needs a second, trunk NIC added on top).
         :return: the created VM
         """
         content = self.esxi_connection.content
@@ -83,20 +87,23 @@ class OVAImporter:
             parse_result = content.ovfManager.ParseDescriptor(
                 ovf_descriptor, vim.OvfManager.ParseDescriptorParams()
             )
-            if len(parse_result.network) != len(network_names):
+            if len(parse_result.network) > len(network_names):
                 raise logger.alert(
                     ValueError,
                     f"OVF declares {len(parse_result.network)} network(s) "
-                    f"({[net.name for net in parse_result.network]}) but "
+                    f"({[net.name for net in parse_result.network]}) but only "
                     f"{len(network_names)} ESXi network(s) were given: {network_names}",
                 )
+            declared_network_names = network_names[: len(parse_result.network)]
+            extra_network_names = network_names[len(parse_result.network) :]
+
             network_mappings = [
                 vim.OvfManager.NetworkMapping(
                     name=declared_network.name,
                     network=self.esxi_connection.find_network(network_name),
                 )
                 for declared_network, network_name in zip(
-                    parse_result.network, network_names
+                    parse_result.network, declared_network_names
                 )
             ]
 
@@ -128,6 +135,9 @@ class OVAImporter:
             vm = lease.info.entity
             self._upload_disks(ova, import_spec_result.fileItem, lease)
             lease.HttpNfcLeaseComplete()
+
+        if extra_network_names:
+            self.esxi_connection.add_vm_network_adapters(vm, extra_network_names)
 
         logger.info(f"Imported VM '{vm_name}'")
         return vm

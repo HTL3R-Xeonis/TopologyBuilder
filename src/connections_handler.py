@@ -530,6 +530,38 @@ class ESXiConnection(GenericConnection):
             ValueError, f"VM '{vm.name}' has no network adapter to set a MAC on"
         )
 
+    def add_vm_network_adapters(
+        self, vm: vim.VirtualMachine, network_names: list[str]
+    ) -> None:
+        """
+        Adds a new network adapter to the VM for each given port group, in
+        order. Used when an OVA declares fewer networks than the VM
+        ultimately needs, e.g. a single-NIC GNS3 OVA that still needs a
+        second, trunk NIC added on top after import.
+        :param vm: the VM to add adapters to
+        :param network_names: ESXi port group name for each adapter to add, in order
+        :return:
+        """
+        device_changes = []
+        for network_name in network_names:
+            device = vim.vm.device.VirtualVmxnet3()
+            device.backing = vim.vm.device.VirtualEthernetCard.NetworkBackingInfo(
+                network=self.find_network(network_name), deviceName=network_name
+            )
+            device.connectable = vim.vm.device.VirtualDevice.ConnectInfo(
+                startConnected=True, connected=True, allowGuestControl=True
+            )
+            device_changes.append(
+                vim.vm.device.VirtualDeviceSpec(
+                    operation=vim.vm.device.VirtualDeviceSpec.Operation.add,
+                    device=device,
+                )
+            )
+
+        config_spec = vim.vm.ConfigSpec(deviceChange=device_changes)
+        self._wait_for_task(vm.ReconfigVM_Task(spec=config_spec))
+        logger.info(f"Added network adapter(s) to VM '{vm.name}' for: {network_names}")
+
     def power_off_vm(self, vm: vim.VirtualMachine) -> None:
         """
         Powers off the given VM, if it isn't already.
