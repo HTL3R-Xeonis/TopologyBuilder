@@ -29,14 +29,26 @@ class GNS3Client:
         """
         self.base_url = base_url.rstrip("/")
 
+    def _raise_for_status(self, response: requests.Response) -> None:
+        """
+        Like Response.raise_for_status, but includes the response body in the
+        raised error - the GNS3 API returns a JSON 'message' field explaining
+        exactly what was wrong with the request, which a bare status code loses.
+        """
+        if not response.ok:
+            raise logger.alert(
+                requests.HTTPError,
+                f"{response.status_code} error for {response.url}: {response.text}",
+            )
+
     def _get(self, path: str):
         response = requests.get(f"{self.base_url}{path}")
-        response.raise_for_status()
+        self._raise_for_status(response)
         return response.json()
 
     def _post(self, path: str, json: dict | None = None):
         response = requests.post(f"{self.base_url}{path}", json=json)
-        response.raise_for_status()
+        self._raise_for_status(response)
         return response.json() if response.content else {}
 
     def get_templates(self) -> list[dict]:
@@ -46,15 +58,15 @@ class GNS3Client:
         """
         return self._get("/v2/templates")
 
-    def find_template_id(self, image: str) -> str:
+    def find_template(self, image: str) -> dict:
         """
-        Resolves a node's configured image to a GNS3 template ID by exact name match.
+        Resolves a node's configured image to a GNS3 template by exact name match.
         :param image: the image name as used in the topology config file
-        :return: matching template_id
+        :return: the matching template dict, including 'template_id' and 'template_type'
         """
         for template in self.get_templates():
             if template.get("name") == image:
-                return template["template_id"]
+                return template
         raise logger.alert(ValueError, f"No GNS3 template found for image '{image}'")
 
     def get_or_create_project(self, name: str) -> dict:
@@ -75,15 +87,23 @@ class GNS3Client:
         return self._post("/v2/projects", json={"name": name})
 
     def create_node(
-        self, project_id: str, template_id: str, name: str, x: int, y: int
+        self, project_id: str, template: dict, name: str, x: int, y: int
     ) -> dict:
         """
         Creates a node from a template at the given scene position.
+        :param template: template dict from find_template/get_templates
         :return: the created node dict, including 'node_id' and 'ports'
         """
         node = self._post(
             f"/v2/projects/{project_id}/nodes",
-            json={"name": name, "template_id": template_id, "x": x, "y": y},
+            json={
+                "name": name,
+                "template_id": template["template_id"],
+                "node_type": template["template_type"],
+                "compute_id": template.get("compute_id") or "local",
+                "x": x,
+                "y": y,
+            },
         )
         logger.info(f"Created GNS3 node '{name}' ({node['node_id']})")
         return node
@@ -206,10 +226,10 @@ def deploy_topology(
     for name, node in nodes.items():
         if node.env != Environment.ON_GNS3:
             continue
-        template_id = client.find_template_id(node.image)
+        template = client.find_template(node.image)
         x, y = positions[name]
         gns3_nodes[name] = client.create_node(
-            project_id, template_id, name, int(x) - 1000, int(y) - 500
+            project_id, template, name, int(x) - 1000, int(y) - 500
         )
 
     seen_edges = set()
