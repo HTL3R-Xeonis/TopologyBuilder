@@ -115,14 +115,18 @@ class GNS3Client:
         # Some template types (e.g. VPCS) already nest their device-specific
         # settings under their own 'properties' key; others (e.g. QEMU) have
         # them flat at the template's top level. Use the former as-is; for
-        # the latter, collect everything that isn't template metadata.
+        # the latter, collect everything that isn't template metadata. Empty
+        # strings mean "not configured" in GNS3's template convention, but
+        # some node schemas reject an empty string outright for fields like
+        # mac_address/bios_image - omit them so the server applies its own
+        # default instead of sending a value it'll refuse.
         if "properties" in template:
             properties = template["properties"]
         else:
             properties = {
                 key: value
                 for key, value in template.items()
-                if key not in _TEMPLATE_META_FIELDS
+                if key not in _TEMPLATE_META_FIELDS and value != ""
             }
         node = self._post(
             f"/v2/projects/{project_id}/nodes",
