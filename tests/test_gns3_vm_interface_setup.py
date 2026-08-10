@@ -216,6 +216,36 @@ def gns3_vm_interface_setup_005() -> None:
         setup._detect_trunk_interface()
 
 
+@allure.title("Zurückgelassene VLAN-Subinterfaces stören die Trunk-Erkennung nicht")
+@allure.description(
+    "Regressionstest für einen live beobachteten Fehler: nach einem "
+    "vorherigen, mittendrin abgebrochenen Lauf blieben VLAN-Subinterfaces "
+    "wie 'VM1_gi0-0@eth1' auf der GNS3 VM zurück. Überprüft, dass "
+    "_detect_trunk_interface solche 'name@parent'-Einträge ausschließt, "
+    "statt sie fälschlich als eigene Kandidaten zu werten und die "
+    "automatische Erkennung an einer Mehrdeutigkeit scheitern zu lassen, "
+    "die nur aus liegengebliebenem Zustand entsteht - nicht aus einer "
+    "echten zweiten physischen/virtuellen NIC"
+)
+@allure.tag("negativ-test", "gns3_vm_interface_setup")
+@allure.feature("gns3_vm_interface_setup")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_vm_interface_setup_017() -> None:
+    setup = _make_setup(
+        {
+            "ip -br addr show": (
+                0,
+                ["eth0             UP             10.20.20.231/24"],
+            ),
+            "ip -br link show": (
+                0,
+                ["lo", "eth0", "eth1", "VM1_gi0-0@eth1", "VM1_gi0-1@eth1"],
+            ),
+        }
+    )
+    assert setup._detect_trunk_interface() == "eth1"
+
+
 @allure.title("_get_subinterfaces liefert bereinigte Liste zurück")
 @allure.description(
     "Überprüft, dass _get_subinterfaces die Ausgabe des ip-Befehls in eine "

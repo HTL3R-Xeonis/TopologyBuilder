@@ -141,6 +141,16 @@ class GNS3VMInterfaceSetup:
             name
             for name in all_interfaces
             if name != mgmt_interface
+            # 'ip -br link show' names a VLAN subinterface as 'name@parent'
+            # (e.g. a leftover 'VM1_gi0-0@eth1' from an earlier, possibly
+            # interrupted, run of _create_subinterfaces_commands) - a trunk
+            # NIC is never itself a VLAN subinterface of something else, so
+            # these are never valid candidates regardless of how many are
+            # currently sitting on the GNS3 VM. Excluding them keeps
+            # auto-detection working even when a previous run left some
+            # behind - the next _reset_subinterfaces_commands call (right
+            # after this one returns) cleans them up anyway.
+            and "@" not in name
             and not name.lower().startswith(_VIRTUAL_INTERFACE_PREFIXES)
         ]
 
