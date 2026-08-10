@@ -15,6 +15,10 @@ generator_url: http://10.20.20.172:8002
 esxi_host: 10.20.20.201
 esxi_username: root
 
+# Name of the GNS3 project `deploy` creates/reuses. Defaults to the config
+# file's name if omitted.
+gns3_project: TopologyBuilder
+
 # Only needed with `deploy --fresh-gns3-vm`:
 gns3_ova_path: /mnt/nfs-share/gns3.ova
 gns3_datastore: datastore1

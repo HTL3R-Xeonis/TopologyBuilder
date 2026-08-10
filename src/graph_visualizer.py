@@ -147,6 +147,21 @@ def _rescale(
     }
 
 
+def compute_node_positions(
+    nodes: dict[str, GenericNode], width: float = 2000.0, height: float = 1000.0
+) -> dict[str, tuple[float, float]]:
+    """
+    Computes a force-directed 2D layout for the given topology - useful for
+    placing nodes on any canvas, e.g. a GNS3 project's scene.
+    :param nodes: built topology of nodes, as returned by GraphBuilder.build()
+    :param width: canvas width
+    :param height: canvas height
+    :return: map of node names to (x, y) positions within [0, width] x [0, height]
+    """
+    adjacency = _build_adjacency(nodes)
+    return _layout(adjacency, width, height)
+
+
 def _draw_line(grid: list[list[str]], x0: int, y0: int, x1: int, y1: int) -> None:
     """
     Draws a line of '.' characters between two grid cells, in place, using

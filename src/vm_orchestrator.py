@@ -9,6 +9,7 @@ import time
 from datetime import datetime
 
 from src.connections_handler import SSHConnection, ESXiConnection
+from src.gns3_client import deploy_topology
 from src.logger_adapter import get_logger
 from src.gns3_vm_interface_setup import GNS3VMInterfaceSetup
 from src.ova_importer import OVAImporter
@@ -105,6 +106,22 @@ class VMOrchestrator:
             f"'{vm_name}' VM did not report an IP address within {ip_wait_timeout_seconds}s",
         )
 
+    def _get_gns3_vm_ip(self, vm_name: str = "GNS3") -> str:
+        """
+        Looks up the GNS3 VM's current IP address.
+        :param vm_name: name of the GNS3 VM
+        :return: its IP address
+        """
+        logger.debug(f"Looking up IP address of '{vm_name}' VM")
+        gns3_ip_address = self.esxi_connection.get_vm_ip_address(vm_name)
+        if gns3_ip_address is None:
+            raise logger.alert(
+                ConnectionError,
+                f"Cannot connect to '{vm_name}' VM. No IP address or VM was found.",
+            )
+        logger.info(f"'{vm_name}' VM found at {gns3_ip_address}")
+        return gns3_ip_address
+
     def create_gns3_configuration_file(self, nodes: dict[str, GenericNode]) -> None:
         """
         Ensures the ESXi vSwitch has a port group for every ESXi-hosted
@@ -119,16 +136,25 @@ class VMOrchestrator:
             self.esxi_connection.ensure_port_group(esxi_vlan_name, vlan_id)
         logger.info(f"Ensured {len(vlan_assignments)} ESXi port group(s)")
 
-        logger.debug("Looking up IP address of GNS3 VM")
-        gns3_ip_address = self.esxi_connection.get_vm_ip_address("GNS3")
-        if gns3_ip_address is None:
-            raise logger.alert(
-                ConnectionError,
-                "Cannot connect to GNS3 VM. No IP address or VM was found.",
-            )
-        logger.info(f"GNS3 VM found at {gns3_ip_address}")
+        gns3_ip_address = self._get_gns3_vm_ip()
 
         gns3_connection = SSHConnection(gns3_ip_address, "gns3", "gns3")
         gns3_settings_setter = GNS3VMInterfaceSetup(gns3_connection)
         gns3_settings_setter.write_config_file(nodes)
         logger.info(f"Wrote GNS3 configuration for {len(nodes)} node(s)")
+
+    def deploy_gns3_topology(
+        self, nodes: dict[str, GenericNode], project_name: str
+    ) -> None:
+        """
+        Builds the topology's actual nodes and links inside a GNS3 project,
+        via the GNS3 v2 controller API. ESXi-hosted nodes get bridged in via
+        Cloud nodes bound to the VLAN subinterfaces create_gns3_configuration_file
+        sets up - call that first so the subinterfaces already exist.
+        :param nodes: built topology of the nodes
+        :param project_name: name of the GNS3 project to create or reuse
+        :return:
+        @TODO create pytest
+        """
+        gns3_ip_address = self._get_gns3_vm_ip()
+        deploy_topology(f"http://{gns3_ip_address}", project_name, nodes)

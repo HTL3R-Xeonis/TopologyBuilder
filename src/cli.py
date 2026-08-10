@@ -16,7 +16,11 @@ from src.connections_handler import ESXiConnection
 from src.graph_builder import GraphBuilder
 from src.graph_visualizer import print_connection_tree, render_graph
 from src.logger_adapter import set_console_level
-from src.topology_generator_client import DEFAULT_BASE_URL, generate_topology
+from src.topology_generator_client import (
+    DEFAULT_BASE_URL,
+    DEFAULT_TIMEOUT_SECONDS,
+    generate_topology,
+)
 from src.vm_orchestrator import VMOrchestrator
 
 app = typer.Typer(
@@ -133,12 +137,18 @@ def generate(
         envvar="TOPOLOGY_GENERATOR_URL",
         help="Base URL of the Topology Generator API.",
     ),
+    timeout: int = typer.Option(
+        _CLI_CONFIG.get("generator_timeout", DEFAULT_TIMEOUT_SECONDS),
+        "--timeout",
+        help="Seconds to wait for a response. Should exceed the server's own "
+        "request_timeout * max_retries.",
+    ),
 ) -> None:
     """
     Generate a topology config file from a natural-language prompt via the
     Topology Generator API.
     """
-    result = generate_topology(prompt, generator_url)
+    result = generate_topology(prompt, generator_url, timeout)
 
     for warning in result.get("warnings", []):
         typer.echo(f"Warning: {warning}", err=True)
@@ -235,6 +245,12 @@ def deploy(
         help="ESXi port group for the fresh GNS3 VM's VLAN trunk NIC (must be "
         "the OVA's second-added network adapter). Required with --fresh-gns3-vm.",
     ),
+    gns3_project: Optional[str] = typer.Option(
+        _CLI_CONFIG.get("gns3_project"),
+        "--gns3-project",
+        help="Name of the GNS3 project to create or reuse. Defaults to the "
+        "config file's name.",
+    ),
 ) -> None:
     """
     Validate a config file, build the topology, and deploy it to GNS3/ESXi.
@@ -273,6 +289,7 @@ def deploy(
         )
 
     orchestrator.create_gns3_configuration_file(nodes)
+    orchestrator.deploy_gns3_topology(nodes, gns3_project or Path(config_path).stem)
     typer.echo("Deployment complete.")
 
 
