@@ -11,6 +11,7 @@ import tarfile
 import time
 
 import requests
+import urllib3
 from pyVmomi import vim
 from requests.adapters import HTTPAdapter
 
@@ -20,6 +21,13 @@ from src.logger_adapter import get_logger
 logger = get_logger(__name__)
 
 _LEASE_POLL_INTERVAL_SECONDS = 1
+
+# ESXi hosts use self-signed certs, so VMDK uploads deliberately skip cert
+# verification (verify=False in _upload_disks) - same choice the pyVmomi
+# connection in connections_handler.py already makes via its own SSLContext.
+# Without this, urllib3 warns on every single upload request about a choice
+# that was made on purpose, not overlooked.
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class _EsxiUploadAdapter(HTTPAdapter):
