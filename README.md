@@ -155,6 +155,7 @@ same port group.
 | `topologybuilder generate <prompt>` | Generate a topology config file from a natural-language prompt via the Topology Generator API. |
 | `topologybuilder deploy <config> --esxi-host ... --esxi-username ...` | Validate, build, and deploy the topology to GNS3/ESXi. |
 | `topologybuilder portgroups --esxi-host ... --esxi-username ...` | List the port groups configured on the ESXi host's vSwitches. |
+| `topologybuilder logs [--lines N]` | Show the last `N` (default 50) lines of the log file. |
 
 Every command accepts `-v`/`-vv` for more verbose console logging, or `-q` to
 suppress everything but errors (the log file at `logs/log.txt` always records

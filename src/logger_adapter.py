@@ -38,6 +38,17 @@ class LoggerAdapter(logging.Logger):
         return error(message)
 
 
+def get_log_file_path() -> Path:
+    """
+    Resolves the path the package logger writes to - honors the
+    TOPOLOGYBUILDER_LOG_FILE env var the same way _configure_package_logger
+    does, so callers that need the log file itself (e.g. the CLI's `logs`
+    command) stay in sync with wherever logging actually ended up writing.
+    :return: the log file path.
+    """
+    return Path(os.getenv("TOPOLOGYBUILDER_LOG_FILE", str(_DEFAULT_LOG_FILE)))
+
+
 def _configure_package_logger() -> logging.Logger:
     """
     Sets up the package-wide 'topologybuilder' logger with a rotating file handler and a
@@ -56,7 +67,7 @@ def _configure_package_logger() -> logging.Logger:
         "%(asctime)s - %(levelname)-8s - %(name)s :: %(message)s"
     )
 
-    log_file = Path(os.getenv("TOPOLOGYBUILDER_LOG_FILE", str(_DEFAULT_LOG_FILE)))
+    log_file = get_log_file_path()
     log_file.parent.mkdir(parents=True, exist_ok=True)
     file_handler = RotatingFileHandler(
         log_file, maxBytes=_MAX_BYTES, backupCount=_BACKUP_COUNT, encoding="utf-8"

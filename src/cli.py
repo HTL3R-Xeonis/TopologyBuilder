@@ -16,7 +16,7 @@ from src.connections_handler import ESXiConnection
 from src.factories import Environment
 from src.graph_builder import GraphBuilder
 from src.graph_visualizer import print_connection_tree, render_graph
-from src.logger_adapter import set_console_level
+from src.logger_adapter import get_log_file_path, set_console_level
 from src.topology_generator_client import (
     DEFAULT_BASE_URL,
     DEFAULT_TIMEOUT_SECONDS,
@@ -369,6 +369,31 @@ def portgroups(
         typer.echo(
             f"{portgroup['name']} (VLAN {portgroup['vlan_id']}) on {portgroup['vswitch']}"
         )
+
+
+@app.command()
+def logs(
+    lines: int = typer.Option(
+        50,
+        "--lines",
+        "-n",
+        min=1,
+        help="Number of most recent log lines to show.",
+    ),
+) -> None:
+    """
+    Show the most recent entries from the log file. The log file always
+    records DEBUG and above regardless of console verbosity (-v/-vv/-q).
+    """
+    log_file_path = get_log_file_path()
+    if not log_file_path.exists():
+        typer.echo(f"No log file found at {log_file_path}.", err=True)
+        raise typer.Exit(code=1)
+
+    with open(log_file_path, "r") as file:
+        recent_lines = file.readlines()[-lines:]
+    for line in recent_lines:
+        typer.echo(line, nl=False)
 
 
 if __name__ == "__main__":

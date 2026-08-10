@@ -514,3 +514,77 @@ def cli_021() -> None:
 
     assert result.exit_code == 0
     assert "PC4_gi0-0 (VLAN 2) on vSwitch0" in result.output
+
+
+# --- logs command -----------------------------------------------------------
+
+
+@allure.title("logs-Befehl zeigt die letzten N Zeilen der Log-Datei")
+@allure.description(
+    "Überprüft, dass der logs-Befehl nur die letzten --lines Zeilen der "
+    "Log-Datei ausgibt, nicht die gesamte Datei"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.CRITICAL)
+def cli_022(tmp_path) -> None:
+    log_file = tmp_path / "log.txt"
+    log_file.write_text("".join(f"line {i}\n" for i in range(1, 11)))
+
+    with patch("src.cli.get_log_file_path", return_value=log_file):
+        result = runner.invoke(app, ["logs", "--lines", "3"])
+
+    assert result.exit_code == 0
+    assert result.output == "line 8\nline 9\nline 10\n"
+
+
+@allure.title("logs-Befehl zeigt die ganze Datei, wenn sie kürzer als --lines ist")
+@allure.description(
+    "Überprüft, dass der logs-Befehl die komplette Datei ausgibt, ohne "
+    "Fehler, wenn sie weniger Zeilen als angefordert enthält"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.NORMAL)
+def cli_023(tmp_path) -> None:
+    log_file = tmp_path / "log.txt"
+    log_file.write_text("line 1\nline 2\n")
+
+    with patch("src.cli.get_log_file_path", return_value=log_file):
+        result = runner.invoke(app, ["logs", "--lines", "50"])
+
+    assert result.exit_code == 0
+    assert result.output == "line 1\nline 2\n"
+
+
+@allure.title("logs-Befehl meldet einen Fehler, wenn die Log-Datei fehlt")
+@allure.description(
+    "Überprüft, dass der logs-Befehl mit Exit-Code 1 und einer klaren "
+    "Fehlermeldung abbricht, wenn die Log-Datei (noch) nicht existiert"
+)
+@allure.tag("negativ-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.NORMAL)
+def cli_024(tmp_path) -> None:
+    missing_path = tmp_path / "does_not_exist.txt"
+
+    with patch("src.cli.get_log_file_path", return_value=missing_path):
+        result = runner.invoke(app, ["logs"])
+
+    assert result.exit_code == 1
+    assert f"No log file found at {missing_path}" in result.output
+
+
+@allure.title("logs --lines lehnt einen nicht-positiven Wert ab")
+@allure.description(
+    "Überprüft, dass der logs-Befehl --lines 0 ablehnt, statt (wegen "
+    "Pythons list[-0:]-Verhalten) versehentlich die gesamte Datei "
+    "auszugeben"
+)
+@allure.tag("negativ-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.NORMAL)
+def cli_025() -> None:
+    result = runner.invoke(app, ["logs", "--lines", "0"])
+
+    assert result.exit_code != 0
