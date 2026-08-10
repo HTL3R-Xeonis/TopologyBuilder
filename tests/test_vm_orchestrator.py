@@ -19,6 +19,10 @@ logger_adapter.LoggerAdapter.is_test_run = True
 def _make_orchestrator() -> tuple[VMOrchestrator, MagicMock]:
     with patch("src.vm_orchestrator.ESXiConnection") as esxi_cls:
         esxi_connection = esxi_cls.return_value
+        # No VM auto-detected by default, so tests that pass an explicit
+        # vm_name (or rely on the 'GNS3' fallback) aren't affected by
+        # auto-detection unless they explicitly opt into testing it.
+        esxi_connection.find_gns3_vm.return_value = None
         orchestrator = VMOrchestrator("10.20.20.201", "root", "pw")
     return orchestrator, esxi_connection
 
@@ -161,7 +165,7 @@ def vm_orchestrator_004() -> None:
         patch("src.vm_orchestrator.SSHConnection") as ssh_cls,
         patch("src.vm_orchestrator.GNS3VMInterfaceSetup") as setup_cls,
     ):
-        orchestrator.create_gns3_configuration_file(nodes)
+        orchestrator.create_gns3_configuration_file(nodes, vm_name="GNS3")
 
         setup = setup_cls.return_value
         setup.write_config_file.assert_called_once_with(nodes)
@@ -192,3 +196,68 @@ def vm_orchestrator_005() -> None:
         orchestrator.deploy_gns3_topology(nodes, "Lab", vm_name="GNS3-VM")
 
     deploy.assert_called_once_with("http://10.20.20.231", "Lab", nodes)
+
+
+@allure.title("GNS3-VM-Name wird automatisch erkannt, wenn keiner angegeben ist")
+@allure.description(
+    "Überprüft, dass _get_gns3_vm_ip ohne angegebenen VM-Namen die gefundene "
+    "GNS3-VM automatisch verwendet, statt einen Namen zu verlangen"
+)
+@allure.tag("positiv-test", "vm_orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_006() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    found_vm = MagicMock(name="GNS3-VM")
+    found_vm.name = "GNS3-VM"
+    esxi_connection.find_gns3_vm.return_value = found_vm
+    esxi_connection.get_vm_ip_address.return_value = "10.20.20.231"
+
+    ip = orchestrator._get_gns3_vm_ip(None)
+
+    esxi_connection.find_gns3_vm.assert_called_once()
+    esxi_connection.get_vm_ip_address.assert_called_once_with("GNS3-VM")
+    assert ip == "10.20.20.231"
+
+
+@allure.title("Fehler, wenn keine GNS3-VM automatisch gefunden wird")
+@allure.description(
+    "Überprüft, dass _get_gns3_vm_ip einen ValueError wirft, wenn kein "
+    "VM-Name angegeben ist und auch keine VM automatisch gefunden wird, "
+    "statt stillschweigend einen falschen Standardnamen zu verwenden"
+)
+@allure.tag("negativ-test", "vm_orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_007() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.find_gns3_vm.return_value = None
+
+    with pytest.raises(ValueError, match=r"Could not find a GNS3 VM automatically"):
+        orchestrator._get_gns3_vm_ip(None)
+
+
+@allure.title("deploy_fresh_gns3_vm fällt ohne gefundene VM auf 'GNS3' zurück")
+@allure.description(
+    "Überprüft, dass deploy_fresh_gns3_vm ohne angegebenen VM-Namen und ohne "
+    "automatisch gefundene VM auf den Standardnamen 'GNS3' zurückfällt, da "
+    "in diesem Fall noch keine VM existieren muss"
+)
+@allure.tag("positiv-test", "vm_orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.NORMAL)
+def vm_orchestrator_008() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.find_gns3_vm.return_value = None
+    esxi_connection.get_vm.return_value = None
+    esxi_connection.get_vm_ip_address.return_value = "10.20.20.221"
+
+    with patch("src.vm_orchestrator.OVAImporter") as importer_cls:
+        importer_cls.return_value.import_ova.return_value = "new-vm-handle"
+        orchestrator.deploy_fresh_gns3_vm(
+            "/tmp/gns3.ova", "datastore1", "PG-MGMT", "PG-TRUNK"
+        )
+
+    importer_cls.return_value.import_ova.assert_called_once_with(
+        "/tmp/gns3.ova", "GNS3", "datastore1", ["PG-MGMT", "PG-TRUNK"]
+    )

@@ -20,6 +20,7 @@ from src.factories import Environment, GenericNode, compute_esxi_vlan_assignment
 logger = get_logger(__name__)
 
 _IP_WAIT_POLL_INTERVAL_SECONDS = 5
+_DEFAULT_GNS3_VM_NAME = "GNS3"
 
 
 class VMOrchestrator:
@@ -41,13 +42,42 @@ class VMOrchestrator:
         self.esxi_connection = ESXiConnection(esxi_host, username, password)
         logger.info(f"Connected to ESXi host {esxi_host}")
 
+    def _resolve_gns3_vm_name(self, vm_name: str | None, require_existing: bool) -> str:
+        """
+        Resolves the GNS3 VM's name: returns it as-is if given, otherwise
+        auto-detects it by searching for the one VM on the host that looks
+        like a typical GNS3 VM (see ESXiConnection.find_gns3_vm), so common
+        setups don't need to know/pass the exact name.
+        :param vm_name: explicit GNS3 VM name, or None to auto-detect
+        :param require_existing: if True, raise when no matching VM is found
+            (used when resolving an already-running GNS3 VM); if False, fall
+            back to _DEFAULT_GNS3_VM_NAME when none is found (used when a VM
+            may not exist yet, e.g. deploy_fresh_gns3_vm on a fresh host)
+        :return: the resolved GNS3 VM name
+        """
+        if vm_name is not None:
+            return vm_name
+
+        vm = self.esxi_connection.find_gns3_vm()
+        if vm is not None:
+            logger.info(f"Auto-detected GNS3 VM '{vm.name}'")
+            return vm.name
+
+        if require_existing:
+            raise logger.alert(
+                ValueError,
+                "Could not find a GNS3 VM automatically (no VM name "
+                "contains 'gns3'). Specify --gns3-vm-name.",
+            )
+        return _DEFAULT_GNS3_VM_NAME
+
     def deploy_fresh_gns3_vm(
         self,
         ova_path: str,
         datastore_name: str,
         mgmt_network_name: str,
         trunk_network_name: str,
-        vm_name: str = "GNS3",
+        vm_name: str | None = None,
         ip_wait_timeout_seconds: int = 300,
     ) -> str:
         """
@@ -64,11 +94,14 @@ class VMOrchestrator:
             Must be the OVA's FIRST-added network adapter.
         :param trunk_network_name: ESXi port group for the new VM's VLAN trunk
             NIC. Must be the OVA's SECOND-added network adapter.
-        :param vm_name: name the new (and previous) GNS3 VM should have
+        :param vm_name: name the new (and previous) GNS3 VM should have, or
+            None to auto-detect an existing one (falls back to 'GNS3' if
+            none exists yet)
         :param ip_wait_timeout_seconds: how long to wait for the new VM to report an IP
         :return: IP address of the new GNS3 VM
         @TODO create pytest
         """
+        vm_name = self._resolve_gns3_vm_name(vm_name, require_existing=False)
         old_vm = self.esxi_connection.get_vm(vm_name)
         old_mac_address = None
         if old_vm is not None:
@@ -108,12 +141,13 @@ class VMOrchestrator:
             f"'{vm_name}' VM did not report an IP address within {ip_wait_timeout_seconds}s",
         )
 
-    def _get_gns3_vm_ip(self, vm_name: str = "GNS3") -> str:
+    def _get_gns3_vm_ip(self, vm_name: str | None = None) -> str:
         """
         Looks up the GNS3 VM's current IP address.
-        :param vm_name: name of the GNS3 VM
+        :param vm_name: name of the GNS3 VM, or None to auto-detect
         :return: its IP address
         """
+        vm_name = self._resolve_gns3_vm_name(vm_name, require_existing=True)
         logger.debug(f"Looking up IP address of '{vm_name}' VM")
         gns3_ip_address = self.esxi_connection.get_vm_ip_address(vm_name)
         if gns3_ip_address is None:
@@ -127,7 +161,7 @@ class VMOrchestrator:
     def create_gns3_configuration_file(
         self,
         nodes: dict[str, GenericNode],
-        vm_name: str = "GNS3",
+        vm_name: str | None = None,
         trunk_network_name: str | None = None,
     ) -> None:
         """
@@ -135,7 +169,7 @@ class VMOrchestrator:
         interface's VLAN, then applies the matching subinterface configuration
         to the GNS3 VM so the two sides of the bridge agree on VLAN numbering.
         :param nodes: built topology of the nodes
-        :param vm_name: name of the GNS3 VM
+        :param vm_name: name of the GNS3 VM, or None to auto-detect
         :param trunk_network_name: name of the ESXi port group carrying the
             GNS3 VM's VLAN trunk NIC (e.g. PG-GNS3-TRUNK). If given, ensures
             it accepts promiscuous mode/MAC changes/forged transmits, which
@@ -160,7 +194,10 @@ class VMOrchestrator:
         logger.info(f"Wrote GNS3 configuration for {len(nodes)} node(s)")
 
     def deploy_gns3_topology(
-        self, nodes: dict[str, GenericNode], project_name: str, vm_name: str = "GNS3"
+        self,
+        nodes: dict[str, GenericNode],
+        project_name: str,
+        vm_name: str | None = None,
     ) -> None:
         """
         Builds the topology's actual nodes and links inside a GNS3 project,
@@ -169,7 +206,7 @@ class VMOrchestrator:
         sets up - call that first so the subinterfaces already exist.
         :param nodes: built topology of the nodes
         :param project_name: name of the GNS3 project to create or reuse
-        :param vm_name: name of the GNS3 VM
+        :param vm_name: name of the GNS3 VM, or None to auto-detect
         :return:
         @TODO create pytest
         """

@@ -257,6 +257,31 @@ class ESXiConnection(GenericConnection):
 
         return None
 
+    def find_gns3_vm(self) -> Optional[ManagedObject]:
+        """
+        Searches for a VM that looks like a typical GNS3 VM, i.e. one whose
+        name contains 'gns3' (case-insensitive) - used to resolve the GNS3
+        VM automatically when no explicit name is given, since real-world
+        GNS3 VM names vary (e.g. 'GNS3', 'GNS3-VM').
+        :return: the matching VM if exactly one was found, else None
+        """
+        container_view = self.content.viewManager.CreateContainerView(
+            self.content.rootFolder, [vim.VirtualMachine], True
+        )
+        try:
+            matches = [vm for vm in container_view.view if "gns3" in vm.name.lower()]
+        finally:
+            container_view.Destroy()
+
+        if len(matches) > 1:
+            names = [vm.name for vm in matches]
+            raise logger.alert(
+                ValueError,
+                f"Multiple VMs look like a GNS3 VM: {names}. Specify "
+                f"--gns3-vm-name to disambiguate.",
+            )
+        return matches[0] if matches else None
+
     def get_vm_ip_address(self, vm_name: str) -> Optional[str]:
         """
         Returns the first IPv4 Address it finds on the VM with given name.

@@ -256,11 +256,12 @@ def deploy(
         help="Name of the GNS3 project to create or reuse. Defaults to the "
         "config file's name.",
     ),
-    gns3_vm_name: str = typer.Option(
-        _CLI_CONFIG.get("gns3_vm_name", "GNS3"),
+    gns3_vm_name: Optional[str] = typer.Option(
+        _CLI_CONFIG.get("gns3_vm_name"),
         "--gns3-vm-name",
-        help="Name of the GNS3 VM on the ESXi host, e.g. if it isn't named "
-        "exactly 'GNS3'.",
+        help="Name of the GNS3 VM on the ESXi host. Auto-detected if "
+        "omitted - matches the one VM whose name contains 'gns3' "
+        "(case-insensitive), e.g. 'GNS3' or 'GNS3-VM'.",
     ),
     esxi_datastore: Optional[str] = typer.Option(
         _CLI_CONFIG.get("esxi_datastore"),
