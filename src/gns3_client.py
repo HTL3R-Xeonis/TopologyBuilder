@@ -112,11 +112,18 @@ class GNS3Client:
         :param template: template dict from find_template/get_templates
         :return: the created node dict, including 'node_id' and 'ports'
         """
-        properties = {
-            key: value
-            for key, value in template.items()
-            if key not in _TEMPLATE_META_FIELDS
-        }
+        # Some template types (e.g. VPCS) already nest their device-specific
+        # settings under their own 'properties' key; others (e.g. QEMU) have
+        # them flat at the template's top level. Use the former as-is; for
+        # the latter, collect everything that isn't template metadata.
+        if "properties" in template:
+            properties = template["properties"]
+        else:
+            properties = {
+                key: value
+                for key, value in template.items()
+                if key not in _TEMPLATE_META_FIELDS
+            }
         node = self._post(
             f"/v2/projects/{project_id}/nodes",
             json={
