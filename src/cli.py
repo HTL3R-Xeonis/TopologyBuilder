@@ -324,6 +324,7 @@ def deploy(
             vm_name=gns3_vm_name,
         )
 
+    orchestrator.delete_stale_esxi_resources(nodes)
     orchestrator.create_gns3_configuration_file(
         nodes, vm_name=gns3_vm_name, trunk_network_name=gns3_trunk_network
     )

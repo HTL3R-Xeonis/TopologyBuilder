@@ -158,6 +158,30 @@ class VMOrchestrator:
         logger.info(f"'{vm_name}' VM found at {gns3_ip_address}")
         return gns3_ip_address
 
+    def delete_stale_esxi_resources(self, nodes: dict[str, GenericNode]) -> None:
+        """
+        Deletes VMs and port groups left over from an earlier deploy of the
+        current topology's ESXi-hosted nodes, so redeploying doesn't
+        accumulate duplicate/renamed VMs (ESXi silently imports a colliding
+        name as e.g. 'PC4_1' rather than overwriting 'PC4') or leave a port
+        group behind under the same name but a stale VLAN ID from a
+        previous topology layout. Call this before
+        create_gns3_configuration_file, so each node's port group is
+        already free (no VM using it) by the time it's recreated.
+        :param nodes: built topology of the nodes
+        :return:
+        """
+        for node in nodes.values():
+            if node.env != Environment.ON_ESXI:
+                continue
+
+            for vm in self.esxi_connection.find_vms_matching(node.name):
+                logger.info(f"Deleting stale ESXi VM '{vm.name}'")
+                self.esxi_connection.delete_vm(vm)
+
+            for interface in node.interfaces.values():
+                self.esxi_connection.delete_port_group(interface.esxi_vlan)
+
     def create_gns3_configuration_file(
         self,
         nodes: dict[str, GenericNode],

@@ -70,3 +70,83 @@ def connections_handler_002() -> None:
     conn = _make_esxi_connection(["GNS3", "GNS3-VM"])
     with pytest.raises(ValueError, match=r"Multiple VMs look like a GNS3 VM"):
         conn.find_gns3_vm()
+
+
+@allure.title("Passende VMs inklusive automatisch umbenannter Duplikate finden")
+@allure.description(
+    "Überprüft, dass find_vms_matching sowohl die exakt benannte VM als auch "
+    "von ESXi bei Namenskollisionen automatisch umbenannte Duplikate (z.B. "
+    "'PC4_1', 'PC4 (1)') findet, aber keine unverwandten VMs mit ähnlichem "
+    "Namen wie 'PC40' oder 'MyPC4'"
+)
+@allure.tag("positiv-test", "connections_handler")
+@allure.feature("connections_handler")
+@allure.severity(allure.severity_level.CRITICAL)
+def connections_handler_003() -> None:
+    conn = _make_esxi_connection(["PC4", "PC4_1", "PC4 (1)", "PC40", "MyPC4", "PC5"])
+    matches = {vm.name for vm in conn.find_vms_matching("PC4")}
+    assert matches == {"PC4", "PC4_1", "PC4 (1)"}
+
+
+@allure.title("VM wird vor dem Löschen heruntergefahren")
+@allure.description(
+    "Überprüft, dass delete_vm eine laufende VM zuerst herunterfährt und dann zerstört"
+)
+@allure.tag("positiv-test", "connections_handler")
+@allure.feature("connections_handler")
+@allure.severity(allure.severity_level.CRITICAL)
+def connections_handler_004() -> None:
+    conn = ESXiConnection.__new__(ESXiConnection)
+    vm = MagicMock()
+    vm.runtime.powerState = "poweredOn"
+    task = MagicMock()
+    task.info.state = "success"
+    vm.PowerOffVM_Task.return_value = task
+    vm.Destroy_Task.return_value = task
+
+    conn.delete_vm(vm)
+
+    vm.PowerOffVM_Task.assert_called_once()
+    vm.Destroy_Task.assert_called_once()
+
+
+@allure.title("Löschen einer nicht vorhandenen Port-Group ist ein No-Op")
+@allure.description(
+    "Überprüft, dass delete_port_group keine Löschanfrage sendet, wenn die "
+    "Port-Group nicht existiert"
+)
+@allure.tag("positiv-test", "connections_handler")
+@allure.feature("connections_handler")
+@allure.severity(allure.severity_level.NORMAL)
+def connections_handler_005() -> None:
+    conn = ESXiConnection.__new__(ESXiConnection)
+    host_system = MagicMock()
+    host_system.configManager.networkSystem.networkInfo.portgroup = []
+    conn.get_host_system = MagicMock(return_value=host_system)
+
+    conn.delete_port_group("PC4_gi0-0")
+
+    host_system.configManager.networkSystem.RemovePortGroup.assert_not_called()
+
+
+@allure.title("Vorhandene Port-Group wird gelöscht")
+@allure.description(
+    "Überprüft, dass delete_port_group eine vorhandene Port-Group über "
+    "RemovePortGroup entfernt"
+)
+@allure.tag("positiv-test", "connections_handler")
+@allure.feature("connections_handler")
+@allure.severity(allure.severity_level.CRITICAL)
+def connections_handler_006() -> None:
+    conn = ESXiConnection.__new__(ESXiConnection)
+    existing = MagicMock()
+    existing.spec.name = "PC4_gi0-0"
+    host_system = MagicMock()
+    host_system.configManager.networkSystem.networkInfo.portgroup = [existing]
+    conn.get_host_system = MagicMock(return_value=host_system)
+
+    conn.delete_port_group("PC4_gi0-0")
+
+    host_system.configManager.networkSystem.RemovePortGroup.assert_called_once_with(
+        pgName="PC4_gi0-0"
+    )

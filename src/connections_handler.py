@@ -7,6 +7,7 @@ __license__ = "GNU GPLv3"
 
 import atexit
 import ipaddress
+import re
 import tarfile
 import time
 from abc import ABC, abstractmethod
@@ -282,6 +283,25 @@ class ESXiConnection(GenericConnection):
             )
         return matches[0] if matches else None
 
+    def find_vms_matching(self, name: str) -> list[ManagedObject]:
+        """
+        Finds every VM whose name exactly matches `name`, or looks like an
+        auto-renamed duplicate of it (ESXi appends e.g. '_1' or ' (1)' when
+        an import collides with an existing VM's name). Used to clean up
+        VMs left over from an earlier deploy of a topology node before
+        redeploying it, so redeploys don't accumulate duplicates.
+        :param name: the node name to match against
+        :return: list of matching VMs
+        """
+        pattern = re.compile(rf"^{re.escape(name)}([ _]\(?\d+\)?)?$")
+        container_view = self.content.viewManager.CreateContainerView(
+            self.content.rootFolder, [vim.VirtualMachine], True
+        )
+        try:
+            return [vm for vm in container_view.view if pattern.match(vm.name)]
+        finally:
+            container_view.Destroy()
+
     def get_vm_ip_address(self, vm_name: str) -> Optional[str]:
         """
         Returns the first IPv4 Address it finds on the VM with given name.
@@ -390,6 +410,28 @@ class ESXiConnection(GenericConnection):
             f"port group '{name}'"
         )
 
+    def delete_port_group(self, name: str) -> None:
+        """
+        Deletes the named port group if it exists. Used to clear out a port
+        group left over from an earlier deploy before recreating it, so a
+        stale VLAN ID from a previous topology layout can't linger under
+        the same name - AddPortGroup/ensure_port_group only skips creation
+        if a port group with that name already exists, without checking
+        whether its VLAN ID is still correct. Requires no VM to still be
+        using the port group.
+        :param name: name of the port group to delete
+        :return:
+        """
+        network_system = self.get_host_system().configManager.networkSystem
+        existing_names = {
+            portgroup.spec.name for portgroup in network_system.networkInfo.portgroup
+        }
+        if name not in existing_names:
+            return
+
+        network_system.RemovePortGroup(pgName=name)
+        logger.info(f"Deleted stale ESXi port group '{name}'")
+
     def list_port_groups(self) -> list[dict[str, str | int]]:
         """
         Lists the port groups configured on the ESXi host's vSwitches.
@@ -496,6 +538,17 @@ class ESXiConnection(GenericConnection):
         """
         if vm.runtime.powerState != vim.VirtualMachine.PowerState.poweredOff:
             self._wait_for_task(vm.PowerOffVM_Task())
+
+    def delete_vm(self, vm: vim.VirtualMachine) -> None:
+        """
+        Powers off (if needed) and permanently deletes the given VM. Used
+        to clean up a VM left over from an earlier deploy before
+        redeploying it, so redeploys don't accumulate duplicate/renamed VMs.
+        :param vm: the VM to delete
+        :return:
+        """
+        self.power_off_vm(vm)
+        self._wait_for_task(vm.Destroy_Task())
 
     def power_on_vm(self, vm: vim.VirtualMachine) -> None:
         """

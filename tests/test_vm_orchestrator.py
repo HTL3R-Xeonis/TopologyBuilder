@@ -261,3 +261,34 @@ def vm_orchestrator_008() -> None:
     importer_cls.return_value.import_ova.assert_called_once_with(
         "/tmp/gns3.ova", "GNS3", "datastore1", ["PG-MGMT", "PG-TRUNK"]
     )
+
+
+@allure.title("Alte ESXi-VMs und Port-Groups werden vor dem Redeploy gelöscht")
+@allure.description(
+    "Überprüft, dass delete_stale_esxi_resources für jede ESXi-gehostete "
+    "Node alle passenden VMs löscht und die Port-Group jeder ihrer "
+    "Interfaces löscht, GNS3-gehostete Nodes aber ignoriert"
+)
+@allure.tag("positiv-test", "vm_orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_009() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+
+    nf = NodeFactory()
+    gns3_node = nf.create_node("VPCS", "ROUTER", "R1")
+    esxi_node: GenericNode = nf.create_node("Ubuntu-Server", "VM", "PC4")
+    esxi_node.add_interface("ens160")
+    nodes = {"R1": gns3_node, "PC4": esxi_node}
+
+    stale_vm = MagicMock()
+    stale_vm.name = "PC4_1"
+    esxi_connection.find_vms_matching.return_value = [stale_vm]
+
+    orchestrator.delete_stale_esxi_resources(nodes)
+
+    esxi_connection.find_vms_matching.assert_called_once_with("PC4")
+    esxi_connection.delete_vm.assert_called_once_with(stale_vm)
+    esxi_connection.delete_port_group.assert_called_once_with(
+        esxi_node.interfaces["ens160"].esxi_vlan
+    )
