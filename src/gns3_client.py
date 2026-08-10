@@ -153,18 +153,22 @@ class GNS3Client:
                 for key, value in template.items()
                 if key not in _TEMPLATE_META_FIELDS and value != ""
             }
-        node = self._post(
-            f"/v2/projects/{project_id}/nodes",
-            json={
-                "name": name,
-                "template_id": template["template_id"],
-                "node_type": template["template_type"],
-                "compute_id": template.get("compute_id") or "local",
-                "x": x,
-                "y": y,
-                "properties": properties,
-            },
-        )
+        body = {
+            "name": name,
+            "template_id": template["template_id"],
+            "node_type": template["template_type"],
+            "compute_id": template.get("compute_id") or "local",
+            "x": x,
+            "y": y,
+            "properties": properties,
+        }
+        # 'symbol' (the node's icon) is a top-level node field, not a device
+        # property, so it's deliberately excluded from 'properties' above -
+        # but it must still be forwarded here, or the server falls back to
+        # its own default icon for the node_type instead of the template's.
+        if template.get("symbol"):
+            body["symbol"] = template["symbol"]
+        node = self._post(f"/v2/projects/{project_id}/nodes", json=body)
         if node.get("name") != name:
             logger.warning(
                 f"Requested GNS3 node name '{name}' but server assigned "
