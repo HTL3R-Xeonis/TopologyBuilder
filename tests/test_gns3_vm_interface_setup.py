@@ -450,6 +450,57 @@ def gns3_vm_interface_setup_015(tmp_path: Path) -> None:
     )
 
 
+@allure.title(
+    "_create_subinterfaces_commands legt bei geteilter VLAN-ID nur eine Subinterface an"
+)
+@allure.description(
+    "Regressionstest für einen live beobachteten Fehler: ein direkter "
+    "ESXi-zu-ESXi-Link lässt beide Seiten dieselbe VLAN-ID teilen "
+    "(compute_esxi_vlan_assignments), aber unter zwei verschiedenen "
+    "esxi_vlan-Namen. Überprüft, dass für eine bereits vergebene VLAN-ID "
+    "keine zweite, gleich nummerierte Subinterface unter dem anderen Namen "
+    "angelegt wird - das schlägt am Kernel fehl ('VLAN device already "
+    "exists'), da eine VLAN-ID pro Parent-Interface nur einmal vergeben "
+    "werden kann, unabhängig vom gewählten Namen, und ist ohnehin "
+    "unnötig, da keine der beiden Seiten je über einen GNS3-Cloud-Node "
+    "gebrückt wird"
+)
+@allure.tag("negativ-test", "gns3_vm_interface_setup")
+@allure.feature("gns3_vm_interface_setup")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_vm_interface_setup_016(tmp_path: Path) -> None:
+    setup = _make_setup(
+        {
+            "ip link add link eth1": (0, []),
+            "ip link set": (0, []),
+        }
+    )
+    setup.configuration_file_path = tmp_path / "config.txt"
+    setup.configuration_file_path.write_text("")
+
+    nf = NodeFactory()
+    switch = nf.create_node("VPCS", "SWITCH", "SW1")
+    vm1: GenericNode = nf.create_node("Ubuntu-Server", "VM", "VM1")
+    vm2: GenericNode = nf.create_node("Rocky 9.2", "VM", "VM2")
+    NodeFactory.create_edge(vm1.add_interface("gi0/0"), switch.add_interface("gi0/0"))
+    NodeFactory.create_edge(vm1.add_interface("gi0/1"), vm2.add_interface("gi0/0"))
+    nodes = {"SW1": switch, "VM1": vm1, "VM2": vm2}
+
+    setup._create_subinterfaces_commands("eth1", nodes)
+
+    add_commands = [
+        call.args[0]
+        for call in setup.gns3_connection.exec_command.call_args_list
+        if "ip link add" in call.args[0]
+    ]
+    # One subinterface for VM1's GNS3-bridged interface (VLAN 2), one for
+    # whichever of VM1/VM2's directly-linked interfaces claimed VLAN 3 first
+    # - never two, since both would collide on the same VLAN ID.
+    assert len(add_commands) == 2
+    assert any("vlan id 2" in c for c in add_commands)
+    assert any("vlan id 3" in c for c in add_commands)
+
+
 @allure.title("write_config_file nutzt die automatische Erkennung ohne Angabe")
 @allure.description(
     "Überprüft, dass write_config_file ohne angegebenes trunk_interface "

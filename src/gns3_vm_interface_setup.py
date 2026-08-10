@@ -171,11 +171,24 @@ class GNS3VMInterfaceSetup:
         Creates and turns up the needed subinterfaces on the GNS3 VM, accordingly
         to the topology. VLAN IDs are assigned by compute_esxi_vlan_assignments,
         so they stay in sync with the matching ESXi vSwitch port groups.
+
+        A direct ESXi-to-ESXi link's two interfaces share one VLAN ID (see
+        compute_esxi_vlan_assignments) under two different esxi_vlan names -
+        only the first one seen gets an actual subinterface created here.
+        The Linux 8021q module allows only one VLAN subinterface per (parent
+        link, VLAN ID) regardless of name, so attempting a second would fail
+        with "VLAN device already exists"; it's also unnecessary, since
+        neither side of a direct ESXi-to-ESXi link is ever bridged through a
+        GNS3 Cloud node.
         :param interface_name: name of interface to which to add the subinterfaces
         :param nodes: built topology of the nodes
         :return:
         """
+        seen_vlan_ids: set[int] = set()
         for esxi_vlan_name, vlan_id in compute_esxi_vlan_assignments(nodes).items():
+            if vlan_id in seen_vlan_ids:
+                continue
+            seen_vlan_ids.add(vlan_id)
             self._apply_command(
                 f"ip link add link {interface_name} name {esxi_vlan_name} type vlan id {vlan_id}"
             )
