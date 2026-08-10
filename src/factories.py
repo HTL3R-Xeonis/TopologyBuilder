@@ -94,6 +94,13 @@ def compute_esxi_vlan_assignments(nodes: dict[str, GenericNode]) -> dict[str, in
     ESXi-hosted node in the topology. Deterministic for a given `nodes` dict,
     so independent callers (the GNS3 VM's subinterfaces, the ESXi vSwitch port
     groups) can derive the same VLAN numbering without sharing state.
+
+    An edge directly connecting two ESXi-hosted interfaces (no GNS3 device in
+    between) gets both sides assigned the SAME VLAN ID, since there's no
+    bridging device to translate between two different VLANs - the two VMs
+    only reach each other if their vNICs share a VLAN. Every other interface
+    (unconnected, or bridged to a GNS3 node via a Cloud node) keeps its own
+    unique VLAN, same as before.
     :param nodes: built topology of nodes, as returned by GraphBuilder.build()
     :return: map of Interface.esxi_vlan name to its assigned VLAN ID
     """
@@ -103,6 +110,23 @@ def compute_esxi_vlan_assignments(nodes: dict[str, GenericNode]) -> dict[str, in
         if node.env != Environment.ON_ESXI:
             continue
         for interface in node.interfaces.values():
+            if interface.esxi_vlan in assignments:
+                continue
+
+            edge = interface.edge
+            if edge is not None:
+                neighbour = (
+                    edge.incidence_2
+                    if edge.incidence_1 is interface
+                    else edge.incidence_1
+                )
+                if (
+                    neighbour.node.env == Environment.ON_ESXI
+                    and neighbour.esxi_vlan in assignments
+                ):
+                    assignments[interface.esxi_vlan] = assignments[neighbour.esxi_vlan]
+                    continue
+
             if vlan_id >= 4094:
                 raise logger.alert(
                     ValueError,
