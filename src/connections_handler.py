@@ -7,6 +7,7 @@ __license__ = "GNU GPLv3"
 
 import atexit
 import ipaddress
+import tarfile
 import time
 from abc import ABC, abstractmethod
 from typing import Optional, Any
@@ -29,6 +30,7 @@ logger = get_logger(__name__)
 _ESXI_TEMPLATE_API_BASE_URL = "http://10.20.20.171:8000"
 _GNS3_TEMPLATE_API_BASE_URL = "http://10.20.20.171:8001"
 _OVA_DOWNLOAD_CHUNK_SIZE = 8 * 1024 * 1024
+_OVA_DOWNLOAD_MAX_ATTEMPTS = 3
 
 
 class APIFunctions:
@@ -85,21 +87,54 @@ class APIFunctions:
         proxied from the Filebrowser-backed NFS share - see
         technische_dokumentation_APIs section 2.3) to dest_path. Streamed in
         chunks, since these OVAs run into multiple gigabytes.
+
+        The proxy's upstream connection to Filebrowser/NFS has been observed
+        to drop mid-transfer without that surfacing as an HTTP-level error -
+        the response still looks like a normal 200 completion, just with a
+        truncated body. Since a truncated .ova otherwise only fails much
+        later with a confusing error deep inside the OVF import, every
+        download is verified to be a structurally complete tar archive
+        before being accepted, with a few retries since this has been
+        observed to be intermittent.
         :param name: template name to search for, e.g. a topology node's image
         :param dest_path: local filesystem path to write the OVA to
         :return:
         """
-        logger.debug(f"Downloading ESXi template '{name}' to {dest_path}")
-        response = requests.get(
-            f"{_ESXI_TEMPLATE_API_BASE_URL}/api/download",
-            params={"name": name},
-            stream=True,
+        last_error: Exception | None = None
+        for attempt in range(1, _OVA_DOWNLOAD_MAX_ATTEMPTS + 1):
+            logger.debug(
+                f"Downloading ESXi template '{name}' to {dest_path} "
+                f"(attempt {attempt}/{_OVA_DOWNLOAD_MAX_ATTEMPTS})"
+            )
+            response = requests.get(
+                f"{_ESXI_TEMPLATE_API_BASE_URL}/api/download",
+                params={"name": name},
+                stream=True,
+            )
+            response.raise_for_status()
+            with open(dest_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=_OVA_DOWNLOAD_CHUNK_SIZE):
+                    f.write(chunk)
+
+            try:
+                with tarfile.open(dest_path) as archive:
+                    archive.getmembers()
+            except tarfile.TarError as error:
+                last_error = error
+                logger.warning(
+                    f"Downloaded OVA for '{name}' is incomplete or corrupt "
+                    f"({error}); retrying ({attempt}/{_OVA_DOWNLOAD_MAX_ATTEMPTS})"
+                )
+                continue
+
+            logger.info(f"Downloaded ESXi template '{name}' to {dest_path}")
+            return
+
+        raise logger.alert(
+            RuntimeError,
+            f"Failed to download a complete OVA for '{name}' after "
+            f"{_OVA_DOWNLOAD_MAX_ATTEMPTS} attempts: {last_error}",
         )
-        response.raise_for_status()
-        with open(dest_path, "wb") as f:
-            for chunk in response.iter_content(chunk_size=_OVA_DOWNLOAD_CHUNK_SIZE):
-                f.write(chunk)
-        logger.info(f"Downloaded ESXi template '{name}' to {dest_path}")
 
 
 class GenericConnection(ABC):
