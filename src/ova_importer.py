@@ -20,7 +20,6 @@ from src.logger_adapter import get_logger
 logger = get_logger(__name__)
 
 _LEASE_POLL_INTERVAL_SECONDS = 1
-_UPLOAD_CHUNK_SIZE = 4 * 1024 * 1024
 
 
 class _EsxiUploadAdapter(HTTPAdapter):
@@ -176,15 +175,24 @@ class OVAImporter:
                 member = ova.getmember(file_item.path)
                 disk_stream = ova.extractfile(member)
 
-                headers = {
-                    "Content-Type": "application/x-vnd.vmware-streamVmdk",
-                    "Content-Length": str(member.size),
-                }
+                # Pass the file-like object itself as the body, rather than
+                # our own chunking generator - requests can determine a
+                # generator's length, so passing one alongside an explicit
+                # Content-Length header (previously done here) makes it ALSO
+                # add 'Transfer-Encoding: chunked' on top of that
+                # Content-Length, producing a self-contradictory request.
+                # ESXi's streamVmdk endpoint doesn't dechunk it and instead
+                # reads the chunk-framing bytes as VMDK data, failing
+                # immediately. A seekable file-like object lets requests
+                # determine the real length itself and send a plain,
+                # non-chunked body - still streamed internally, never
+                # buffered fully in memory.
+                headers = {"Content-Type": "application/x-vnd.vmware-streamVmdk"}
                 method = session.put if file_item.create else session.post
                 logger.debug(f"Uploading {file_item.path} ({member.size} bytes)")
                 response = method(
                     upload_url,
-                    data=self._read_in_chunks(disk_stream),
+                    data=disk_stream,
                     headers=headers,
                     verify=False,
                 )
@@ -192,15 +200,3 @@ class OVAImporter:
 
                 uploaded_bytes += member.size
                 lease.HttpNfcLeaseProgress(int(uploaded_bytes / total_bytes * 100))
-
-    @staticmethod
-    def _read_in_chunks(file_obj, chunk_size: int = _UPLOAD_CHUNK_SIZE):
-        """
-        Generator yielding a file-like object's contents in fixed-size chunks,
-        so uploads don't need to buffer the whole disk image in memory.
-        """
-        while True:
-            chunk = file_obj.read(chunk_size)
-            if not chunk:
-                return
-            yield chunk
