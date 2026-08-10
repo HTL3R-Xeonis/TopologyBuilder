@@ -18,7 +18,14 @@ from src.factories import Environment
 
 logger_adapter.LoggerAdapter.is_test_run = True
 
-runner = CliRunner()
+# Typer renders BadParameter errors through Rich in a bordered panel whose
+# wrap width and color are auto-detected per environment - narrow enough
+# locally to sometimes split a multi-word substring across the wrap, and
+# CI has been observed to enable ANSI color where a local run didn't. Both
+# make substring assertions against result.output flaky across machines.
+# Pinning a wide COLUMNS and disabling color keeps every assertion on
+# rendered CLI output exact and reproducible everywhere.
+runner = CliRunner(env={"COLUMNS": "200", "NO_COLOR": "1", "TERM": "dumb"})
 
 
 # --- _resolve_esxi_credentials -----------------------------------------
