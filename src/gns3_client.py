@@ -69,6 +69,25 @@ class GNS3Client:
         self._raise_for_status(response)
         return response.json() if response.content else {}
 
+    def _delete(self, path: str) -> None:
+        response = requests.delete(f"{self.base_url}{path}")
+        self._raise_for_status(response)
+
+    def delete_all_nodes(self, project_id: str) -> None:
+        """
+        Deletes every node currently in the project (and, as a consequence,
+        every link between them), so redeploying against an already-existing
+        project starts from a clean slate instead of piling duplicate nodes
+        on top of a previous run.
+        :param project_id: the project to clear
+        :return:
+        """
+        nodes = self._get(f"/v2/projects/{project_id}/nodes")
+        for node in nodes:
+            self._delete(f"/v2/projects/{project_id}/nodes/{node['node_id']}")
+        if nodes:
+            logger.info(f"Deleted {len(nodes)} existing node(s) before redeploying")
+
     def get_templates(self) -> list[dict]:
         """
         Lists the GNS3 templates available on this server.
@@ -268,6 +287,10 @@ def deploy_topology(
     Edges where both endpoints are ESXi-hosted need no GNS3-side wiring at
     all - once Phase 3 provisions those VMs onto the matching port group,
     they reach each other directly.
+
+    Any nodes already in the project (e.g. from a previous deploy) are
+    deleted first, so redeploying the same topology converges to a clean,
+    correct state instead of accumulating duplicates.
     :param base_url: base URL of the GNS3 VM, e.g. http://10.20.20.231
     :param project_name: name of the GNS3 project to create or reuse
     :param nodes: built topology of nodes, as returned by GraphBuilder.build()
@@ -275,6 +298,7 @@ def deploy_topology(
     client = GNS3Client(base_url)
     project = client.get_or_create_project(project_name)
     project_id = project["project_id"]
+    client.delete_all_nodes(project_id)
 
     positions = compute_node_positions(nodes)
 
