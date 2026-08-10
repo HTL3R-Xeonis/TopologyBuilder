@@ -48,3 +48,10 @@ esxi_datastore: datastore1
 # this at a larger volume (e.g. the same NFS mount used for gns3_ova_path)
 # if you hit "No space left on device".
 esxi_ova_cache_dir: /mnt/nfs-share
+
+# Base URLs of the ESXi/NFS template-listing+OVA-download service and the
+# GNS3 template-listing service (see src/connections_handler.py). Only
+# needed if these live somewhere other than this project's own internal
+# network default - most setups won't need to set these at all.
+# esxi_template_api_url: http://10.20.20.171:8000
+# gns3_template_api_url: http://10.20.20.171:8001

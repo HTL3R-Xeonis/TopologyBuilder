@@ -12,7 +12,15 @@ import pytest
 from pyVmomi import vim
 
 from src import logger_adapter
-from src.connections_handler import ESXiConnection, GNS3Connection, SSHConnection
+from src import connections_handler
+from src.connections_handler import (
+    APIFunctions,
+    ESXiConnection,
+    GNS3Connection,
+    SSHConnection,
+    set_esxi_template_api_url,
+    set_gns3_template_api_url,
+)
 
 logger_adapter.LoggerAdapter.is_test_run = True
 
@@ -341,3 +349,82 @@ def connections_handler_008() -> None:
             match=r"Failed to connect to ESXi host 10\.20\.20\.202 as 'root'",
         ):
             ESXiConnection("10.20.20.202", "root", "wrong-password")
+
+
+@allure.title("set_esxi_template_api_url überschreibt die ESXi-Template-API-URL")
+@allure.description(
+    "Überprüft, dass set_esxi_template_api_url den module-level Default für "
+    "die ESXi/NFS-Template-API-Basis-URL ersetzt"
+)
+@allure.tag("positiv-test", "connections_handler")
+@allure.feature("connections_handler")
+@allure.severity(allure.severity_level.CRITICAL)
+def connections_handler_017() -> None:
+    original = connections_handler._ESXI_TEMPLATE_API_BASE_URL
+    try:
+        set_esxi_template_api_url("http://esxi-templates.example:9000")
+        assert (
+            connections_handler._ESXI_TEMPLATE_API_BASE_URL
+            == "http://esxi-templates.example:9000"
+        )
+    finally:
+        set_esxi_template_api_url(original)
+
+
+@allure.title("set_gns3_template_api_url überschreibt die GNS3-Template-API-URL")
+@allure.description(
+    "Überprüft, dass set_gns3_template_api_url den module-level Default für "
+    "die GNS3-Template-API-Basis-URL ersetzt"
+)
+@allure.tag("positiv-test", "connections_handler")
+@allure.feature("connections_handler")
+@allure.severity(allure.severity_level.CRITICAL)
+def connections_handler_018() -> None:
+    original = connections_handler._GNS3_TEMPLATE_API_BASE_URL
+    try:
+        set_gns3_template_api_url("http://gns3-templates.example:9001")
+        assert (
+            connections_handler._GNS3_TEMPLATE_API_BASE_URL
+            == "http://gns3-templates.example:9001"
+        )
+    finally:
+        set_gns3_template_api_url(original)
+
+
+@allure.title("download_esxi_template nutzt die überschriebene ESXi-Template-API-URL")
+@allure.description(
+    "Überprüft end-to-end, dass download_esxi_template tatsächlich die per "
+    "set_esxi_template_api_url gesetzte URL für den Download-Request "
+    "verwendet, nicht den ursprünglichen Default - da jede APIFunctions-"
+    "Methode den module-level Global bei jedem Aufruf frisch liest, statt "
+    "ihn nur einmal beim Import als Parameter-Default zu binden"
+)
+@allure.tag("positiv-test", "connections_handler")
+@allure.feature("connections_handler")
+@allure.severity(allure.severity_level.CRITICAL)
+def connections_handler_019(tmp_path) -> None:
+    original = connections_handler._ESXI_TEMPLATE_API_BASE_URL
+    try:
+        set_esxi_template_api_url("http://esxi-templates.example:9000")
+        dest_path = tmp_path / "template.ova"
+
+        response = MagicMock()
+        response.raise_for_status.return_value = None
+        response.iter_content.return_value = [b"fake-ova-bytes"]
+
+        with (
+            patch(
+                "src.connections_handler.requests.get", return_value=response
+            ) as mock_get,
+            patch("src.connections_handler.tarfile.open") as mock_tar_open,
+        ):
+            mock_tar_open.return_value.__enter__.return_value.getmembers.return_value = []
+            APIFunctions.download_esxi_template("Ubuntu-Server", str(dest_path))
+
+        mock_get.assert_called_once_with(
+            "http://esxi-templates.example:9000/api/download",
+            params={"name": "Ubuntu-Server"},
+            stream=True,
+        )
+    finally:
+        set_esxi_template_api_url(original)

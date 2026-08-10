@@ -129,9 +129,24 @@ def cli_005() -> None:
 @allure.severity(allure.severity_level.CRITICAL)
 def cli_006() -> None:
     with patch("src.cli.set_console_level") as mock_set_level:
-        main(verbose=0, quiet=False)
-        main(verbose=1, quiet=False)
-        main(verbose=2, quiet=False)
+        main(
+            verbose=0,
+            quiet=False,
+            esxi_template_api_url=None,
+            gns3_template_api_url=None,
+        )
+        main(
+            verbose=1,
+            quiet=False,
+            esxi_template_api_url=None,
+            gns3_template_api_url=None,
+        )
+        main(
+            verbose=2,
+            quiet=False,
+            esxi_template_api_url=None,
+            gns3_template_api_url=None,
+        )
 
     assert mock_set_level.call_args_list == [
         ((logging.WARNING,),),
@@ -151,7 +166,12 @@ def cli_006() -> None:
 @allure.severity(allure.severity_level.NORMAL)
 def cli_007() -> None:
     with patch("src.cli.set_console_level") as mock_set_level:
-        main(verbose=10, quiet=False)
+        main(
+            verbose=10,
+            quiet=False,
+            esxi_template_api_url=None,
+            gns3_template_api_url=None,
+        )
 
     mock_set_level.assert_called_once_with(logging.DEBUG)
 
@@ -166,7 +186,12 @@ def cli_007() -> None:
 @allure.severity(allure.severity_level.NORMAL)
 def cli_008() -> None:
     with patch("src.cli.set_console_level") as mock_set_level:
-        main(verbose=2, quiet=True)
+        main(
+            verbose=2,
+            quiet=True,
+            esxi_template_api_url=None,
+            gns3_template_api_url=None,
+        )
 
     mock_set_level.assert_called_once_with(logging.ERROR)
 
@@ -588,3 +613,58 @@ def cli_025() -> None:
     result = runner.invoke(app, ["logs", "--lines", "0"])
 
     assert result.exit_code != 0
+
+
+# --- main() (template-API URL overrides) ----------------------------------
+
+
+@allure.title("main() überschreibt die Template-API-URLs, wenn angegeben")
+@allure.description(
+    "Überprüft, dass main() set_esxi_template_api_url/set_gns3_template_api_url "
+    "mit den gegebenen URLs aufruft, wenn --esxi-template-api-url/"
+    "--gns3-template-api-url angegeben sind"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.CRITICAL)
+def cli_026() -> None:
+    with (
+        patch("src.cli.set_console_level"),
+        patch("src.cli.set_esxi_template_api_url") as set_esxi,
+        patch("src.cli.set_gns3_template_api_url") as set_gns3,
+    ):
+        main(
+            verbose=0,
+            quiet=False,
+            esxi_template_api_url="http://esxi-templates.example:8000",
+            gns3_template_api_url="http://gns3-templates.example:8001",
+        )
+
+    set_esxi.assert_called_once_with("http://esxi-templates.example:8000")
+    set_gns3.assert_called_once_with("http://gns3-templates.example:8001")
+
+
+@allure.title("main() lässt die Template-API-URLs unverändert, wenn nicht angegeben")
+@allure.description(
+    "Überprüft, dass main() set_esxi_template_api_url/set_gns3_template_api_url "
+    "nicht aufruft, wenn keine der beiden Optionen angegeben ist - die "
+    "Standard-URLs in connections_handler.py bleiben dann unangetastet"
+)
+@allure.tag("negativ-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.NORMAL)
+def cli_027() -> None:
+    with (
+        patch("src.cli.set_console_level"),
+        patch("src.cli.set_esxi_template_api_url") as set_esxi,
+        patch("src.cli.set_gns3_template_api_url") as set_gns3,
+    ):
+        main(
+            verbose=0,
+            quiet=False,
+            esxi_template_api_url=None,
+            gns3_template_api_url=None,
+        )
+
+    set_esxi.assert_not_called()
+    set_gns3.assert_not_called()

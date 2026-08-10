@@ -88,13 +88,15 @@ already exist and be reachable:
 - A **GNS3 VM** already running on that ESXi host, reachable over SSH with the
   stock GNS3 VM appliance credentials (`gns3`/`gns3`) and over HTTP on its v2
   controller API (port 80).
-- Two internal template-listing/OVA-download services that this project's
-  ESXi and GNS3 template lookups depend on. Their base URLs are currently
-  hardcoded in `src/connections_handler.py`
-  (`_ESXI_TEMPLATE_API_BASE_URL`, `_GNS3_TEMPLATE_API_BASE_URL`) rather than
-  configurable, so this tool assumes access to that specific internal
-  network. `LITERAL_API_VALUES=true` (see Testing below) bypasses both for
-  local development/testing without that network.
+- Two template-listing/OVA-download services that this project's ESXi and
+  GNS3 template lookups depend on. They default to this project's own
+  internal network but are configurable via `--esxi-template-api-url`/
+  `--gns3-template-api-url` (or `esxi_template_api_url`/
+  `gns3_template_api_url` in `topologybuilder.yml`, or the
+  `ESXI_TEMPLATE_API_URL`/`GNS3_TEMPLATE_API_URL` env vars) if they live
+  somewhere else on your network. `LITERAL_API_VALUES=true` (see Testing
+  below) bypasses both entirely for local development/testing without
+  either service.
 
 ## Configuration
 

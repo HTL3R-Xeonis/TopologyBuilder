@@ -12,7 +12,11 @@ import typer
 
 from src.cli_config import load_cli_config
 from src.config_file_handler import ConfigFileHandler
-from src.connections_handler import ESXiConnection
+from src.connections_handler import (
+    ESXiConnection,
+    set_esxi_template_api_url,
+    set_gns3_template_api_url,
+)
 from src.factories import Environment
 from src.graph_builder import GraphBuilder
 from src.graph_visualizer import print_connection_tree, render_graph
@@ -58,6 +62,20 @@ ESXI_PASSWORD_OPTION = typer.Option(
     envvar="ESXI_PASSWORD",
     help="Password for the ESXi host. Prompted for if not provided. "
     "Not readable from the config file for security reasons.",
+)
+ESXI_TEMPLATE_API_URL_OPTION = typer.Option(
+    _CLI_CONFIG.get("esxi_template_api_url"),
+    "--esxi-template-api-url",
+    envvar="ESXI_TEMPLATE_API_URL",
+    help="Base URL of the ESXi/NFS template-listing and OVA-download "
+    "service. Defaults to this project's own internal network if omitted.",
+)
+GNS3_TEMPLATE_API_URL_OPTION = typer.Option(
+    _CLI_CONFIG.get("gns3_template_api_url"),
+    "--gns3-template-api-url",
+    envvar="GNS3_TEMPLATE_API_URL",
+    help="Base URL of the GNS3 template-listing service. Defaults to this "
+    "project's own internal network if omitted.",
 )
 
 
@@ -111,6 +129,8 @@ def main(
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="Suppress all console log output except errors."
     ),
+    esxi_template_api_url: Optional[str] = ESXI_TEMPLATE_API_URL_OPTION,
+    gns3_template_api_url: Optional[str] = GNS3_TEMPLATE_API_URL_OPTION,
 ) -> None:
     """
     Build and deploy network topologies to GNS3/ESXi from a YAML config file.
@@ -120,6 +140,11 @@ def main(
     else:
         index = min(verbose, len(_VERBOSITY_LEVELS) - 1)
         set_console_level(_VERBOSITY_LEVELS[index])
+
+    if esxi_template_api_url is not None:
+        set_esxi_template_api_url(esxi_template_api_url)
+    if gns3_template_api_url is not None:
+        set_gns3_template_api_url(gns3_template_api_url)
 
 
 @app.command()

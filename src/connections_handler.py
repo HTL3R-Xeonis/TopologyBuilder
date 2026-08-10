@@ -27,11 +27,41 @@ logger = get_logger(__name__)
 # Proxy APIs in front of the two device catalogs (see technische_dokumentation_APIs):
 # port 8000 fronts the NFS share of VM OVA images (the image source for role: VM
 # nodes), port 8001 fronts a GNS3 server's own /v2/templates (the image source for
-# every other role). Both are unauthenticated.
+# every other role). Both are unauthenticated. These are only defaults - override
+# via set_esxi_template_api_url/set_gns3_template_api_url (wired to CLI flags in
+# cli.py) for a network where these services live somewhere else.
 _ESXI_TEMPLATE_API_BASE_URL = "http://10.20.20.171:8000"
 _GNS3_TEMPLATE_API_BASE_URL = "http://10.20.20.171:8001"
 _OVA_DOWNLOAD_CHUNK_SIZE = 8 * 1024 * 1024
 _OVA_DOWNLOAD_MAX_ATTEMPTS = 3
+
+
+def set_esxi_template_api_url(base_url: str) -> None:
+    """
+    Overrides the ESXi/NFS template-listing and OVA-download service's base
+    URL for the rest of the process - the module-level default assumes a
+    specific internal network. Every APIFunctions method that talks to this
+    service reads the module-level global at call time, so calling this
+    before any of them run (e.g. from the CLI's main() callback) is enough;
+    no need to thread the URL through every call site.
+    :param base_url: the new base URL, e.g. "http://10.20.20.171:8000"
+    :return:
+    """
+    global _ESXI_TEMPLATE_API_BASE_URL
+    _ESXI_TEMPLATE_API_BASE_URL = base_url
+
+
+def set_gns3_template_api_url(base_url: str) -> None:
+    """
+    Overrides the GNS3 template-listing service's base URL for the rest of
+    the process - see set_esxi_template_api_url for why this is a simple
+    module-level override rather than a parameter threaded through every
+    caller.
+    :param base_url: the new base URL, e.g. "http://10.20.20.171:8001"
+    :return:
+    """
+    global _GNS3_TEMPLATE_API_BASE_URL
+    _GNS3_TEMPLATE_API_BASE_URL = base_url
 
 
 class APIFunctions:
