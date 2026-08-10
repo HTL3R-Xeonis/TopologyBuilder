@@ -186,9 +186,12 @@ class VMOrchestrator:
         :param download_dir: directory to stage downloaded OVAs in before
             import. Defaults to the system temp dir, which may not have
             room for multi-gigabyte OVAs - point this at a larger volume
-            (e.g. the same NFS mount used for gns3_ova_path) if needed.
+            if needed. Created automatically if it doesn't exist yet.
         :return:
         """
+        if download_dir is not None:
+            Path(download_dir).mkdir(parents=True, exist_ok=True)
+
         importer = OVAImporter(self.esxi_connection)
         with tempfile.TemporaryDirectory(
             prefix="topologybuilder-ova-", dir=download_dir
