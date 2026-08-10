@@ -41,14 +41,15 @@ def _sanitize_ifname(raw: str, max_length: int = _LINUX_IFNAME_MAX_LENGTH) -> st
 def normalize_template_name(name: str) -> str:
     """
     Normalizes a template/image name for lenient comparison: case-insensitive,
-    with any run of whitespace (leading, trailing, or repeated internal)
-    collapsed to a single space. Real-world template names have been observed
-    to differ from a topology config's image name by exactly this kind of
-    whitespace/case noise (e.g. "Cisco IOSvL2 15.2.1" vs "Cisco IOSvL2  15.2.1").
+    with ALL whitespace removed (not just collapsed) - real-world template
+    names have been observed to disagree with a topology config's image name
+    on whether a space exists at a given position at all, not just how many
+    (e.g. "Cisco IOSv 15.6(1)T" vs "Cisco IOSv 15.6(1) T"), so collapsing
+    whitespace runs to a single space still wouldn't make those equal.
     :param name: the name to normalize
     :return: normalized name, safe to compare with ==
     """
-    return " ".join(name.split()).lower()
+    return "".join(name.split()).lower()
 
 
 class Environment(Enum):
