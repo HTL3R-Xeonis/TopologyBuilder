@@ -22,6 +22,14 @@ from src.settings import Settings
 
 logger = get_logger(__name__)
 
+# Proxy APIs in front of the two device catalogs (see technische_dokumentation_APIs):
+# port 8000 fronts the NFS share of VM OVA images (the image source for role: VM
+# nodes), port 8001 fronts a GNS3 server's own /v2/templates (the image source for
+# every other role). Both are unauthenticated.
+_ESXI_TEMPLATE_API_BASE_URL = "http://10.20.20.171:8000"
+_GNS3_TEMPLATE_API_BASE_URL = "http://10.20.20.171:8001"
+_OVA_DOWNLOAD_CHUNK_SIZE = 8 * 1024 * 1024
+
 
 class APIFunctions:
     """
@@ -51,7 +59,9 @@ class APIFunctions:
         """
         if Settings.Testing.GithubWorkflow.LITERAL_API_VALUES:
             return Settings.Testing.GithubWorkflow.LITERAL_ESXI_TEMPLATES
-        json = APIFunctions._send_get_request("http://10.20.20.171:8000/api/templates")
+        json = APIFunctions._send_get_request(
+            f"{_ESXI_TEMPLATE_API_BASE_URL}/api/templates"
+        )
         return {template["name"] for template in json["templates"]}
 
     @staticmethod
@@ -62,8 +72,34 @@ class APIFunctions:
         """
         if Settings.Testing.GithubWorkflow.LITERAL_API_VALUES:
             return Settings.Testing.GithubWorkflow.LITERAL_GNS3_TEMPLATES
-        json = APIFunctions._send_get_request("http://10.20.20.171:8001/api/templates")
+        json = APIFunctions._send_get_request(
+            f"{_GNS3_TEMPLATE_API_BASE_URL}/api/templates"
+        )
         return {template["name"] for template in json["templates"]}
+
+    @staticmethod
+    def download_esxi_template(name: str, dest_path: str) -> None:
+        """
+        Downloads the OVA file for the NFS-share template whose name/tags
+        best match `name` (server-side fuzzy match against templates.yml,
+        proxied from the Filebrowser-backed NFS share - see
+        technische_dokumentation_APIs section 2.3) to dest_path. Streamed in
+        chunks, since these OVAs run into multiple gigabytes.
+        :param name: template name to search for, e.g. a topology node's image
+        :param dest_path: local filesystem path to write the OVA to
+        :return:
+        """
+        logger.debug(f"Downloading ESXi template '{name}' to {dest_path}")
+        response = requests.get(
+            f"{_ESXI_TEMPLATE_API_BASE_URL}/api/download",
+            params={"name": name},
+            stream=True,
+        )
+        response.raise_for_status()
+        with open(dest_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=_OVA_DOWNLOAD_CHUNK_SIZE):
+                f.write(chunk)
+        logger.info(f"Downloaded ESXi template '{name}' to {dest_path}")
 
 
 class GenericConnection(ABC):

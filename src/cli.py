@@ -13,6 +13,7 @@ import typer
 from src.cli_config import load_cli_config
 from src.config_file_handler import ConfigFileHandler
 from src.connections_handler import ESXiConnection
+from src.factories import Environment
 from src.graph_builder import GraphBuilder
 from src.graph_visualizer import print_connection_tree, render_graph
 from src.logger_adapter import set_console_level
@@ -257,6 +258,12 @@ def deploy(
         help="Name of the GNS3 VM on the ESXi host, e.g. if it isn't named "
         "exactly 'GNS3'.",
     ),
+    esxi_datastore: Optional[str] = typer.Option(
+        _CLI_CONFIG.get("esxi_datastore"),
+        "--esxi-datastore",
+        help="ESXi datastore to place newly provisioned topology VMs on. "
+        "Required if the topology has any ESXi-hosted (role: VM) nodes.",
+    ),
 ) -> None:
     """
     Validate a config file, build the topology, and deploy it to GNS3/ESXi.
@@ -287,6 +294,13 @@ def deploy(
     graph_builder = GraphBuilder(handler.nodes, handler.edges)
     nodes = graph_builder.build()
 
+    if esxi_datastore is None and any(
+        node.env == Environment.ON_ESXI for node in nodes.values()
+    ):
+        raise typer.BadParameter(
+            "--esxi-datastore is required: this topology has ESXi-hosted (role: VM) nodes."
+        )
+
     orchestrator = VMOrchestrator(esxi_host, esxi_username, esxi_password)
 
     if fresh_gns3_vm:
@@ -299,6 +313,7 @@ def deploy(
         )
 
     orchestrator.create_gns3_configuration_file(nodes, vm_name=gns3_vm_name)
+    orchestrator.deploy_esxi_nodes(nodes, esxi_datastore)
     orchestrator.deploy_gns3_topology(
         nodes, gns3_project or Path(config_path).stem, vm_name=gns3_vm_name
     )

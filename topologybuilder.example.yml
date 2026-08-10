@@ -24,3 +24,7 @@ gns3_ova_path: /mnt/nfs-share/gns3.ova
 gns3_datastore: datastore1
 gns3_mgmt_network: PG-MGMT
 gns3_trunk_network: PG-GNS3-TRUNK
+
+# Datastore to place newly provisioned topology VMs on. Only needed if the
+# topology config has ESXi-hosted (role: VM) nodes.
+esxi_datastore: datastore1

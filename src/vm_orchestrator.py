@@ -5,15 +5,17 @@ settings accordingly to the built topology.
 
 __license__ = "GNU GPLv3"
 
+import tempfile
 import time
 from datetime import datetime
+from pathlib import Path
 
-from src.connections_handler import SSHConnection, ESXiConnection
+from src.connections_handler import SSHConnection, ESXiConnection, APIFunctions
 from src.gns3_client import deploy_topology
 from src.logger_adapter import get_logger
 from src.gns3_vm_interface_setup import GNS3VMInterfaceSetup
 from src.ova_importer import OVAImporter
-from src.factories import GenericNode, compute_esxi_vlan_assignments
+from src.factories import Environment, GenericNode, compute_esxi_vlan_assignments
 
 logger = get_logger(__name__)
 
@@ -162,3 +164,41 @@ class VMOrchestrator:
         """
         gns3_ip_address = self._get_gns3_vm_ip(vm_name)
         deploy_topology(f"http://{gns3_ip_address}", project_name, nodes)
+
+    def deploy_esxi_nodes(
+        self, nodes: dict[str, GenericNode], datastore_name: str
+    ) -> None:
+        """
+        Provisions the real ESXi VM behind every ESXi-hosted node in the
+        topology: downloads the OVA matching the node's image from the NFS
+        template API (the image source for role: VM nodes - see
+        technische_dokumentation_APIs.docx section 2.3), imports it as a new
+        VM named after the node with its network adapters wired to the VLAN
+        port groups create_gns3_configuration_file set up - call that first,
+        so those port groups already exist - and powers it on. An image is
+        only downloaded once even if several nodes share it, since these
+        OVAs can run into multiple gigabytes.
+        :param nodes: built topology of the nodes
+        :param datastore_name: ESXi datastore to place the new VMs on
+        :return:
+        """
+        importer = OVAImporter(self.esxi_connection)
+        with tempfile.TemporaryDirectory(prefix="topologybuilder-ova-") as tmp_dir:
+            ova_paths: dict[str, str] = {}
+            for node in nodes.values():
+                if node.env != Environment.ON_ESXI:
+                    continue
+
+                if node.image not in ova_paths:
+                    ova_path = str(Path(tmp_dir) / f"{len(ova_paths)}.ova")
+                    APIFunctions.download_esxi_template(node.image, ova_path)
+                    ova_paths[node.image] = ova_path
+
+                network_names = [
+                    interface.esxi_vlan for interface in node.interfaces.values()
+                ]
+                vm = importer.import_ova(
+                    ova_paths[node.image], node.name, datastore_name, network_names
+                )
+                self.esxi_connection.power_on_vm(vm)
+                logger.info(f"Provisioned ESXi VM '{node.name}'")
