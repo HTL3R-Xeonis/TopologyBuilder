@@ -150,3 +150,18 @@ def connections_handler_006() -> None:
     host_system.configManager.networkSystem.RemovePortGroup.assert_called_once_with(
         pgName="PC4_gi0-0"
     )
+
+
+@allure.title("Backup-VMs werden bei der automatischen Erkennung ignoriert")
+@allure.description(
+    "Überprüft, dass find_gns3_vm eine von deploy_fresh_gns3_vm umbenannte "
+    "Backup-VM (Name endet auf '-backup-<Zeitstempel>') nicht als die "
+    "aktuelle GNS3-VM erkennt, obwohl ihr Name weiterhin 'gns3' enthält - "
+    "sonst würde ein Redeploy die falsche (bereits ersetzte) VM referenzieren"
+)
+@allure.tag("negativ-test", "connections_handler")
+@allure.feature("connections_handler")
+@allure.severity(allure.severity_level.CRITICAL)
+def connections_handler_007() -> None:
+    conn = _make_esxi_connection(["GNS3-VM-backup-20260810171954", "PC4"])
+    assert conn.find_gns3_vm() is None

@@ -207,6 +207,14 @@ class GNS3Connection(GenericConnection):
         pass
 
 
+# Matches the backup-name suffix VMOrchestrator.deploy_fresh_gns3_vm gives a
+# replaced VM (f"{vm_name}-backup-{datetime.now():%Y%m%d%H%M%S}") - used to
+# keep find_gns3_vm() from mistaking a backup for the live GNS3 VM, since a
+# backup's name still contains the original name (and so still matches
+# "gns3") but must never be auto-detected as the VM to use/replace.
+_BACKUP_VM_NAME_PATTERN = re.compile(r"-backup-\d{14}")
+
+
 class ESXiConnection(GenericConnection):
     def __init__(self, ip_address: str, username: str, password: str | None):
         super().__init__(ip_address, username, password)
@@ -263,14 +271,22 @@ class ESXiConnection(GenericConnection):
         Searches for a VM that looks like a typical GNS3 VM, i.e. one whose
         name contains 'gns3' (case-insensitive) - used to resolve the GNS3
         VM automatically when no explicit name is given, since real-world
-        GNS3 VM names vary (e.g. 'GNS3', 'GNS3-VM').
+        GNS3 VM names vary (e.g. 'GNS3', 'GNS3-VM'). Backup VMs (renamed by
+        deploy_fresh_gns3_vm before replacing the original) are excluded,
+        even though their name still contains the original name - a backup
+        must never be auto-detected as the live VM to use or replace.
         :return: the matching VM if exactly one was found, else None
         """
         container_view = self.content.viewManager.CreateContainerView(
             self.content.rootFolder, [vim.VirtualMachine], True
         )
         try:
-            matches = [vm for vm in container_view.view if "gns3" in vm.name.lower()]
+            matches = [
+                vm
+                for vm in container_view.view
+                if "gns3" in vm.name.lower()
+                and not _BACKUP_VM_NAME_PATTERN.search(vm.name)
+            ]
         finally:
             container_view.Destroy()
 
