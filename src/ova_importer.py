@@ -6,11 +6,13 @@ lease, then stream each referenced disk to the URL the lease hands back.
 
 __license__ = "GNU GPLv3"
 
+import ssl
 import tarfile
 import time
 
 import requests
 from pyVmomi import vim
+from requests.adapters import HTTPAdapter
 
 from src.connections_handler import ESXiConnection
 from src.logger_adapter import get_logger
@@ -19,6 +21,24 @@ logger = get_logger(__name__)
 
 _LEASE_POLL_INTERVAL_SECONDS = 1
 _UPLOAD_CHUNK_SIZE = 4 * 1024 * 1024
+
+
+class _EsxiUploadAdapter(HTTPAdapter):
+    """
+    HTTPAdapter whose SSL context tolerates a connection closed without a
+    proper TLS close_notify, instead of raising SSLError. ESXi's embedded
+    HTTP server (rhttpproxy) does this on VMDK upload responses; OpenSSL 1.1
+    silently accepted it, but OpenSSL 3.x's stricter default behavior turns
+    it into '[SSL: UNEXPECTED_EOF_WHILE_READING]'.
+    """
+
+    def init_poolmanager(self, *args, **kwargs) -> None:
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        context.options |= ssl.OP_IGNORE_UNEXPECTED_EOF
+        kwargs["ssl_context"] = context
+        super().init_poolmanager(*args, **kwargs)
 
 
 class OVAImporter:
@@ -145,28 +165,33 @@ class OVAImporter:
         total_bytes = sum(item.size for item in file_items) or 1
         uploaded_bytes = 0
 
-        for file_item in file_items:
-            device_url = device_urls[file_item.deviceId]
-            upload_url = device_url.url.replace("*", self.esxi_connection.ip_address)
-            member = ova.getmember(file_item.path)
-            disk_stream = ova.extractfile(member)
+        with requests.Session() as session:
+            session.mount("https://", _EsxiUploadAdapter())
 
-            headers = {
-                "Content-Type": "application/x-vnd.vmware-streamVmdk",
-                "Content-Length": str(member.size),
-            }
-            method = requests.put if file_item.create else requests.post
-            logger.debug(f"Uploading {file_item.path} ({member.size} bytes)")
-            response = method(
-                upload_url,
-                data=self._read_in_chunks(disk_stream),
-                headers=headers,
-                verify=False,
-            )
-            response.raise_for_status()
+            for file_item in file_items:
+                device_url = device_urls[file_item.deviceId]
+                upload_url = device_url.url.replace(
+                    "*", self.esxi_connection.ip_address
+                )
+                member = ova.getmember(file_item.path)
+                disk_stream = ova.extractfile(member)
 
-            uploaded_bytes += member.size
-            lease.HttpNfcLeaseProgress(int(uploaded_bytes / total_bytes * 100))
+                headers = {
+                    "Content-Type": "application/x-vnd.vmware-streamVmdk",
+                    "Content-Length": str(member.size),
+                }
+                method = session.put if file_item.create else session.post
+                logger.debug(f"Uploading {file_item.path} ({member.size} bytes)")
+                response = method(
+                    upload_url,
+                    data=self._read_in_chunks(disk_stream),
+                    headers=headers,
+                    verify=False,
+                )
+                response.raise_for_status()
+
+                uploaded_bytes += member.size
+                lease.HttpNfcLeaseProgress(int(uploaded_bytes / total_bytes * 100))
 
     @staticmethod
     def _read_in_chunks(file_obj, chunk_size: int = _UPLOAD_CHUNK_SIZE):
