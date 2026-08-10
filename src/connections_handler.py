@@ -225,7 +225,6 @@ class ESXiConnection(GenericConnection):
         """
         Connect to the ESXi API.
         :return: Returns the client
-        @TODO create pytest
         """
         logger.debug(
             f"Opening ESXi API connection to {self.ip_address} as {self.username}"
@@ -234,13 +233,26 @@ class ESXiConnection(GenericConnection):
         ssl_context.check_hostname = False
         ssl_context.verify_mode = ssl.CERT_NONE
 
-        instance = SmartConnect(
-            host=self.ip_address,
-            user=self.username,
-            pwd=self.password,
-            port=443,
-            sslContext=ssl_context,
-        )
+        try:
+            instance = SmartConnect(
+                host=self.ip_address,
+                user=self.username,
+                pwd=self.password,
+                port=443,
+                sslContext=ssl_context,
+            )
+        except vim.fault.VimFault as fault:
+            # Re-raised as a plain exception rather than left as the raw
+            # pyVmomi fault object: Typer's pretty-traceback renderer
+            # crashes trying to attach its own debug attribute to it
+            # (pyVmomi's DataObject.__setattr__ rejects unknown attributes),
+            # turning a simple "wrong password" into a confusing wall of
+            # unrelated errors instead of a clean, actionable message.
+            raise logger.alert(
+                ConnectionError,
+                f"Failed to connect to ESXi host {self.ip_address} as "
+                f"'{self.username}': {fault.msg}",
+            ) from None
         logger.debug(f"ESXi API connection to {self.ip_address} established")
 
         atexit.register(Disconnect, instance)

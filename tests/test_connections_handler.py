@@ -4,10 +4,11 @@ Tests to validate functionality of connections_handler.py
 
 __license__ = "GNU GPLv3"
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import allure
 import pytest
+from pyVmomi import vim
 
 from src import logger_adapter
 from src.connections_handler import ESXiConnection
@@ -165,3 +166,27 @@ def connections_handler_006() -> None:
 def connections_handler_007() -> None:
     conn = _make_esxi_connection(["GNS3-VM-backup-20260810171954", "PC4"])
     assert conn.find_gns3_vm() is None
+
+
+@allure.title("Falsches ESXi-Passwort wirft eine klare Fehlermeldung")
+@allure.description(
+    "Überprüft, dass ein VimFault (z.B. InvalidLogin) beim Verbindungsaufbau "
+    "als klarer ConnectionError weitergegeben wird, statt das rohe pyVmomi-"
+    "Fault-Objekt durchzureichen - das lässt Typers Pretty-Traceback-"
+    "Renderer abstürzen (pyVmomis DataObject.__setattr__ lehnt das von Typer "
+    "angehängte Debug-Attribut ab) und verschleiert die eigentliche, "
+    "einfache Fehlerursache hinter einer verwirrenden zweiten Exception"
+)
+@allure.tag("negativ-test", "connections_handler")
+@allure.feature("connections_handler")
+@allure.severity(allure.severity_level.CRITICAL)
+def connections_handler_008() -> None:
+    fault = vim.fault.InvalidLogin(
+        msg="Cannot complete login due to an incorrect user name or password."
+    )
+    with patch("src.connections_handler.SmartConnect", side_effect=fault):
+        with pytest.raises(
+            ConnectionError,
+            match=r"Failed to connect to ESXi host 10\.20\.20\.202 as 'root'",
+        ):
+            ESXiConnection("10.20.20.202", "root", "wrong-password")
