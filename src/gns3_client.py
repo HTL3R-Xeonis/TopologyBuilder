@@ -17,6 +17,24 @@ logger = get_logger(__name__)
 
 _CLOUD_PORT_NAME = "eth0"
 
+# Fields on a template object that describe the template itself, not the
+# device it configures (e.g. platform, qemu_path, ram, hda_disk_image, ...).
+# Everything NOT in this set gets copied into a new node's 'properties', since
+# GNS3 doesn't fully inherit them from template_id alone - omitting them (e.g.
+# 'platform') leaves the node half-configured, such as building a QEMU binary
+# path like 'qemu-system-None'.
+_TEMPLATE_META_FIELDS = {
+    "template_id",
+    "template_type",
+    "name",
+    "category",
+    "builtin",
+    "default_name_format",
+    "symbol",
+    "compute_id",
+    "usage",
+}
+
 
 class GNS3Client:
     """
@@ -94,6 +112,11 @@ class GNS3Client:
         :param template: template dict from find_template/get_templates
         :return: the created node dict, including 'node_id' and 'ports'
         """
+        properties = {
+            key: value
+            for key, value in template.items()
+            if key not in _TEMPLATE_META_FIELDS
+        }
         node = self._post(
             f"/v2/projects/{project_id}/nodes",
             json={
@@ -103,6 +126,7 @@ class GNS3Client:
                 "compute_id": template.get("compute_id") or "local",
                 "x": x,
                 "y": y,
+                "properties": properties,
             },
         )
         logger.info(f"Created GNS3 node '{name}' ({node['node_id']})")
