@@ -19,6 +19,10 @@ from src.factories import (
     Router,
     Firewall,
     GenericNode,
+    Environment,
+    normalize_template_name,
+    compute_esxi_vlan_assignments,
+    _sanitize_ifname,
 )
 
 logger_adapter.LoggerAdapter.is_test_run = True
@@ -267,3 +271,179 @@ def factories_011() -> None:
     )
     assert node_1.get_neighbour("gi0/0") is node_2
     assert node_2.get_neighbour("gi0/0") is node_1
+
+
+@allure.title("Template-Namen mit Leerzeichen- und Groß-/Kleinschreibungs-Unterschied")
+@allure.description(
+    "Überprüft, dass normalize_template_name Namen gleichsetzt, die sich nur "
+    "durch Groß-/Kleinschreibung oder ob an einer Stelle überhaupt ein "
+    "Leerzeichen existiert unterscheiden - reines Zusammenfassen mehrfacher "
+    "Leerzeichen würde das nicht lösen"
+)
+@allure.tag("positiv-test", "factory")
+@allure.feature("factory")
+@allure.severity(allure.severity_level.CRITICAL)
+def factories_012() -> None:
+    assert normalize_template_name("Cisco IOSv 15.6(1)T") == normalize_template_name(
+        "cisco iosv 15.6(1) t"
+    )
+
+
+@allure.title("Template-Namen mit unterschiedlichem Inhalt bleiben unterschiedlich")
+@allure.description(
+    "Überprüft, dass normalize_template_name inhaltlich unterschiedliche Namen "
+    "nicht fälschlich gleichsetzt"
+)
+@allure.tag("negativ-test", "factory")
+@allure.feature("factory")
+@allure.severity(allure.severity_level.NORMAL)
+def factories_013() -> None:
+    assert normalize_template_name("Cisco IOSv 15.6(1)T") != normalize_template_name(
+        "Cisco IOSvL2 15.2.1"
+    )
+
+
+@allure.title("Interface-Namen bis zur Maximallänge bleiben unverändert")
+@allure.description(
+    "Überprüft, dass _sanitize_ifname kurze, bereits gültige Namen unverändert "
+    "zurückgibt und ungültige Zeichen durch '-' ersetzt"
+)
+@allure.tag("positiv-test", "factory")
+@allure.feature("factory")
+@allure.severity(allure.severity_level.NORMAL)
+def factories_014() -> None:
+    assert _sanitize_ifname("PC4_gi0-0") == "PC4_gi0-0"
+    assert _sanitize_ifname("PC4_gi0/0") == "PC4_gi0-0"
+
+
+@allure.title("Zu lange Interface-Namen werden gekürzt und bleiben eindeutig")
+@allure.description(
+    "Überprüft, dass _sanitize_ifname Namen über der Maximallänge kürzt und "
+    "einen Hash-Suffix anhängt, sodass zwei unterschiedliche Namen, die nach "
+    "einfachem Abschneiden kollidieren würden, trotzdem unterschiedlich bleiben"
+)
+@allure.tag("positiv-test", "factory")
+@allure.feature("factory")
+@allure.severity(allure.severity_level.CRITICAL)
+def factories_015() -> None:
+    name_1 = _sanitize_ifname("Very-Long-Node-Name-A_GigabitEthernet0/0")
+    name_2 = _sanitize_ifname("Very-Long-Node-Name-B_GigabitEthernet0/0")
+
+    assert len(name_1) <= 15
+    assert len(name_2) <= 15
+    assert name_1 != name_2
+
+
+@allure.title("VLAN-Zuweisung ist fortlaufend für unabhängige ESXi-Interfaces")
+@allure.description(
+    "Überprüft, dass compute_esxi_vlan_assignments unabhängigen ESXi-Interfaces "
+    "fortlaufende VLAN-IDs ab 2 zuweist und GNS3-gehostete Nodes ignoriert"
+)
+@allure.tag("positiv-test", "factory")
+@allure.feature("factory")
+@allure.severity(allure.severity_level.CRITICAL)
+def factories_016() -> None:
+    nf = NodeFactory()
+    vm = nf.create_node("Ubuntu-Server", "VM", "VM1")
+    router = nf.create_node("VPCS", "ROUTER", "R1")
+    vm.add_interface("ens160")
+    vm.add_interface("ens192")
+    router.add_interface("Ethernet0")
+
+    assignments = compute_esxi_vlan_assignments({"VM1": vm, "R1": router})
+
+    assert assignments == {
+        vm.interfaces["ens160"].esxi_vlan: 2,
+        vm.interfaces["ens192"].esxi_vlan: 3,
+    }
+
+
+@allure.title("Direkt verbundene ESXi-Nodes teilen sich ein VLAN")
+@allure.description(
+    "Überprüft, dass zwei ESXi-gehostete Nodes, die direkt (ohne GNS3-Node "
+    "dazwischen) verbunden sind, dieselbe VLAN-ID zugewiesen bekommen, da es "
+    "keine Bridge gibt, die zwischen zwei unterschiedlichen VLANs übersetzen "
+    "könnte - Regressionstest für den per-Edge-VLAN-Bug"
+)
+@allure.tag("positiv-test", "factory")
+@allure.feature("factory")
+@allure.severity(allure.severity_level.CRITICAL)
+def factories_017() -> None:
+    nf = NodeFactory()
+    vm_1 = nf.create_node("Ubuntu-Server", "VM", "VM1")
+    vm_2 = nf.create_node("Rocky 9.2", "VM", "VM2")
+    NodeFactory.create_edge(vm_1.add_interface("ens160"), vm_2.add_interface("ens160"))
+
+    assignments = compute_esxi_vlan_assignments({"VM1": vm_1, "VM2": vm_2})
+
+    assert (
+        assignments[vm_1.interfaces["ens160"].esxi_vlan]
+        == assignments[vm_2.interfaces["ens160"].esxi_vlan]
+    )
+
+
+@allure.title("Über GNS3 gebrückte ESXi-Interfaces behalten ihr eigenes VLAN")
+@allure.description(
+    "Überprüft, dass eine Edge zwischen einer ESXi- und einer GNS3-gehosteten "
+    "Node weiterhin eine eigene VLAN-ID für das ESXi-Interface erhält, statt "
+    "sich fälschlich ein VLAN mit einem anderen, direkt verbundenen ESXi-"
+    "Interface zu teilen"
+)
+@allure.tag("positiv-test", "factory")
+@allure.feature("factory")
+@allure.severity(allure.severity_level.CRITICAL)
+def factories_018() -> None:
+    nf = NodeFactory()
+    vm_1 = nf.create_node("Ubuntu-Server", "VM", "VM1")
+    vm_2 = nf.create_node("Rocky 9.2", "VM", "VM2")
+    router = nf.create_node("VPCS", "ROUTER", "R1")
+    NodeFactory.create_edge(vm_1.add_interface("ens160"), vm_2.add_interface("ens160"))
+    NodeFactory.create_edge(
+        vm_1.add_interface("ens192"), router.add_interface("Ethernet0")
+    )
+
+    assignments = compute_esxi_vlan_assignments(
+        {"VM1": vm_1, "VM2": vm_2, "R1": router}
+    )
+
+    assert (
+        assignments[vm_1.interfaces["ens192"].esxi_vlan]
+        != assignments[vm_1.interfaces["ens160"].esxi_vlan]
+    )
+
+
+@allure.title("Environment erkennt GNS3-Templates trotz Namens-Rauschen")
+@allure.description(
+    "Überprüft, dass Environment.get_environment ein Image einem GNS3-Template "
+    "zuordnet, auch wenn sich Groß-/Kleinschreibung oder Leerzeichen vom "
+    "konfigurierten Template-Namen unterscheiden"
+)
+@allure.tag("positiv-test", "factory")
+@allure.feature("factory")
+@allure.severity(allure.severity_level.CRITICAL)
+def factories_019() -> None:
+    assert Environment.get_environment("vpcs") == Environment.ON_GNS3
+
+
+@allure.title("Environment erkennt ESXi-Templates")
+@allure.description(
+    "Überprüft, dass Environment.get_environment ein Image, das nur auf ESXi "
+    "existiert, als ON_ESXI einstuft"
+)
+@allure.tag("positiv-test", "factory")
+@allure.feature("factory")
+@allure.severity(allure.severity_level.CRITICAL)
+def factories_020() -> None:
+    assert Environment.get_environment("Ubuntu-Server") == Environment.ON_ESXI
+
+
+@allure.title("Environment stuft unbekannte Images als ON_NOTHING ein")
+@allure.description(
+    "Überprüft, dass Environment.get_environment ON_NOTHING zurückgibt, wenn "
+    "das Image auf keinem der beiden Systeme als Template existiert"
+)
+@allure.tag("negativ-test", "factory")
+@allure.feature("factory")
+@allure.severity(allure.severity_level.NORMAL)
+def factories_021() -> None:
+    assert Environment.get_environment("Nonexistent-Image") == Environment.ON_NOTHING
