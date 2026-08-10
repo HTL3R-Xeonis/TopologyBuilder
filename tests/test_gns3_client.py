@@ -314,8 +314,8 @@ def gns3_client_011() -> None:
         client.delete_all_nodes("proj-1")
 
     assert delete.call_count == 2
-    delete.assert_any_call(f"{BASE_URL}/v2/projects/proj-1/nodes/n1", timeout=30)
-    delete.assert_any_call(f"{BASE_URL}/v2/projects/proj-1/nodes/n2", timeout=30)
+    delete.assert_any_call(f"{BASE_URL}/v2/projects/proj-1/nodes/n1", timeout=300)
+    delete.assert_any_call(f"{BASE_URL}/v2/projects/proj-1/nodes/n2", timeout=300)
 
 
 @allure.title("Löschen bei leerem Projekt ist ein No-Op")
@@ -614,3 +614,37 @@ def gns3_client_022() -> None:
             client.start_all_nodes("proj-1")
 
     assert post.call_count == 3
+
+
+@allure.title("Löschen der übrigen Nodes trotz einzelnem Fehler")
+@allure.description(
+    "Überprüft, dass delete_all_nodes weiterhin versucht, alle übrigen "
+    "Nodes zu löschen, wenn eine einzelne Node fehlschlägt (z.B. Timeout "
+    "bei einer noch laufenden QEMU-Node unter Host-Last), statt die ganze "
+    "Operation abzubrechen - und keinen Fehler wirft, da das Löschen nur "
+    "ein Best-Effort-Cleanup vor dem eigentlichen Deployment ist"
+)
+@allure.tag("negativ-test", "gns3_client")
+@allure.feature("gns3_client")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_client_023() -> None:
+    with (
+        patch("src.gns3_client.requests.get") as get,
+        patch("src.gns3_client.requests.delete") as delete,
+    ):
+        get.return_value = _response(
+            json_data=[
+                {"node_id": "n1", "name": "PC1"},
+                {"node_id": "n2", "name": "PC2"},
+                {"node_id": "n3", "name": "PC3"},
+            ]
+        )
+        delete.side_effect = [
+            _response(ok=True, content=False),
+            _response(ok=False, status_code=408, text="Read timed out"),
+            _response(ok=True, content=False),
+        ]
+        client = GNS3Client(BASE_URL)
+        client.delete_all_nodes("proj-1")  # must not raise
+
+    assert delete.call_count == 3

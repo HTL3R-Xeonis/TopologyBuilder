@@ -19,10 +19,13 @@ logger = get_logger(__name__)
 
 _CLOUD_PORT_NAME = "eth0"
 _DEFAULT_TIMEOUT_SECONDS = 30
-# Comfortably exceeds GNS3's own observed 240s internal per-node compute
-# timeout, so we don't time out client-side before GNS3 itself gives up on
-# a slow-starting node.
-_NODE_START_TIMEOUT_SECONDS = 300
+# Starting or deleting a QEMU-backed node can be much slower than the other,
+# purely metadata-level API calls (create project, list nodes, create link,
+# ...) - GNS3's own controller has been observed to block synchronously on
+# its compute backend for both, up to its own internal 240s per-node
+# timeout. This is comfortably above that, so we don't time out client-side
+# before GNS3 itself gives up on a slow node.
+_NODE_LIFECYCLE_TIMEOUT_SECONDS = 300
 
 # Fields on a template object that describe the template itself, not the
 # device it configures (e.g. platform, qemu_path, ram, hda_disk_image, ...).
@@ -90,14 +93,39 @@ class GNS3Client:
         Deletes every node currently in the project (and, as a consequence,
         every link between them), so redeploying against an already-existing
         project starts from a clean slate instead of piling duplicate nodes
-        on top of a previous run.
+        on top of a previous run. Deleting a still-running QEMU-backed node
+        can be just as slow as starting one under host load (observed as a
+        client-side ReadTimeout at the previous, shorter default timeout),
+        so each delete gets a generous timeout, and a failure on one node
+        doesn't stop the rest from being cleaned up - node creation below
+        already tolerates a leftover name collision (see the warning
+        create_node logs in that case), so this is a best-effort cleanup
+        rather than something the whole deploy needs to hard-fail on.
         :param project_id: the project to clear
         :return:
         """
         nodes = self._get(f"/v2/projects/{project_id}/nodes")
+        failed_names = []
         for node in nodes:
-            self._delete(f"/v2/projects/{project_id}/nodes/{node['node_id']}")
-        if nodes:
+            try:
+                self._delete(
+                    f"/v2/projects/{project_id}/nodes/{node['node_id']}",
+                    timeout=_NODE_LIFECYCLE_TIMEOUT_SECONDS,
+                )
+            except requests.exceptions.RequestException as error:
+                failed_names.append(node.get("name", node["node_id"]))
+                logger.error(
+                    f"Failed to delete existing node '{node.get('name')}': {error}"
+                )
+
+        if failed_names:
+            logger.warning(
+                f"Failed to delete {len(failed_names)}/{len(nodes)} existing "
+                f"node(s) before redeploying: {failed_names}. Continuing - "
+                f"node creation may pick up a renamed duplicate if a name "
+                f"collides."
+            )
+        elif nodes:
             logger.info(f"Deleted {len(nodes)} existing node(s) before redeploying")
 
     def get_templates(self) -> list[dict]:
@@ -334,7 +362,7 @@ class GNS3Client:
             try:
                 self._post(
                     f"/v2/projects/{project_id}/nodes/{node['node_id']}/start",
-                    timeout=_NODE_START_TIMEOUT_SECONDS,
+                    timeout=_NODE_LIFECYCLE_TIMEOUT_SECONDS,
                 )
             except requests.exceptions.RequestException as error:
                 failed_names.append(node["name"])
