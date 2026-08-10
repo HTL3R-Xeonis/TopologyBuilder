@@ -266,7 +266,9 @@ def gns3_client_009() -> None:
         client = GNS3Client(BASE_URL)
         client.get_or_create_project("Lab")
 
-    post.assert_called_once_with(f"{BASE_URL}/v2/projects/p1/open", json=None)
+    post.assert_called_once_with(
+        f"{BASE_URL}/v2/projects/p1/open", json=None, timeout=30
+    )
 
 
 @allure.title("Neues Projekt wird erstellt, wenn keins passt")
@@ -288,7 +290,9 @@ def gns3_client_010() -> None:
         project = client.get_or_create_project("New")
 
     assert project["project_id"] == "p2"
-    post.assert_called_once_with(f"{BASE_URL}/v2/projects", json={"name": "New"})
+    post.assert_called_once_with(
+        f"{BASE_URL}/v2/projects", json={"name": "New"}, timeout=30
+    )
 
 
 @allure.title("Alle Nodes eines Projekts werden gelöscht")
@@ -310,8 +314,8 @@ def gns3_client_011() -> None:
         client.delete_all_nodes("proj-1")
 
     assert delete.call_count == 2
-    delete.assert_any_call(f"{BASE_URL}/v2/projects/proj-1/nodes/n1")
-    delete.assert_any_call(f"{BASE_URL}/v2/projects/proj-1/nodes/n2")
+    delete.assert_any_call(f"{BASE_URL}/v2/projects/proj-1/nodes/n1", timeout=30)
+    delete.assert_any_call(f"{BASE_URL}/v2/projects/proj-1/nodes/n2", timeout=30)
 
 
 @allure.title("Löschen bei leerem Projekt ist ein No-Op")
@@ -540,3 +544,73 @@ def gns3_client_020() -> None:
     assert cloud_args[2] == vm_if.esxi_vlan
     client.create_link.assert_called_once()
     client.start_all_nodes.assert_called_once_with("proj-1")
+
+
+@allure.title("start_all_nodes startet jede Node einzeln")
+@allure.description(
+    "Überprüft, dass start_all_nodes jede Node über ihren eigenen "
+    "Start-Endpunkt einzeln startet, statt GNS3s Batch-'start all'-Endpunkt "
+    "zu verwenden - vermeidet, dass viele QEMU-Nodes gleichzeitig gestartet "
+    "werden und den Host überlasten"
+)
+@allure.tag("positiv-test", "gns3_client")
+@allure.feature("gns3_client")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_client_021() -> None:
+    with (
+        patch("src.gns3_client.requests.get") as get,
+        patch("src.gns3_client.requests.post") as post,
+    ):
+        get.return_value = _response(
+            json_data=[
+                {"node_id": "n1", "name": "PC1"},
+                {"node_id": "n2", "name": "PC2"},
+            ]
+        )
+        post.return_value = _response(ok=True, content=False)
+        client = GNS3Client(BASE_URL)
+        client.start_all_nodes("proj-1")
+
+    assert post.call_count == 2
+    post.assert_any_call(
+        f"{BASE_URL}/v2/projects/proj-1/nodes/n1/start", json=None, timeout=300
+    )
+    post.assert_any_call(
+        f"{BASE_URL}/v2/projects/proj-1/nodes/n2/start", json=None, timeout=300
+    )
+
+
+@allure.title("start_all_nodes startet verbleibende Nodes trotz einzelnem Fehler")
+@allure.description(
+    "Überprüft, dass start_all_nodes weiterhin versucht, alle übrigen Nodes "
+    "zu starten, wenn eine einzelne Node fehlschlägt, und erst danach einen "
+    "RuntimeError wirft, der genau die fehlgeschlagene(n) Node(s) benennt - "
+    "statt die gesamte Operation beim ersten Fehler abzubrechen"
+)
+@allure.tag("negativ-test", "gns3_client")
+@allure.feature("gns3_client")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_client_022() -> None:
+    with (
+        patch("src.gns3_client.requests.get") as get,
+        patch("src.gns3_client.requests.post") as post,
+    ):
+        get.return_value = _response(
+            json_data=[
+                {"node_id": "n1", "name": "PC1"},
+                {"node_id": "n2", "name": "PC2"},
+                {"node_id": "n3", "name": "PC3"},
+            ]
+        )
+        post.side_effect = [
+            _response(ok=True, content=False),
+            _response(ok=False, status_code=409, text="Timeout error"),
+            _response(ok=True, content=False),
+        ]
+        client = GNS3Client(BASE_URL)
+        with pytest.raises(
+            RuntimeError, match=r"Failed to start 1/3 node\(s\): \['PC2'\]"
+        ):
+            client.start_all_nodes("proj-1")
+
+    assert post.call_count == 3

@@ -18,6 +18,11 @@ from src.logger_adapter import get_logger
 logger = get_logger(__name__)
 
 _CLOUD_PORT_NAME = "eth0"
+_DEFAULT_TIMEOUT_SECONDS = 30
+# Comfortably exceeds GNS3's own observed 240s internal per-node compute
+# timeout, so we don't time out client-side before GNS3 itself gives up on
+# a slow-starting node.
+_NODE_START_TIMEOUT_SECONDS = 300
 
 # Fields on a template object that describe the template itself, not the
 # device it configures (e.g. platform, qemu_path, ram, hda_disk_image, ...).
@@ -61,18 +66,23 @@ class GNS3Client:
                 f"{response.status_code} error for {response.url}: {response.text}",
             )
 
-    def _get(self, path: str):
-        response = requests.get(f"{self.base_url}{path}")
+    def _get(self, path: str, timeout: int = _DEFAULT_TIMEOUT_SECONDS):
+        response = requests.get(f"{self.base_url}{path}", timeout=timeout)
         self._raise_for_status(response)
         return response.json()
 
-    def _post(self, path: str, json: dict | None = None):
-        response = requests.post(f"{self.base_url}{path}", json=json)
+    def _post(
+        self,
+        path: str,
+        json: dict | None = None,
+        timeout: int = _DEFAULT_TIMEOUT_SECONDS,
+    ):
+        response = requests.post(f"{self.base_url}{path}", json=json, timeout=timeout)
         self._raise_for_status(response)
         return response.json() if response.content else {}
 
-    def _delete(self, path: str) -> None:
-        response = requests.delete(f"{self.base_url}{path}")
+    def _delete(self, path: str, timeout: int = _DEFAULT_TIMEOUT_SECONDS) -> None:
+        response = requests.delete(f"{self.base_url}{path}", timeout=timeout)
         self._raise_for_status(response)
 
     def delete_all_nodes(self, project_id: str) -> None:
@@ -307,10 +317,38 @@ class GNS3Client:
 
     def start_all_nodes(self, project_id: str) -> None:
         """
-        Starts every node in the project.
+        Starts every node in the project one at a time, rather than GNS3's
+        own batch 'start all' endpoint. That endpoint has been observed to
+        fail the entire operation when a single node's start exceeds GNS3's
+        own internal 240s per-node compute timeout - easily triggered by
+        starting many QEMU-backed nodes (e.g. several Cisco IOSv routers)
+        at once on a resource-constrained host. Starting sequentially
+        naturally staggers the actual work instead of firing every node's
+        start simultaneously, and on a failure reports exactly which
+        node(s) failed instead of an opaque all-or-nothing batch error -
+        nodes that did start successfully are left running.
         """
-        self._post(f"/v2/projects/{project_id}/nodes/start")
-        logger.info("Started all GNS3 nodes")
+        nodes = self._get(f"/v2/projects/{project_id}/nodes")
+        failed_names = []
+        for node in nodes:
+            try:
+                self._post(
+                    f"/v2/projects/{project_id}/nodes/{node['node_id']}/start",
+                    timeout=_NODE_START_TIMEOUT_SECONDS,
+                )
+            except requests.exceptions.RequestException as error:
+                failed_names.append(node["name"])
+                logger.error(f"Failed to start node '{node['name']}': {error}")
+
+        if failed_names:
+            raise logger.alert(
+                RuntimeError,
+                f"Failed to start {len(failed_names)}/{len(nodes)} node(s): "
+                f"{failed_names}. The rest started successfully; check the "
+                f"GNS3 Web UI, then rerun deploy if needed (redeploys are "
+                f"idempotent).",
+            )
+        logger.info(f"Started all {len(nodes)} GNS3 node(s)")
 
 
 def deploy_topology(
