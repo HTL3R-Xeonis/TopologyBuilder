@@ -264,6 +264,13 @@ def deploy(
         help="ESXi datastore to place newly provisioned topology VMs on. "
         "Required if the topology has any ESXi-hosted (role: VM) nodes.",
     ),
+    esxi_ova_cache_dir: Optional[str] = typer.Option(
+        _CLI_CONFIG.get("esxi_ova_cache_dir"),
+        "--esxi-ova-cache-dir",
+        help="Directory to stage downloaded node OVAs in before import. "
+        "Defaults to the system temp dir, which may not have room for "
+        "multi-gigabyte OVAs - point this at a larger volume if needed.",
+    ),
 ) -> None:
     """
     Validate a config file, build the topology, and deploy it to GNS3/ESXi.
@@ -313,7 +320,9 @@ def deploy(
         )
 
     orchestrator.create_gns3_configuration_file(nodes, vm_name=gns3_vm_name)
-    orchestrator.deploy_esxi_nodes(nodes, esxi_datastore)
+    orchestrator.deploy_esxi_nodes(
+        nodes, esxi_datastore, download_dir=esxi_ova_cache_dir
+    )
     orchestrator.deploy_gns3_topology(
         nodes, gns3_project or Path(config_path).stem, vm_name=gns3_vm_name
     )

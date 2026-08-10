@@ -28,3 +28,9 @@ gns3_trunk_network: PG-GNS3-TRUNK
 # Datastore to place newly provisioned topology VMs on. Only needed if the
 # topology config has ESXi-hosted (role: VM) nodes.
 esxi_datastore: datastore1
+
+# Directory to stage downloaded node OVAs in before import. Defaults to the
+# system temp dir, which may be too small for multi-gigabyte OVAs - point
+# this at a larger volume (e.g. the same NFS mount used for gns3_ova_path)
+# if you hit "No space left on device".
+esxi_ova_cache_dir: /mnt/nfs-share

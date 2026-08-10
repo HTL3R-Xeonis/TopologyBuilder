@@ -166,7 +166,10 @@ class VMOrchestrator:
         deploy_topology(f"http://{gns3_ip_address}", project_name, nodes)
 
     def deploy_esxi_nodes(
-        self, nodes: dict[str, GenericNode], datastore_name: str
+        self,
+        nodes: dict[str, GenericNode],
+        datastore_name: str,
+        download_dir: str | None = None,
     ) -> None:
         """
         Provisions the real ESXi VM behind every ESXi-hosted node in the
@@ -180,10 +183,16 @@ class VMOrchestrator:
         OVAs can run into multiple gigabytes.
         :param nodes: built topology of the nodes
         :param datastore_name: ESXi datastore to place the new VMs on
+        :param download_dir: directory to stage downloaded OVAs in before
+            import. Defaults to the system temp dir, which may not have
+            room for multi-gigabyte OVAs - point this at a larger volume
+            (e.g. the same NFS mount used for gns3_ova_path) if needed.
         :return:
         """
         importer = OVAImporter(self.esxi_connection)
-        with tempfile.TemporaryDirectory(prefix="topologybuilder-ova-") as tmp_dir:
+        with tempfile.TemporaryDirectory(
+            prefix="topologybuilder-ova-", dir=download_dir
+        ) as tmp_dir:
             ova_paths: dict[str, str] = {}
             for node in nodes.values():
                 if node.env != Environment.ON_ESXI:
