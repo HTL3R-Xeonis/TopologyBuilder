@@ -34,7 +34,7 @@ class ConfigFileHandler:
             raise logger.alert(
                 FileNotFoundError, f"File does not exists. Current path: {path}"
             )
-        if not Path(path).is_file() and not (
+        if not Path(path).is_file() or not (
             path.endswith(".yml") or path.endswith(".yaml")
         ):
             raise logger.alert(
@@ -113,7 +113,7 @@ class ConfigFileHandler:
 
     def __validate_node_group(self, node_group: dict) -> None:
         """
-        Helper-methode for validate_file. Validates the nodegroup of given node.
+        Helper method for validate_file. Validates the nodegroup of given node.
         :param node_group: Dictionary entry of nodes. Contains the image, role and names.
         :return:
         """
@@ -181,7 +181,7 @@ class ConfigFileHandler:
 
     def __validate_edges(self, edge: list) -> None:
         """
-        Helper-methode for validate_file. Validates the entries of given edge.
+        Helper method for validate_file. Validates the entries of given edge.
         :param edge: List entry of edges. Contains the connections between the nodes.
         :return:
         """

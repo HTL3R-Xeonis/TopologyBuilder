@@ -391,3 +391,18 @@ def conf_file_024() -> None:
 def conf_file_025() -> None:
     c = ConfigFileHandler(add_folder_path("config_file_025.yml"))
     c.validate_file()
+
+
+@allure.title("Datei mit falscher Endung")
+@allure.description(
+    "Überprüft, ob ConfigFileHandler() erkennt, ob eine existierende Datei nicht auf *.yaml oder *.yml endet"
+)
+@allure.tag("user-input", "negativ-test", "config-file")
+@allure.feature("config_file")
+@allure.severity(allure.severity_level.MINOR)
+def conf_file_026() -> None:
+    with pytest.raises(
+        ValueError,
+        match=r"Path does not link to \*\.yaml or \*\.yml file\. Current path: .*",
+    ):
+        ConfigFileHandler(add_folder_path("config_file_026.txt"))
