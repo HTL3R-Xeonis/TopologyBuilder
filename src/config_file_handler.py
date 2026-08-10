@@ -8,6 +8,7 @@ from pathlib import Path
 import yaml
 from src.logger_adapter import get_logger
 from src.connections_handler import APIFunctions
+from src.factories import normalize_template_name
 
 logger = get_logger(__name__)
 
@@ -133,7 +134,10 @@ class ConfigFileHandler:
                 f"Image must be of type string. Current type: {type(node_group['image'])}",
             )
         if self.available_templates is not None:
-            if node_group["image"] not in self.available_templates:
+            normalized_available = {
+                normalize_template_name(t) for t in self.available_templates
+            }
+            if normalize_template_name(node_group["image"]) not in normalized_available:
                 raise logger.alert(
                     ValueError, f"Image {node_group['image']} not found on ESXi or GNS3"
                 )

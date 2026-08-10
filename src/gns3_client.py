@@ -9,7 +9,7 @@ __license__ = "GNU GPLv3"
 
 import requests
 
-from src.factories import Environment, GenericNode
+from src.factories import Environment, GenericNode, normalize_template_name
 from src.graph_visualizer import compute_node_positions
 from src.logger_adapter import get_logger
 
@@ -78,12 +78,16 @@ class GNS3Client:
 
     def find_template(self, image: str) -> dict:
         """
-        Resolves a node's configured image to a GNS3 template by exact name match.
+        Resolves a node's configured image to a GNS3 template. Matching
+        ignores case and whitespace differences (see normalize_template_name)
+        - real GNS3 installs have been observed to have template names that
+        differ from a config's image name by exactly that kind of noise.
         :param image: the image name as used in the topology config file
         :return: the matching template dict, including 'template_id' and 'template_type'
         """
+        normalized_image = normalize_template_name(image)
         for template in self.get_templates():
-            if template.get("name") == image:
+            if normalize_template_name(template.get("name", "")) == normalized_image:
                 return template
         raise logger.alert(ValueError, f"No GNS3 template found for image '{image}'")
 

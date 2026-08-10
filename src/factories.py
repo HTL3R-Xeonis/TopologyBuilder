@@ -38,6 +38,19 @@ def _sanitize_ifname(raw: str, max_length: int = _LINUX_IFNAME_MAX_LENGTH) -> st
     return f"{sanitized[: max_length - len(suffix) - 1]}-{suffix}"
 
 
+def normalize_template_name(name: str) -> str:
+    """
+    Normalizes a template/image name for lenient comparison: case-insensitive,
+    with any run of whitespace (leading, trailing, or repeated internal)
+    collapsed to a single space. Real-world template names have been observed
+    to differ from a topology config's image name by exactly this kind of
+    whitespace/case noise (e.g. "Cisco IOSvL2 15.2.1" vs "Cisco IOSvL2  15.2.1").
+    :param name: the name to normalize
+    :return: normalized name, safe to compare with ==
+    """
+    return " ".join(name.split()).lower()
+
+
 class Environment(Enum):
     ON_NOTHING = 0
     ON_ESXI = 1
@@ -59,14 +72,17 @@ class Environment(Enum):
         image: str,
     ) -> Literal[Environment.ON_GNS3, Environment.ON_ESXI, Environment.ON_NOTHING]:
         """
-        Returns the environment based on the image
+        Returns the environment based on the image. Matching ignores case and
+        whitespace differences (see normalize_template_name).
         #@TODO add description and tests
         :param image: image to judge the environment on
         :return: Either returns ON_ESXI or ON_GNS3. When the template-name isn't on either then it returns ON_NOTHING
         """
-        if image in Environment.get_templates()[0]:
+        normalized_image = normalize_template_name(image)
+        gns3_templates, esxi_templates = Environment.get_templates()
+        if any(normalize_template_name(t) == normalized_image for t in gns3_templates):
             return Environment.ON_GNS3
-        if image in Environment.get_templates()[1]:
+        if any(normalize_template_name(t) == normalized_image for t in esxi_templates):
             return Environment.ON_ESXI
         return Environment.ON_NOTHING
 
