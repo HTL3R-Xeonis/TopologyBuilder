@@ -243,8 +243,12 @@ def deploy(
     gns3_trunk_network: Optional[str] = typer.Option(
         _CLI_CONFIG.get("gns3_trunk_network"),
         "--gns3-trunk-network",
-        help="ESXi port group for the fresh GNS3 VM's VLAN trunk NIC (must be "
-        "the OVA's second-added network adapter). Required with --fresh-gns3-vm.",
+        help="ESXi port group for the GNS3 VM's VLAN trunk NIC (must be the "
+        "OVA's second-added network adapter with --fresh-gns3-vm). Required "
+        "with --fresh-gns3-vm. If given (with or without --fresh-gns3-vm), "
+        "this port group is also set to accept promiscuous mode/MAC "
+        "changes/forged transmits, which GNS3's Cloud nodes need to bridge "
+        "topology devices through it.",
     ),
     gns3_project: Optional[str] = typer.Option(
         _CLI_CONFIG.get("gns3_project"),
@@ -319,7 +323,9 @@ def deploy(
             vm_name=gns3_vm_name,
         )
 
-    orchestrator.create_gns3_configuration_file(nodes, vm_name=gns3_vm_name)
+    orchestrator.create_gns3_configuration_file(
+        nodes, vm_name=gns3_vm_name, trunk_network_name=gns3_trunk_network
+    )
     orchestrator.deploy_esxi_nodes(
         nodes, esxi_datastore, download_dir=esxi_ova_cache_dir
     )

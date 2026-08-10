@@ -23,6 +23,12 @@ gns3_project: TopologyBuilder
 gns3_ova_path: /mnt/nfs-share/gns3.ova
 gns3_datastore: datastore1
 gns3_mgmt_network: PG-MGMT
+
+# ESXi port group carrying the GNS3 VM's VLAN trunk NIC. Required with
+# --fresh-gns3-vm; also used on every deploy (with or without
+# --fresh-gns3-vm) to ensure it accepts promiscuous mode/MAC changes/forged
+# transmits, which GNS3's Cloud nodes need to bridge topology devices
+# through it - without this, ESXi silently drops all bridged traffic.
 gns3_trunk_network: PG-GNS3-TRUNK
 
 # Datastore to place newly provisioned topology VMs on. Only needed if the

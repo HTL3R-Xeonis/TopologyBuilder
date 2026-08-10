@@ -324,6 +324,47 @@ class ESXiConnection(GenericConnection):
             f"Created ESXi port group '{name}' (VLAN {vlan_id}) on {vswitch_name}"
         )
 
+    def ensure_bridging_security_policy(self, name: str) -> None:
+        """
+        Ensures an existing port group accepts promiscuous mode, MAC address
+        changes, and forged transmits - required for a port group whose VM
+        relays traffic for MAC addresses other than its own vNIC's, e.g. the
+        GNS3 VM's trunk NIC, which GNS3's Cloud nodes use to bridge in
+        arbitrary topology devices' own MACs. ESXi's default security policy
+        rejects promiscuous mode and forged transmits, which silently drops
+        all such relayed traffic without any visible error on either side.
+        :param name: name of an existing port group to update
+        :return:
+        """
+        network_system = self.get_host_system().configManager.networkSystem
+        port_group = next(
+            (pg for pg in network_system.networkInfo.portgroup if pg.spec.name == name),
+            None,
+        )
+        if port_group is None:
+            raise logger.alert(ValueError, f"Port group '{name}' not found")
+
+        spec = port_group.spec
+        spec.policy = spec.policy or vim.host.NetworkPolicy()
+        security = spec.policy.security or vim.host.NetworkPolicy.SecurityPolicy()
+        if (
+            security.allowPromiscuous
+            and security.macChanges
+            and security.forgedTransmits
+        ):
+            return
+
+        security.allowPromiscuous = True
+        security.macChanges = True
+        security.forgedTransmits = True
+        spec.policy.security = security
+
+        network_system.UpdatePortGroup(pgName=name, portgrp=spec)
+        logger.info(
+            f"Enabled promiscuous mode, MAC changes, and forged transmits on "
+            f"port group '{name}'"
+        )
+
     def list_port_groups(self) -> list[dict[str, str | int]]:
         """
         Lists the port groups configured on the ESXi host's vSwitches.

@@ -125,7 +125,10 @@ class VMOrchestrator:
         return gns3_ip_address
 
     def create_gns3_configuration_file(
-        self, nodes: dict[str, GenericNode], vm_name: str = "GNS3"
+        self,
+        nodes: dict[str, GenericNode],
+        vm_name: str = "GNS3",
+        trunk_network_name: str | None = None,
     ) -> None:
         """
         Ensures the ESXi vSwitch has a port group for every ESXi-hosted
@@ -133,13 +136,21 @@ class VMOrchestrator:
         to the GNS3 VM so the two sides of the bridge agree on VLAN numbering.
         :param nodes: built topology of the nodes
         :param vm_name: name of the GNS3 VM
+        :param trunk_network_name: name of the ESXi port group carrying the
+            GNS3 VM's VLAN trunk NIC (e.g. PG-GNS3-TRUNK). If given, ensures
+            it accepts promiscuous mode/MAC changes/forged transmits, which
+            GNS3's Cloud nodes need to bridge in each topology device's own
+            MAC through that one NIC - ESXi's default security policy
+            silently drops that traffic otherwise. Skipped if not given.
         :return:
-        @TODO create pytest
         """
         vlan_assignments = compute_esxi_vlan_assignments(nodes)
         for esxi_vlan_name, vlan_id in vlan_assignments.items():
             self.esxi_connection.ensure_port_group(esxi_vlan_name, vlan_id)
         logger.info(f"Ensured {len(vlan_assignments)} ESXi port group(s)")
+
+        if trunk_network_name is not None:
+            self.esxi_connection.ensure_bridging_security_policy(trunk_network_name)
 
         gns3_ip_address = self._get_gns3_vm_ip(vm_name)
 
