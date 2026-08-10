@@ -250,6 +250,16 @@ def deploy(
         "changes/forged transmits, which GNS3's Cloud nodes need to bridge "
         "topology devices through it.",
     ),
+    gns3_trunk_interface: str = typer.Option(
+        _CLI_CONFIG.get("gns3_trunk_interface", "eth1"),
+        "--gns3-trunk-interface",
+        help="Name of the GNS3 VM's own guest-OS network interface for its "
+        "VLAN trunk NIC (not the ESXi port group - see --gns3-trunk-network "
+        "for that). Not guaranteed to be 'eth1' on every GNS3 VM build, "
+        "e.g. after --fresh-gns3-vm imports a single-NIC OVA and a second "
+        "NIC gets added on top. If wrong, the error lists the VM's actual "
+        "interfaces.",
+    ),
     gns3_project: Optional[str] = typer.Option(
         _CLI_CONFIG.get("gns3_project"),
         "--gns3-project",
@@ -326,7 +336,10 @@ def deploy(
 
     orchestrator.delete_stale_esxi_resources(nodes)
     orchestrator.create_gns3_configuration_file(
-        nodes, vm_name=gns3_vm_name, trunk_network_name=gns3_trunk_network
+        nodes,
+        vm_name=gns3_vm_name,
+        trunk_network_name=gns3_trunk_network,
+        trunk_interface=gns3_trunk_interface,
     )
     orchestrator.deploy_esxi_nodes(
         nodes, esxi_datastore, download_dir=esxi_ova_cache_dir

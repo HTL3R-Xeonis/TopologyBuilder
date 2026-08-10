@@ -187,6 +187,7 @@ class VMOrchestrator:
         nodes: dict[str, GenericNode],
         vm_name: str | None = None,
         trunk_network_name: str | None = None,
+        trunk_interface: str = "eth1",
     ) -> None:
         """
         Ensures the ESXi vSwitch has a port group for every ESXi-hosted
@@ -200,6 +201,11 @@ class VMOrchestrator:
             GNS3's Cloud nodes need to bridge in each topology device's own
             MAC through that one NIC - ESXi's default security policy
             silently drops that traffic otherwise. Skipped if not given.
+        :param trunk_interface: name of the GNS3 VM's own guest-OS network
+            interface for that same trunk NIC (e.g. 'eth1'). Not the same
+            as trunk_network_name above - this is the interface name
+            inside the GNS3 VM's guest OS, which isn't guaranteed to match
+            across different GNS3 VM builds (see GNS3VMInterfaceSetup).
         :return:
         """
         vlan_assignments = compute_esxi_vlan_assignments(nodes)
@@ -214,7 +220,7 @@ class VMOrchestrator:
 
         gns3_connection = SSHConnection(gns3_ip_address, "gns3", "gns3")
         gns3_settings_setter = GNS3VMInterfaceSetup(gns3_connection)
-        gns3_settings_setter.write_config_file(nodes)
+        gns3_settings_setter.write_config_file(nodes, trunk_interface=trunk_interface)
         logger.info(f"Wrote GNS3 configuration for {len(nodes)} node(s)")
 
     def deploy_gns3_topology(

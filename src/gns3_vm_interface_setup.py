@@ -80,6 +80,37 @@ class GNS3VMInterfaceSetup:
                 f"{stderr.read().decode().strip()}",
             )
 
+    def _verify_interface_exists(self, interface_name: str) -> None:
+        """
+        Confirms the given interface actually exists on the GNS3 VM before
+        trying to create VLAN subinterfaces on it. The trunk NIC's name
+        isn't guaranteed to be 'eth1' on every GNS3 VM build - e.g. a
+        --fresh-gns3-vm import from an OVA that only declares one NIC gets
+        a second one added afterward (see OVAImporter/add_vm_network_adapters),
+        and the guest OS may not name that added NIC the same way. Raises a
+        clear error listing the actual available interfaces, instead of
+        letting the first 'ip link add' fail deep inside _apply_command
+        with a bare 'Cannot find device' message.
+        :param interface_name: interface name to check for
+        :return:
+        """
+        _, stdout, _ = self.gns3_connection.exec_command(
+            f"ip -br link show {interface_name}"
+        )
+        if stdout.channel.recv_exit_status() == 0:
+            return
+
+        _, stdout, _ = self.gns3_connection.exec_command(
+            "ip -br link show | awk '{print $1}' | grep -v '^lo$'"
+        )
+        available = [line.strip() for line in stdout.readlines()]
+        raise logger.alert(
+            ValueError,
+            f"GNS3 VM has no interface named '{interface_name}'. Available "
+            f"interfaces: {available}. Specify --gns3-trunk-interface if "
+            f"the trunk NIC isn't named '{interface_name}' on this VM.",
+        )
+
     def _reset_subinterfaces_commands(self, interface: str) -> None:
         """
         Deletes the existing subinterfaces of given interface on the GNS3 VM.
@@ -108,16 +139,21 @@ class GNS3VMInterfaceSetup:
             )
             self._apply_command(f"ip link set {esxi_vlan_name} up")
 
-    def write_config_file(self, nodes: dict[str, GenericNode]) -> None:
+    def write_config_file(
+        self, nodes: dict[str, GenericNode], trunk_interface: str = "eth1"
+    ) -> None:
         """
         Applies the VLAN subinterface configuration to the GNS3 VM: deletes the
         existing subinterfaces and creates the ones needed for the given
         topology. Also keeps a human-readable record of the applied commands
         in ./esxi_instances/.
         :param nodes: built topology of the nodes
+        :param trunk_interface: name of the GNS3 VM's trunk NIC to create
+            VLAN subinterfaces on. Verified to exist before use - see
+            _verify_interface_exists.
         :return:
-        @TODO create pytest
         """
+        self._verify_interface_exists(trunk_interface)
 
         config_file_path = self.configuration_file_path
         config_file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -125,5 +161,5 @@ class GNS3VMInterfaceSetup:
         with open(config_file_path, "w") as f:
             f.write("# Commands applied to the GNS3 VM via SSH:\n")
 
-        self._reset_subinterfaces_commands("eth1")
-        self._create_subinterfaces_commands("eth1", nodes)
+        self._reset_subinterfaces_commands(trunk_interface)
+        self._create_subinterfaces_commands(trunk_interface, nodes)

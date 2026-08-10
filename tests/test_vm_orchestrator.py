@@ -168,7 +168,7 @@ def vm_orchestrator_004() -> None:
         orchestrator.create_gns3_configuration_file(nodes, vm_name="GNS3")
 
         setup = setup_cls.return_value
-        setup.write_config_file.assert_called_once_with(nodes)
+        setup.write_config_file.assert_called_once_with(nodes, trunk_interface="eth1")
         ssh_cls.assert_called_once_with("10.20.20.221", "gns3", "gns3")
 
     esxi_connection.ensure_port_group.assert_called_once()

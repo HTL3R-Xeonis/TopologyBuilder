@@ -31,6 +31,14 @@ gns3_mgmt_network: PG-MGMT
 # through it - without this, ESXi silently drops all bridged traffic.
 gns3_trunk_network: PG-GNS3-TRUNK
 
+# Name of the GNS3 VM's own guest-OS interface for that same trunk NIC -
+# NOT the ESXi port group above, the interface name inside the VM itself.
+# Defaults to 'eth1', but this isn't guaranteed across different GNS3 VM
+# builds (e.g. after --fresh-gns3-vm imports a single-NIC OVA and a second
+# NIC gets added on top, the guest may name it something else). If wrong,
+# the deploy error lists the VM's actual interfaces.
+gns3_trunk_interface: eth1
+
 # Datastore to place newly provisioned topology VMs on. Only needed if the
 # topology config has ESXi-hosted (role: VM) nodes.
 esxi_datastore: datastore1
