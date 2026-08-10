@@ -144,7 +144,13 @@ class GNS3Client:
                 "properties": properties,
             },
         )
-        logger.info(f"Created GNS3 node '{name}' ({node['node_id']})")
+        if node.get("name") != name:
+            logger.warning(
+                f"Requested GNS3 node name '{name}' but server assigned "
+                f"'{node.get('name')}' instead (likely a name collision with "
+                f"an existing node from a previous deploy of this project)"
+            )
+        logger.info(f"Created GNS3 node '{node.get('name')}' ({node['node_id']})")
         return node
 
     def create_cloud_node(
@@ -185,11 +191,22 @@ class GNS3Client:
     def _find_port(node: dict, interface_name: str) -> dict:
         """
         Finds a node's port matching the given interface name, case-insensitively.
+        If the node has exactly one port, that port is used regardless of the
+        requested name - single-port node types (e.g. VPCS's 'Ethernet0') often
+        don't share the topology config's generic interface naming convention
+        (e.g. 'gi0/0'), but there's no ambiguity when there's only one port.
         """
-        for port in node.get("ports", []):
+        ports = node.get("ports", [])
+        for port in ports:
             if port.get("name", "").lower() == interface_name.lower():
                 return port
-        available = [port.get("name") for port in node.get("ports", [])]
+        if len(ports) == 1:
+            logger.warning(
+                f"Node '{node.get('name')}' has no port named '{interface_name}', "
+                f"using its only port '{ports[0].get('name')}' instead"
+            )
+            return ports[0]
+        available = [port.get("name") for port in ports]
         raise logger.alert(
             ValueError,
             f"No port named '{interface_name}' on node '{node.get('name')}'. "
