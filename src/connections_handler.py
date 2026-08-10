@@ -144,7 +144,6 @@ class GenericConnection(ABC):
         :param ip_address: IP address of the instance
         :param username: Hosts username
         :param password: corresponding password for user
-        @TODO create pytest
         """
         ipaddress.ip_address(ip_address)
 
@@ -183,7 +182,6 @@ class SSHConnection(GenericConnection, paramiko.SSHClient):
         """
         Connect to an SSH server.
         :return: Returns the client
-        @TODO create pytest
         """
         logger.debug(f"Opening SSH connection to {self.ip_address} as {self.username}")
         client = paramiko.SSHClient()
@@ -263,7 +261,6 @@ class ESXiConnection(GenericConnection):
         Searches for a VM with given name.
         :param vm_name: Name of VM to look for
         :return: Returns Virtual Machine if found, else None
-        @TODO create pytest
         """
         container_view = self.content.viewManager.CreateContainerView(
             self.content.rootFolder, [vim.VirtualMachine], True
@@ -336,7 +333,6 @@ class ESXiConnection(GenericConnection):
         Ignores loopback, link locals and multicast addresses.
         :param vm_name: Name of VM to look on
         :return: IPv4 Address if found, else None.
-        @TODO create pytest
         """
         vm = self.get_vm(vm_name)
         for nic in [] if vm is None else vm.guest.net:

@@ -28,7 +28,6 @@ class GNS3VMInterfaceSetup:
         """
         Initialize the GNS3 VM interface setup class
         :param gns3_connection: SSH connection to the GNS3 VM
-        @TODO create pytest
         """
         self.gns3_connection = gns3_connection
         self.configuration_file_path = Path(
@@ -40,8 +39,6 @@ class GNS3VMInterfaceSetup:
         Gets the subinterface-names of given interface-name and returns them as a list.
         :param interface: the name of the interface to look on for subinterfaces
         :return: A list of found subinterface-names as strings or an empty list
-
-        @TODO create pytest
         """
         lines = self.gns3_connection.exec_command(
             f"ip -br link show type vlan | grep @{interface} | awk '{{sub(/@.*/, \"\", $1); print $1}}'"
@@ -55,7 +52,6 @@ class GNS3VMInterfaceSetup:
         kept as a human-readable record of what was applied to the GNS3 VM.
         :param command: string to write
         :return:
-        @TODO create pytest
         """
         if not self.configuration_file_path.exists():
             logger.alert(
@@ -72,7 +68,6 @@ class GNS3VMInterfaceSetup:
         Raises if the remote command exits with a non-zero status.
         :param command: shell command to apply on the GNS3 VM
         :return:
-        @TODO create pytest
         """
         self._write_command(command)
 
@@ -165,7 +160,6 @@ class GNS3VMInterfaceSetup:
         Deletes the existing subinterfaces of given interface on the GNS3 VM.
         :param interface: name of interface, from which the subinterfaces are
         :return:
-        @TODO create pytest
         """
         for si in self._get_subinterfaces(interface):
             self._apply_command(f"ip link delete {si}")
@@ -180,7 +174,6 @@ class GNS3VMInterfaceSetup:
         :param interface_name: name of interface to which to add the subinterfaces
         :param nodes: built topology of the nodes
         :return:
-        @TODO create pytest
         """
         for esxi_vlan_name, vlan_id in compute_esxi_vlan_assignments(nodes).items():
             self._apply_command(

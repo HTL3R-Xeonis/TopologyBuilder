@@ -75,7 +75,6 @@ class Environment(Enum):
         """
         Returns the environment based on the image. Matching ignores case and
         whitespace differences (see normalize_template_name).
-        #@TODO add description and tests
         :param image: image to judge the environment on
         :return: Either returns ON_ESXI or ON_GNS3. When the template-name isn't on either then it returns ON_NOTHING
         """
@@ -303,8 +302,6 @@ class GenericNode:
         Initializes the Node class
         :param image: which image to use for this node
         :param name: which name to use for this node
-
-        @TODO add tests for self.env variable
         """
         self.image = image
         self.name = name

@@ -225,6 +225,38 @@ def factories_008() -> None:
     assert str(node) == "PC"
 
 
+@allure.title("GenericNode.env spiegelt die erkannte Umgebung des Images wider")
+@allure.description(
+    "Überprüft, dass GenericNode beim Anlegen self.env passend zum Image "
+    "setzt - ON_GNS3 für ein GNS3-Template, ON_ESXI für ein ESXi-Template"
+)
+@allure.tag("positiv-test", "factory")
+@allure.feature("factory")
+@allure.severity(allure.severity_level.CRITICAL)
+def factories_022() -> None:
+    gns3_node = GenericNode("VPCS", "PC")
+    assert gns3_node.env == Environment.ON_GNS3
+
+    esxi_node = GenericNode("Ubuntu-Server", "VM1")
+    assert esxi_node.env == Environment.ON_ESXI
+
+
+@allure.title("GenericNode lehnt ein Image ab, das auf keinem System existiert")
+@allure.description(
+    "Überprüft, dass GenericNode.__init__ einen ValueError wirft, statt eine "
+    "Node mit env=ON_NOTHING anzulegen, wenn das Image weder als GNS3- noch "
+    "als ESXi-Template bekannt ist"
+)
+@allure.tag("negativ-test", "factory")
+@allure.feature("factory")
+@allure.severity(allure.severity_level.CRITICAL)
+def factories_023() -> None:
+    with pytest.raises(
+        ValueError, match=r"Image Nonexistent-Image not found on ESXi or GNS3"
+    ):
+        GenericNode("Nonexistent-Image", "PC")
+
+
 @allure.title("Interfaces zu Node hinzufügen")
 @allure.description(
     "Überprüft, ob mehrere Interfaces an einer Node angelegt werden können"

@@ -216,6 +216,240 @@ def gns3_vm_interface_setup_005() -> None:
         setup._detect_trunk_interface()
 
 
+@allure.title("_get_subinterfaces liefert bereinigte Liste zurück")
+@allure.description(
+    "Überprüft, dass _get_subinterfaces die Ausgabe des ip-Befehls in eine "
+    "Liste von Subinterface-Namen ohne Zeilenumbrüche umwandelt"
+)
+@allure.tag("positiv-test", "gns3_vm_interface_setup")
+@allure.feature("gns3_vm_interface_setup")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_vm_interface_setup_007() -> None:
+    setup = _make_setup(
+        {
+            "ip -br link show type vlan | grep @eth1": (
+                0,
+                ["PC4_gi0-0", "PC5_gi0-0"],
+            ),
+        }
+    )
+    assert setup._get_subinterfaces("eth1") == ["PC4_gi0-0", "PC5_gi0-0"]
+
+
+@allure.title("_get_subinterfaces liefert leere Liste ohne Subinterfaces")
+@allure.description(
+    "Überprüft, dass _get_subinterfaces eine leere Liste zurückgibt, wenn "
+    "das Interface keine VLAN-Subinterfaces hat"
+)
+@allure.tag("positiv-test", "gns3_vm_interface_setup")
+@allure.feature("gns3_vm_interface_setup")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_vm_interface_setup_008() -> None:
+    setup = _make_setup(
+        {"ip -br link show type vlan | grep @eth1": (0, [])},
+    )
+    assert setup._get_subinterfaces("eth1") == []
+
+
+@allure.title("_write_command hängt Befehl an die Konfigurationsdatei an")
+@allure.description(
+    "Überprüft, dass _write_command den gegebenen Befehl als neue Zeile an "
+    "die bestehende Konfigurationsdatei anhängt, ohne vorhandene Zeilen zu "
+    "überschreiben"
+)
+@allure.tag("positiv-test", "gns3_vm_interface_setup")
+@allure.feature("gns3_vm_interface_setup")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_vm_interface_setup_009(tmp_path: Path) -> None:
+    setup = _make_setup({})
+    setup.configuration_file_path = tmp_path / "config.txt"
+    setup.configuration_file_path.write_text("# existing\n")
+
+    setup._write_command("ip link set eth1 up")
+
+    assert (
+        setup.configuration_file_path.read_text() == "# existing\nip link set eth1 up\n"
+    )
+
+
+@allure.title(
+    "_write_command loggt einen Alert, wenn die Datei fehlt, schreibt aber trotzdem"
+)
+@allure.description(
+    "Überprüft, dass _write_command einen FileNotFoundError-Alert loggt, "
+    "wenn die Konfigurationsdatei noch nicht existiert, den Befehl aber "
+    "trotzdem schreibt, da 'a'-Modus die Datei implizit anlegt - das Logging "
+    "ist hier reine Diagnose, kein Abbruch"
+)
+@allure.tag("negativ-test", "gns3_vm_interface_setup")
+@allure.feature("gns3_vm_interface_setup")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_vm_interface_setup_010(tmp_path: Path) -> None:
+    setup = _make_setup({})
+    setup.configuration_file_path = tmp_path / "does_not_exist_yet" / "config.txt"
+    setup.configuration_file_path.parent.mkdir(parents=True)
+
+    setup._write_command("ip link set eth1 up")
+
+    assert setup.configuration_file_path.read_text() == "ip link set eth1 up\n"
+
+
+@allure.title(
+    "_apply_command führt den Befehl mit sudo -n aus und schreibt ihn in die Audit-Datei"
+)
+@allure.description(
+    "Überprüft, dass _apply_command den Befehl per SSH mit 'sudo -n' "
+    "voranstellt ausführt und ihn zuvor über _write_command protokolliert"
+)
+@allure.tag("positiv-test", "gns3_vm_interface_setup")
+@allure.feature("gns3_vm_interface_setup")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_vm_interface_setup_011(tmp_path: Path) -> None:
+    setup = _make_setup({"sudo -n ip link set eth1 up": (0, [])})
+    setup.configuration_file_path = tmp_path / "config.txt"
+    setup.configuration_file_path.write_text("")
+
+    setup._apply_command("ip link set eth1 up")
+
+    commands = [
+        call.args[0] for call in setup.gns3_connection.exec_command.call_args_list
+    ]
+    assert commands == ["sudo -n ip link set eth1 up"]
+    assert setup.configuration_file_path.read_text() == "ip link set eth1 up\n"
+
+
+@allure.title("_apply_command wirft RuntimeError bei nicht-null Exit-Code")
+@allure.description(
+    "Überprüft, dass _apply_command einen RuntimeError mit Exit-Code und "
+    "stderr-Inhalt wirft, wenn der Befehl auf der GNS3 VM fehlschlägt"
+)
+@allure.tag("negativ-test", "gns3_vm_interface_setup")
+@allure.feature("gns3_vm_interface_setup")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_vm_interface_setup_012(tmp_path: Path) -> None:
+    connection = MagicMock()
+    connection.ip_address = "10.20.20.231"
+    stdout = MagicMock()
+    stdout.channel.recv_exit_status.return_value = 1
+    stderr = MagicMock()
+    stderr.read.return_value = b'Cannot find device "eth1"'
+    connection.exec_command.side_effect = lambda command: (
+        MagicMock(),
+        stdout,
+        stderr,
+    )
+    setup = GNS3VMInterfaceSetup(connection)
+    setup.configuration_file_path = tmp_path / "config.txt"
+    setup.configuration_file_path.write_text("")
+
+    with pytest.raises(RuntimeError) as exc_info:
+        setup._apply_command("ip link add link eth1 name PC4_gi0-0 type vlan id 2")
+    assert "Command failed on GNS3 VM (exit 1)" in str(exc_info.value)
+    assert "Cannot find device" in str(exc_info.value)
+
+
+@allure.title("_reset_subinterfaces_commands löscht jede gefundene Subinterface")
+@allure.description(
+    "Überprüft, dass _reset_subinterfaces_commands für jede von "
+    "_get_subinterfaces gemeldete Subinterface einen 'ip link delete'-Befehl "
+    "anwendet, auch bei mehreren vorhandenen Subinterfaces"
+)
+@allure.tag("positiv-test", "gns3_vm_interface_setup")
+@allure.feature("gns3_vm_interface_setup")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_vm_interface_setup_013(tmp_path: Path) -> None:
+    setup = _make_setup(
+        {
+            "ip -br link show type vlan | grep @eth1": (
+                0,
+                ["PC4_gi0-0", "PC5_gi0-0"],
+            ),
+            "ip link delete PC4_gi0-0": (0, []),
+            "ip link delete PC5_gi0-0": (0, []),
+        }
+    )
+    setup.configuration_file_path = tmp_path / "config.txt"
+    setup.configuration_file_path.write_text("")
+
+    setup._reset_subinterfaces_commands("eth1")
+
+    commands = [
+        call.args[0] for call in setup.gns3_connection.exec_command.call_args_list
+    ]
+    assert "sudo -n ip link delete PC4_gi0-0" in commands
+    assert "sudo -n ip link delete PC5_gi0-0" in commands
+
+
+@allure.title("_reset_subinterfaces_commands tut nichts ohne vorhandene Subinterfaces")
+@allure.description(
+    "Überprüft, dass _reset_subinterfaces_commands keinen Befehl anwendet, "
+    "wenn das Interface keine bestehenden VLAN-Subinterfaces hat"
+)
+@allure.tag("positiv-test", "gns3_vm_interface_setup")
+@allure.feature("gns3_vm_interface_setup")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_vm_interface_setup_014(tmp_path: Path) -> None:
+    setup = _make_setup({"ip -br link show type vlan | grep @eth1": (0, [])})
+    setup.configuration_file_path = tmp_path / "config.txt"
+    setup.configuration_file_path.write_text("")
+
+    setup._reset_subinterfaces_commands("eth1")
+
+    assert setup.gns3_connection.exec_command.call_count == 1
+
+
+@allure.title(
+    "_create_subinterfaces_commands legt für jede zugewiesene VLAN eine Subinterface an"
+)
+@allure.description(
+    "Überprüft, dass _create_subinterfaces_commands für jede von "
+    "compute_esxi_vlan_assignments gelieferte VLAN-Zuweisung ein 'ip link "
+    "add'- und ein 'ip link set ... up'-Kommando anwendet, auch bei "
+    "mehreren Nodes/Interfaces"
+)
+@allure.tag("positiv-test", "gns3_vm_interface_setup")
+@allure.feature("gns3_vm_interface_setup")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_vm_interface_setup_015(tmp_path: Path) -> None:
+    setup = _make_setup(
+        {
+            "ip link add link eth1": (0, []),
+            "ip link set": (0, []),
+        }
+    )
+    setup.configuration_file_path = tmp_path / "config.txt"
+    setup.configuration_file_path.write_text("")
+
+    nf = NodeFactory()
+    vm1: GenericNode = nf.create_node("Ubuntu-Server", "VM", "VM1")
+    vm1.add_interface("ens160")
+    vm2: GenericNode = nf.create_node("Rocky 9.2", "VM", "VM2")
+    vm2.add_interface("ens160")
+    nodes = {"VM1": vm1, "VM2": vm2}
+
+    setup._create_subinterfaces_commands("eth1", nodes)
+
+    commands = [
+        call.args[0] for call in setup.gns3_connection.exec_command.call_args_list
+    ]
+    assert any(
+        f"ip link add link eth1 name {vm1.interfaces['ens160'].esxi_vlan} type vlan id 2"
+        in c
+        for c in commands
+    )
+    assert any(
+        f"ip link set {vm1.interfaces['ens160'].esxi_vlan} up" in c for c in commands
+    )
+    assert any(
+        f"ip link add link eth1 name {vm2.interfaces['ens160'].esxi_vlan} type vlan id 3"
+        in c
+        for c in commands
+    )
+    assert any(
+        f"ip link set {vm2.interfaces['ens160'].esxi_vlan} up" in c for c in commands
+    )
+
+
 @allure.title("write_config_file nutzt die automatische Erkennung ohne Angabe")
 @allure.description(
     "Überprüft, dass write_config_file ohne angegebenes trunk_interface "

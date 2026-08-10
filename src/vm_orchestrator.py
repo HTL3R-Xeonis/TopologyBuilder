@@ -27,7 +27,6 @@ class VMOrchestrator:
     """
     Provides methods for the whole process of provisioning the VMs on GNS3 and ESXi.
     As well as for creating certain parts of needed components and for setting the settings of the GNS3 VM.
-    @TODO create pytest
     """
 
     def __init__(self, esxi_host: str, username: str, password: str) -> None:
@@ -36,7 +35,6 @@ class VMOrchestrator:
         :param esxi_host: IPv4 address of the ESXi host
         :param username: username of the ESXi host
         :param password: corresponding password for user
-        @TODO create pytest
         """
         logger.info(f"Connecting to ESXi host {esxi_host} as {username}")
         self.esxi_connection = ESXiConnection(esxi_host, username, password)
@@ -99,7 +97,6 @@ class VMOrchestrator:
             none exists yet)
         :param ip_wait_timeout_seconds: how long to wait for the new VM to report an IP
         :return: IP address of the new GNS3 VM
-        @TODO create pytest
         """
         vm_name = self._resolve_gns3_vm_name(vm_name, require_existing=False)
         old_vm = self.esxi_connection.get_vm(vm_name)
@@ -239,7 +236,6 @@ class VMOrchestrator:
         :param project_name: name of the GNS3 project to create or reuse
         :param vm_name: name of the GNS3 VM, or None to auto-detect
         :return:
-        @TODO create pytest
         """
         gns3_ip_address = self._get_gns3_vm_ip(vm_name)
         deploy_topology(f"http://{gns3_ip_address}", project_name, nodes)

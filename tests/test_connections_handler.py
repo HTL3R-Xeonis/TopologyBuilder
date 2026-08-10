@@ -7,11 +7,12 @@ __license__ = "GNU GPLv3"
 from unittest.mock import MagicMock, patch
 
 import allure
+import paramiko
 import pytest
 from pyVmomi import vim
 
 from src import logger_adapter
-from src.connections_handler import ESXiConnection
+from src.connections_handler import ESXiConnection, GNS3Connection, SSHConnection
 
 logger_adapter.LoggerAdapter.is_test_run = True
 
@@ -166,6 +167,156 @@ def connections_handler_006() -> None:
 def connections_handler_007() -> None:
     conn = _make_esxi_connection(["GNS3-VM-backup-20260810171954", "PC4"])
     assert conn.find_gns3_vm() is None
+
+
+@allure.title("GenericConnection.__init__ lehnt eine ungültige IP-Adresse ab")
+@allure.description(
+    "Überprüft, dass GenericConnection.__init__ einen ValueError wirft, "
+    "bevor irgendein Attribut gesetzt oder connect() aufgerufen wird, wenn "
+    "die gegebene IP-Adresse ungültig ist"
+)
+@allure.tag("negativ-test", "connections_handler")
+@allure.feature("connections_handler")
+@allure.severity(allure.severity_level.CRITICAL)
+def connections_handler_009() -> None:
+    with patch.object(GNS3Connection, "connect") as mock_connect:
+        with pytest.raises(ValueError):
+            GNS3Connection("not-an-ip-address", "user", "pass")
+    mock_connect.assert_not_called()
+
+
+@allure.title("GenericConnection.__init__ setzt Attribute und ruft connect() auf")
+@allure.description(
+    "Überprüft, dass GenericConnection.__init__ IP-Adresse, Benutzername und "
+    "Passwort als Properties bereitstellt und das Ergebnis von connect() "
+    "als .connection speichert"
+)
+@allure.tag("positiv-test", "connections_handler")
+@allure.feature("connections_handler")
+@allure.severity(allure.severity_level.CRITICAL)
+def connections_handler_010() -> None:
+    with patch.object(
+        GNS3Connection, "connect", return_value="fake-connection"
+    ) as mock_connect:
+        conn = GNS3Connection("10.20.20.235", "gns3", "secret")
+
+    mock_connect.assert_called_once()
+    assert conn.ip_address == "10.20.20.235"
+    assert conn.username == "gns3"
+    assert conn.password == "secret"
+    assert conn.connection == "fake-connection"
+
+
+@allure.title("SSHConnection.connect baut eine paramiko-SSH-Verbindung auf")
+@allure.description(
+    "Überprüft, dass SSHConnection.connect einen paramiko.SSHClient anlegt, "
+    "System-Host-Keys lädt, unbekannte Host-Keys automatisch akzeptiert und "
+    "sich mit Host, Port 22, Benutzername und Passwort verbindet"
+)
+@allure.tag("positiv-test", "connections_handler")
+@allure.feature("connections_handler")
+@allure.severity(allure.severity_level.CRITICAL)
+def connections_handler_011() -> None:
+    mock_client = MagicMock()
+    with patch("src.connections_handler.paramiko.SSHClient", return_value=mock_client):
+        conn = SSHConnection("10.20.20.235", "gns3", "gns3")
+
+    mock_client.load_system_host_keys.assert_called_once()
+    (policy,), _ = mock_client.set_missing_host_key_policy.call_args
+    assert isinstance(policy, paramiko.AutoAddPolicy)
+    mock_client.connect.assert_called_once_with(
+        hostname="10.20.20.235", port=22, username="gns3", password="gns3", timeout=10
+    )
+    assert conn.connection is mock_client
+
+
+@allure.title("get_vm findet eine VM anhand des exakten Namens")
+@allure.description(
+    "Überprüft, dass get_vm die VM mit exakt passendem Namen zurückgibt und "
+    "den ContainerView danach zerstört"
+)
+@allure.tag("positiv-test", "connections_handler")
+@allure.feature("connections_handler")
+@allure.severity(allure.severity_level.CRITICAL)
+def connections_handler_012() -> None:
+    conn = _make_esxi_connection(["PC5", "PC4"])
+    target = conn.content.viewManager.CreateContainerView.return_value.view[1]
+
+    result = conn.get_vm("PC4")
+
+    assert result is target
+    conn.content.viewManager.CreateContainerView.return_value.Destroy.assert_called_once()
+
+
+@allure.title("get_vm gibt None zurück, wenn keine VM passt")
+@allure.description(
+    "Überprüft, dass get_vm None zurückgibt und den ContainerView trotzdem "
+    "zerstört, wenn keine VM mit dem gegebenen Namen existiert"
+)
+@allure.tag("negativ-test", "connections_handler")
+@allure.feature("connections_handler")
+@allure.severity(allure.severity_level.NORMAL)
+def connections_handler_013() -> None:
+    conn = _make_esxi_connection(["PC5"])
+
+    assert conn.get_vm("PC4") is None
+    conn.content.viewManager.CreateContainerView.return_value.Destroy.assert_called_once()
+
+
+@allure.title("get_vm_ip_address findet die erste gültige IPv4-Adresse")
+@allure.description(
+    "Überprüft, dass get_vm_ip_address IPv6- (inkl. Link-Local) und IPv4-"
+    "Link-Local-Adressen überspringt und die erste normale IPv4-Adresse "
+    "zurückgibt"
+)
+@allure.tag("positiv-test", "connections_handler")
+@allure.feature("connections_handler")
+@allure.severity(allure.severity_level.CRITICAL)
+def connections_handler_014() -> None:
+    conn = ESXiConnection.__new__(ESXiConnection)
+    nic = MagicMock()
+    nic.ipAddress = ["fe80::1", "169.254.1.1", "10.20.20.235", "::1"]
+    vm = MagicMock()
+    vm.guest.net = [nic]
+    conn.get_vm = MagicMock(return_value=vm)
+
+    assert conn.get_vm_ip_address("GNS3-VM") == "10.20.20.235"
+
+
+@allure.title(
+    "get_vm_ip_address gibt None zurück, wenn nur Sonderadressen vorhanden sind"
+)
+@allure.description(
+    "Überprüft, dass get_vm_ip_address None zurückgibt, wenn die VM nur "
+    "Loopback-, Link-Local- oder Multicast-Adressen hat"
+)
+@allure.tag("negativ-test", "connections_handler")
+@allure.feature("connections_handler")
+@allure.severity(allure.severity_level.NORMAL)
+def connections_handler_015() -> None:
+    conn = ESXiConnection.__new__(ESXiConnection)
+    nic = MagicMock()
+    nic.ipAddress = ["127.0.0.1", "169.254.5.5", "224.0.0.1"]
+    vm = MagicMock()
+    vm.guest.net = [nic]
+    conn.get_vm = MagicMock(return_value=vm)
+
+    assert conn.get_vm_ip_address("GNS3-VM") is None
+
+
+@allure.title("get_vm_ip_address gibt None zurück, wenn die VM nicht existiert")
+@allure.description(
+    "Überprüft, dass get_vm_ip_address None zurückgibt, ohne guest.net "
+    "anzufassen, wenn get_vm keine VM findet"
+)
+@allure.tag("negativ-test", "connections_handler")
+@allure.feature("connections_handler")
+@allure.severity(allure.severity_level.NORMAL)
+def connections_handler_016() -> None:
+    conn = ESXiConnection.__new__(ESXiConnection)
+    conn.get_vm = MagicMock(return_value=None)
+
+    assert conn.get_vm_ip_address("GNS3-VM") is None
 
 
 @allure.title("Falsches ESXi-Passwort wirft eine klare Fehlermeldung")

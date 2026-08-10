@@ -27,6 +27,23 @@ def _make_orchestrator() -> tuple[VMOrchestrator, MagicMock]:
     return orchestrator, esxi_connection
 
 
+@allure.title("__init__ verbindet sich mit dem ESXi-Host und speichert die Verbindung")
+@allure.description(
+    "Überprüft, dass VMOrchestrator.__init__ eine ESXiConnection mit den "
+    "gegebenen Zugangsdaten (Host, Benutzername, Passwort) aufbaut und das "
+    "Ergebnis als self.esxi_connection speichert"
+)
+@allure.tag("positiv-test", "vm_orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_010() -> None:
+    with patch("src.vm_orchestrator.ESXiConnection") as esxi_cls:
+        orchestrator = VMOrchestrator("10.20.20.202", "root", "secret")
+
+    esxi_cls.assert_called_once_with("10.20.20.202", "root", "secret")
+    assert orchestrator.esxi_connection is esxi_cls.return_value
+
+
 @allure.title("Neue GNS3 VM ohne vorhandene VM")
 @allure.description(
     "Überprüft, dass deploy_fresh_gns3_vm ohne vorhandene VM weder power_off_vm "
