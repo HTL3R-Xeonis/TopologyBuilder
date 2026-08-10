@@ -39,11 +39,6 @@ class GNS3Client:
         response.raise_for_status()
         return response.json() if response.content else {}
 
-    def _put(self, path: str, json: dict):
-        response = requests.put(f"{self.base_url}{path}", json=json)
-        response.raise_for_status()
-        return response.json()
-
     def get_templates(self) -> list[dict]:
         """
         Lists the GNS3 templates available on this server.
@@ -83,17 +78,12 @@ class GNS3Client:
         self, project_id: str, template_id: str, name: str, x: int, y: int
     ) -> dict:
         """
-        Creates a node from a template at the given scene position, then
-        renames it (template instantiation doesn't reliably honor a custom
-        name across GNS3 versions, so this is done as a separate, certain step).
+        Creates a node from a template at the given scene position.
         :return: the created node dict, including 'node_id' and 'ports'
         """
         node = self._post(
-            f"/v2/projects/{project_id}/templates/{template_id}",
-            json={"x": x, "y": y},
-        )
-        node = self._put(
-            f"/v2/projects/{project_id}/nodes/{node['node_id']}", json={"name": name}
+            f"/v2/projects/{project_id}/nodes",
+            json={"name": name, "template_id": template_id, "x": x, "y": y},
         )
         logger.info(f"Created GNS3 node '{name}' ({node['node_id']})")
         return node
