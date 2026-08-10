@@ -122,12 +122,15 @@ class VMOrchestrator:
         logger.info(f"'{vm_name}' VM found at {gns3_ip_address}")
         return gns3_ip_address
 
-    def create_gns3_configuration_file(self, nodes: dict[str, GenericNode]) -> None:
+    def create_gns3_configuration_file(
+        self, nodes: dict[str, GenericNode], vm_name: str = "GNS3"
+    ) -> None:
         """
         Ensures the ESXi vSwitch has a port group for every ESXi-hosted
         interface's VLAN, then applies the matching subinterface configuration
         to the GNS3 VM so the two sides of the bridge agree on VLAN numbering.
         :param nodes: built topology of the nodes
+        :param vm_name: name of the GNS3 VM
         :return:
         @TODO create pytest
         """
@@ -136,7 +139,7 @@ class VMOrchestrator:
             self.esxi_connection.ensure_port_group(esxi_vlan_name, vlan_id)
         logger.info(f"Ensured {len(vlan_assignments)} ESXi port group(s)")
 
-        gns3_ip_address = self._get_gns3_vm_ip()
+        gns3_ip_address = self._get_gns3_vm_ip(vm_name)
 
         gns3_connection = SSHConnection(gns3_ip_address, "gns3", "gns3")
         gns3_settings_setter = GNS3VMInterfaceSetup(gns3_connection)
@@ -144,7 +147,7 @@ class VMOrchestrator:
         logger.info(f"Wrote GNS3 configuration for {len(nodes)} node(s)")
 
     def deploy_gns3_topology(
-        self, nodes: dict[str, GenericNode], project_name: str
+        self, nodes: dict[str, GenericNode], project_name: str, vm_name: str = "GNS3"
     ) -> None:
         """
         Builds the topology's actual nodes and links inside a GNS3 project,
@@ -153,8 +156,9 @@ class VMOrchestrator:
         sets up - call that first so the subinterfaces already exist.
         :param nodes: built topology of the nodes
         :param project_name: name of the GNS3 project to create or reuse
+        :param vm_name: name of the GNS3 VM
         :return:
         @TODO create pytest
         """
-        gns3_ip_address = self._get_gns3_vm_ip()
+        gns3_ip_address = self._get_gns3_vm_ip(vm_name)
         deploy_topology(f"http://{gns3_ip_address}", project_name, nodes)

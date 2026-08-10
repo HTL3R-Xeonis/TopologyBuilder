@@ -251,6 +251,12 @@ def deploy(
         help="Name of the GNS3 project to create or reuse. Defaults to the "
         "config file's name.",
     ),
+    gns3_vm_name: str = typer.Option(
+        _CLI_CONFIG.get("gns3_vm_name", "GNS3"),
+        "--gns3-vm-name",
+        help="Name of the GNS3 VM on the ESXi host, e.g. if it isn't named "
+        "exactly 'GNS3'.",
+    ),
 ) -> None:
     """
     Validate a config file, build the topology, and deploy it to GNS3/ESXi.
@@ -285,11 +291,17 @@ def deploy(
 
     if fresh_gns3_vm:
         orchestrator.deploy_fresh_gns3_vm(
-            gns3_ova_path, gns3_datastore, gns3_mgmt_network, gns3_trunk_network
+            gns3_ova_path,
+            gns3_datastore,
+            gns3_mgmt_network,
+            gns3_trunk_network,
+            vm_name=gns3_vm_name,
         )
 
-    orchestrator.create_gns3_configuration_file(nodes)
-    orchestrator.deploy_gns3_topology(nodes, gns3_project or Path(config_path).stem)
+    orchestrator.create_gns3_configuration_file(nodes, vm_name=gns3_vm_name)
+    orchestrator.deploy_gns3_topology(
+        nodes, gns3_project or Path(config_path).stem, vm_name=gns3_vm_name
+    )
     typer.echo("Deployment complete.")
 
 
