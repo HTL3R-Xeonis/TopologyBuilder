@@ -511,3 +511,61 @@ def vm_orchestrator_017() -> None:
         )
 
     esxi_connection.get_vm_network_names.assert_not_called()
+
+
+@allure.title(
+    "deploy_esxi_nodes lädt jedes Image nur einmal herunter und importiert jeden ESXi-Knoten"
+)
+@allure.description(
+    "Überprüft, dass deploy_esxi_nodes GNS3-gehostete Knoten überspringt, "
+    "für jeden ESXi-gehosteten Knoten die passende OVA importiert und die "
+    "resultierende VM einschaltet - und ein Image, das sich mehrere Knoten "
+    "teilen, nur ein einziges Mal herunterlädt statt einmal pro Knoten"
+)
+@allure.tag("positiv-test", "vm_orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_018() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+
+    nf = NodeFactory()
+    gns3_node = nf.create_node("VPCS", "ROUTER", "R1")
+    vm1: GenericNode = nf.create_node("Ubuntu-Server", "VM", "VM1")
+    vm1.add_interface("ens160")
+    vm2: GenericNode = nf.create_node("Ubuntu-Server", "VM", "VM2")
+    vm2.add_interface("ens160")
+    nodes = {"R1": gns3_node, "VM1": vm1, "VM2": vm2}
+
+    with (
+        patch(
+            "src.vm_orchestrator.APIFunctions.download_esxi_template"
+        ) as mock_download,
+        patch("src.vm_orchestrator.OVAImporter") as importer_cls,
+    ):
+        importer = importer_cls.return_value
+        importer.import_ova.side_effect = ["vm1-handle", "vm2-handle"]
+
+        orchestrator.deploy_esxi_nodes(nodes, "datastore1")
+
+    mock_download.assert_called_once()
+    assert importer.import_ova.call_count == 2
+    esxi_connection.power_on_vm.assert_any_call("vm1-handle")
+    esxi_connection.power_on_vm.assert_any_call("vm2-handle")
+
+
+@allure.title("deploy_esxi_nodes legt das OVA-Cache-Verzeichnis an, falls angegeben")
+@allure.description(
+    "Überprüft, dass deploy_esxi_nodes einen gegebenen download_dir "
+    "erstellt, bevor die OVA-Downloads darin gestaged werden"
+)
+@allure.tag("positiv-test", "vm_orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.NORMAL)
+def vm_orchestrator_019(tmp_path) -> None:
+    orchestrator, _ = _make_orchestrator()
+    download_dir = tmp_path / "ova-cache"
+
+    with patch("src.vm_orchestrator.OVAImporter"):
+        orchestrator.deploy_esxi_nodes({}, "datastore1", download_dir=str(download_dir))
+
+    assert download_dir.is_dir()

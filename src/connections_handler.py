@@ -230,11 +230,6 @@ class SSHConnection(GenericConnection, paramiko.SSHClient):
         return client
 
 
-class GNS3Connection(GenericConnection):
-    def connect(self):
-        pass
-
-
 # Matches the backup-name suffix VMOrchestrator.deploy_fresh_gns3_vm gives a
 # replaced VM (f"{vm_name}-backup-{datetime.now():%Y%m%d%H%M%S}") - used to
 # keep find_gns3_vm() from mistaking a backup for the live GNS3 VM, since a
