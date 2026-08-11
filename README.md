@@ -155,10 +155,12 @@ same port group.
 | `topologybuilder validate <config>` | Validate a topology config file without building or deploying anything. |
 | `topologybuilder build <config> [--graph] [--list]` | Validate and build the in-memory topology graph; optionally print an ASCII visualization (`--graph`) or a connection tree (`--list`). |
 | `topologybuilder generate <prompt>` | Generate a topology config file from a natural-language prompt via the Topology Generator API. |
-| `topologybuilder deploy <config> --esxi-host ... --esxi-username ...` | Validate, build, and deploy the topology to GNS3/ESXi. |
-| `topologybuilder destroy <config> --esxi-host ... --esxi-username ...` | Tear down a previously deployed topology: deletes its GNS3 nodes/links and its ESXi-hosted VMs/port groups. |
+| `topologybuilder deploy <config> --esxi-host ... --esxi-username ... [--dry-run] [--incremental]` | Validate, build, and deploy the topology to GNS3/ESXi. `--dry-run` prints the plan without changing anything; `--incremental` only creates what's missing instead of a full teardown+rebuild (never removes nodes dropped from the config, and won't pick up an existing node's image changing). |
+| `topologybuilder destroy <config> --esxi-host ... --esxi-username ... [--dry-run]` | Tear down a previously deployed topology: deletes its GNS3 nodes/links and its ESXi-hosted VMs/port groups. `--dry-run` prints what would be deleted without deleting anything. |
+| `topologybuilder verify <config> --esxi-host ... --esxi-username ... [--gns3-trunk-network ...]` | Structural health check against a deployed topology (GNS3 nodes started, ESXi VMs powered on with an IP, trunk NIC wiring, VLAN agreement on both sides of a link). Not a ping test — topologybuilder never assigns IP addresses to nodes, so there's no address to ping. |
 | `topologybuilder status --esxi-host ... --esxi-username ...` | Check connectivity to the ESXi host and GNS3 VM, and list GNS3 projects and each one's node/started counts. No config file needed. |
 | `topologybuilder templates` | List available ESXi and GNS3 template names — valid values for a node's `image` field. |
+| `topologybuilder export <output.yml> --esxi-host ... --esxi-username ... --gns3-project <name>` | Capture a currently deployed topology's live state back into a topology config YAML — a best-effort reverse of `deploy`. Only includes ESXi VMs that `deploy` tagged with its image annotation; VMs from before that existed are skipped with a warning. |
 | `topologybuilder portgroups --esxi-host ... --esxi-username ...` | List the port groups configured on the ESXi host's vSwitches. |
 | `topologybuilder logs [--lines N]` | Show the last `N` (default 50) lines of the log file. |
 
