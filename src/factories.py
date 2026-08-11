@@ -317,7 +317,11 @@ class GenericNode:
 
         self.env = Environment.get_environment(image)
         if self.env == Environment.ON_NOTHING:
-            raise logger.alert(ValueError, f"Image {image} not found on ESXi or GNS3.")
+            raise logger.alert(
+                ValueError,
+                f"Image {image} not found on ESXi or GNS3. "
+                f"Run 'topologybuilder templates' to see available image names.",
+            )
 
     @property
     def interfaces(self):

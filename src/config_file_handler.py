@@ -139,7 +139,9 @@ class ConfigFileHandler:
             }
             if normalize_template_name(node_group["image"]) not in normalized_available:
                 raise logger.alert(
-                    ValueError, f"Image {node_group['image']} not found on ESXi or GNS3"
+                    ValueError,
+                    f"Image {node_group['image']} not found on ESXi or GNS3. "
+                    f"Run 'topologybuilder templates' to see available image names.",
                 )
 
         if not isinstance(node_group["role"], str):
