@@ -34,9 +34,7 @@ _NODE_LIFECYCLE_TIMEOUT_SECONDS = 300
 # releasing the port (see Hard-won knowledge #21 in HANDOFF.md - never
 # actually confirmed live before now). Retried once below since the port
 # often frees itself within a few seconds.
-_CONSOLE_PORT_COLLISION_PATTERN = re.compile(
-    r"already in use|errno 98", re.IGNORECASE
-)
+_CONSOLE_PORT_COLLISION_PATTERN = re.compile(r"already in use|errno 98", re.IGNORECASE)
 _CONSOLE_PORT_COLLISION_RETRY_BACKOFF_SECONDS = 5
 
 
@@ -130,7 +128,7 @@ class GNS3Client:
         :param project_id: the project to clear
         :return:
         """
-        nodes = self._get(f"/v2/projects/{project_id}/nodes")
+        nodes = self.list_nodes(project_id)
         failed_names = []
         for node in nodes:
             try:
@@ -176,6 +174,29 @@ class GNS3Client:
                 return template
         raise logger.alert(ValueError, f"No GNS3 template found for image '{image}'")
 
+    def get_version(self) -> dict:
+        """
+        Returns the GNS3 server's own version/edition info. A minimal,
+        side-effect-free call - useful purely as a reachability check.
+        :return: dict with at least a 'version' key
+        """
+        return self._get("/v2/version")
+
+    def list_projects(self) -> list[dict]:
+        """
+        Lists every project on this GNS3 server, open or not.
+        :return: list of project dicts, each with at least 'project_id' and 'name'
+        """
+        return self._get("/v2/projects")
+
+    def list_nodes(self, project_id: str) -> list[dict]:
+        """
+        Lists every node currently in the given project.
+        :param project_id: the project to list nodes for
+        :return: list of node dicts, each with at least 'node_id', 'name', and 'status'
+        """
+        return self._get(f"/v2/projects/{project_id}/nodes")
+
     def get_or_create_project(self, name: str) -> dict:
         """
         Finds an existing project by name, or creates one if none exists.
@@ -183,7 +204,7 @@ class GNS3Client:
         :param name: project name
         :return: project dict, including 'project_id'
         """
-        for project in self._get("/v2/projects"):
+        for project in self.list_projects():
             if project.get("name") == name:
                 logger.info(f"Reusing existing GNS3 project '{name}'")
                 if project.get("status") != "opened":
@@ -387,7 +408,7 @@ class GNS3Client:
         after a short backoff before being counted as failed, since it's
         often a transient orphaned-process condition that clears itself.
         """
-        nodes = self._get(f"/v2/projects/{project_id}/nodes")
+        nodes = self.list_nodes(project_id)
         failed_names = []
         for node in nodes:
             try:

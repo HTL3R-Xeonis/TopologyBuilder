@@ -668,3 +668,146 @@ def cli_027() -> None:
 
     set_esxi.assert_not_called()
     set_gns3.assert_not_called()
+
+
+# --- destroy command ---------------------------------------------------
+
+
+@allure.title("destroy-Befehl löscht ESXi-Ressourcen und die GNS3-Topologie")
+@allure.description(
+    "Überprüft, dass der destroy-Befehl delete_stale_esxi_resources und "
+    "destroy_gns3_topology mit dem Config-Dateinamen als Projektnamen aufruft"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.CRITICAL)
+def cli_028() -> None:
+    nodes = {"R1": MagicMock()}
+    with (
+        patch("src.cli.ConfigFileHandler"),
+        patch("src.cli.GraphBuilder") as graph_builder_cls,
+        patch("src.cli.VMOrchestrator") as orchestrator_cls,
+    ):
+        graph_builder_cls.return_value.build.return_value = nodes
+        orchestrator = orchestrator_cls.return_value
+        result = runner.invoke(app, ["destroy", "config_ex.yml", *_DEPLOY_CREDS])
+
+    assert result.exit_code == 0, result.output
+    orchestrator_cls.assert_called_once_with("10.20.20.202", "root", "pw")
+    orchestrator.delete_stale_esxi_resources.assert_called_once_with(nodes)
+    orchestrator.destroy_gns3_topology.assert_called_once_with(
+        "config_ex", vm_name=None
+    )
+    assert "Destroy complete." in result.output
+
+
+@allure.title("destroy --gns3-project überschreibt den Standard-Projektnamen")
+@allure.description(
+    "Überprüft, dass der destroy-Befehl mit --gns3-project den angegebenen "
+    "Namen statt des Config-Dateinamens an destroy_gns3_topology übergibt"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.NORMAL)
+def cli_029() -> None:
+    with (
+        patch("src.cli.ConfigFileHandler"),
+        patch("src.cli.GraphBuilder") as graph_builder_cls,
+        patch("src.cli.VMOrchestrator") as orchestrator_cls,
+    ):
+        graph_builder_cls.return_value.build.return_value = {}
+        orchestrator = orchestrator_cls.return_value
+        runner.invoke(
+            app, ["destroy", "config_ex.yml", *_DEPLOY_CREDS, "--gns3-project", "MyLab"]
+        )
+
+    orchestrator.destroy_gns3_topology.assert_called_once_with("MyLab", vm_name=None)
+
+
+# --- status command ------------------------------------------------------
+
+
+@allure.title("status-Befehl meldet Erreichbarkeit und Projekt-/Node-Status")
+@allure.description(
+    "Überprüft, dass der status-Befehl die ESXi-Erreichbarkeit, die "
+    "GNS3-VM-Version und für jedes Projekt die Node-/Started-Anzahl ausgibt"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.CRITICAL)
+def cli_030() -> None:
+    found_vm = MagicMock()
+    found_vm.name = "GNS3-VM"
+    with (
+        patch("src.cli.ESXiConnection") as esxi_cls,
+        patch("src.cli.GNS3Client") as client_cls,
+    ):
+        esxi_connection = esxi_cls.return_value
+        esxi_connection.find_gns3_vm.return_value = found_vm
+        esxi_connection.get_vm_ip_address.return_value = "10.20.20.231"
+
+        client = client_cls.return_value
+        client.get_version.return_value = {"version": "2.2.45"}
+        client.list_projects.return_value = [
+            {"project_id": "p1", "name": "Lab", "status": "opened"}
+        ]
+        client.list_nodes.return_value = [
+            {"node_id": "n1", "status": "started"},
+            {"node_id": "n2", "status": "stopped"},
+        ]
+
+        result = runner.invoke(app, ["status", *_DEPLOY_CREDS])
+
+    assert result.exit_code == 0, result.output
+    assert "ESXi host 10.20.20.202: reachable" in result.output
+    assert "GNS3 VM 'GNS3-VM' at 10.20.20.231: reachable (GNS3 2.2.45)" in result.output
+    assert "Project 'Lab' (opened): 2 node(s), 1 started" in result.output
+
+
+@allure.title("status-Befehl meldet Fehler, wenn keine GNS3-VM gefunden wird")
+@allure.description(
+    "Überprüft, dass der status-Befehl mit Exit-Code 1 abbricht, wenn keine "
+    "GNS3-VM auf dem ESXi-Host gefunden wird"
+)
+@allure.tag("negativ-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.NORMAL)
+def cli_031() -> None:
+    with patch("src.cli.ESXiConnection") as esxi_cls:
+        esxi_cls.return_value.find_gns3_vm.return_value = None
+        result = runner.invoke(app, ["status", *_DEPLOY_CREDS])
+
+    assert result.exit_code == 1
+    assert "GNS3 VM: not found" in result.output
+
+
+@allure.title(
+    "status --gns3-vm-name sucht die VM per exaktem Namen statt Auto-Erkennung"
+)
+@allure.description(
+    "Überprüft, dass der status-Befehl mit --gns3-vm-name get_vm mit dem "
+    "angegebenen Namen aufruft statt find_gns3_vm zur Auto-Erkennung zu nutzen"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.NORMAL)
+def cli_032() -> None:
+    found_vm = MagicMock()
+    found_vm.name = "GNS3"
+    with (
+        patch("src.cli.ESXiConnection") as esxi_cls,
+        patch("src.cli.GNS3Client") as client_cls,
+    ):
+        esxi_connection = esxi_cls.return_value
+        esxi_connection.get_vm.return_value = found_vm
+        esxi_connection.get_vm_ip_address.return_value = "10.20.20.221"
+        client_cls.return_value.get_version.return_value = {"version": "2.2.45"}
+        client_cls.return_value.list_projects.return_value = []
+
+        result = runner.invoke(
+            app, ["status", *_DEPLOY_CREDS, "--gns3-vm-name", "GNS3"]
+        )
+
+    esxi_connection.get_vm.assert_called_once_with("GNS3")
+    esxi_connection.find_gns3_vm.assert_not_called()
+    assert "No GNS3 projects." in result.output

@@ -393,3 +393,26 @@ def vm_orchestrator_013() -> None:
 
         with pytest.raises(RuntimeError, match=r"address already in use"):
             orchestrator.deploy_gns3_topology({}, "Lab", vm_name="GNS3-VM")
+
+
+@allure.title("destroy_gns3_topology löscht alle Nodes im aufgelösten Projekt")
+@allure.description(
+    "Überprüft, dass destroy_gns3_topology die IP der GNS3-VM nachschlägt, "
+    "das Projekt per Namen auflöst und anschließend alle seine Nodes löscht"
+)
+@allure.tag("positiv-test", "vm_orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_014() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.get_vm_ip_address.return_value = "10.20.20.231"
+
+    with patch("src.vm_orchestrator.GNS3Client") as client_cls:
+        client = client_cls.return_value
+        client.get_or_create_project.return_value = {"project_id": "proj-1"}
+
+        orchestrator.destroy_gns3_topology("Lab", vm_name="GNS3-VM")
+
+    client_cls.assert_called_once_with("http://10.20.20.231")
+    client.get_or_create_project.assert_called_once_with("Lab")
+    client.delete_all_nodes.assert_called_once_with("proj-1")

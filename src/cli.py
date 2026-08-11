@@ -18,6 +18,7 @@ from src.connections_handler import (
     set_gns3_template_api_url,
 )
 from src.factories import Environment
+from src.gns3_client import GNS3Client
 from src.graph_builder import GraphBuilder
 from src.graph_visualizer import print_connection_tree, render_graph
 from src.logger_adapter import get_log_file_path, set_console_level
@@ -76,6 +77,19 @@ GNS3_TEMPLATE_API_URL_OPTION = typer.Option(
     envvar="GNS3_TEMPLATE_API_URL",
     help="Base URL of the GNS3 template-listing service. Defaults to this "
     "project's own internal network if omitted.",
+)
+GNS3_PROJECT_OPTION = typer.Option(
+    _CLI_CONFIG.get("gns3_project"),
+    "--gns3-project",
+    help="Name of the GNS3 project to create or reuse. Defaults to the "
+    "config file's name.",
+)
+GNS3_VM_NAME_OPTION = typer.Option(
+    _CLI_CONFIG.get("gns3_vm_name"),
+    "--gns3-vm-name",
+    help="Name of the GNS3 VM on the ESXi host. Auto-detected if "
+    "omitted - matches the one VM whose name contains 'gns3' "
+    "(case-insensitive), e.g. 'GNS3' or 'GNS3-VM'.",
 )
 
 
@@ -286,19 +300,8 @@ def deploy(
         "be 'eth1' on every GNS3 VM build, e.g. after --fresh-gns3-vm "
         "imports a single-NIC OVA and a second NIC gets added on top.",
     ),
-    gns3_project: Optional[str] = typer.Option(
-        _CLI_CONFIG.get("gns3_project"),
-        "--gns3-project",
-        help="Name of the GNS3 project to create or reuse. Defaults to the "
-        "config file's name.",
-    ),
-    gns3_vm_name: Optional[str] = typer.Option(
-        _CLI_CONFIG.get("gns3_vm_name"),
-        "--gns3-vm-name",
-        help="Name of the GNS3 VM on the ESXi host. Auto-detected if "
-        "omitted - matches the one VM whose name contains 'gns3' "
-        "(case-insensitive), e.g. 'GNS3' or 'GNS3-VM'.",
-    ),
+    gns3_project: Optional[str] = GNS3_PROJECT_OPTION,
+    gns3_vm_name: Optional[str] = GNS3_VM_NAME_OPTION,
     esxi_datastore: Optional[str] = typer.Option(
         _CLI_CONFIG.get("esxi_datastore"),
         "--esxi-datastore",
@@ -374,6 +377,93 @@ def deploy(
         nodes, gns3_project or Path(config_path).stem, vm_name=gns3_vm_name
     )
     typer.echo("Deployment complete.")
+
+
+@app.command()
+def destroy(
+    config_path: Optional[str] = CONFIG_ARG,
+    esxi_host: Optional[str] = ESXI_HOST_OPTION,
+    esxi_username: Optional[str] = ESXI_USERNAME_OPTION,
+    esxi_password: Optional[str] = ESXI_PASSWORD_OPTION,
+    gns3_project: Optional[str] = GNS3_PROJECT_OPTION,
+    gns3_vm_name: Optional[str] = GNS3_VM_NAME_OPTION,
+) -> None:
+    """
+    Tear down a previously deployed topology: deletes its GNS3 nodes/links
+    and its ESXi-hosted VMs/port groups. The only prior way to do this was
+    to redeploy over it or use the GNS3 Web UI by hand.
+    """
+    config_path = _resolve_config_path(config_path)
+    esxi_host, esxi_username, esxi_password = _resolve_esxi_credentials(
+        esxi_host, esxi_username, esxi_password
+    )
+
+    handler = ConfigFileHandler(config_path)
+    handler.validate_file()
+    graph_builder = GraphBuilder(handler.nodes, handler.edges)
+    nodes = graph_builder.build()
+
+    orchestrator = VMOrchestrator(esxi_host, esxi_username, esxi_password)
+    orchestrator.delete_stale_esxi_resources(nodes)
+    orchestrator.destroy_gns3_topology(
+        gns3_project or Path(config_path).stem, vm_name=gns3_vm_name
+    )
+    typer.echo("Destroy complete.")
+
+
+@app.command()
+def status(
+    esxi_host: Optional[str] = ESXI_HOST_OPTION,
+    esxi_username: Optional[str] = ESXI_USERNAME_OPTION,
+    esxi_password: Optional[str] = ESXI_PASSWORD_OPTION,
+    gns3_vm_name: Optional[str] = GNS3_VM_NAME_OPTION,
+) -> None:
+    """
+    Check connectivity to the ESXi host and GNS3 VM, and list GNS3 projects
+    and each one's node count/started count. No config file needed.
+    """
+    esxi_host, esxi_username, esxi_password = _resolve_esxi_credentials(
+        esxi_host, esxi_username, esxi_password
+    )
+
+    esxi_connection = ESXiConnection(esxi_host, esxi_username, esxi_password)
+    typer.echo(f"ESXi host {esxi_host}: reachable")
+
+    vm = (
+        esxi_connection.get_vm(gns3_vm_name)
+        if gns3_vm_name is not None
+        else esxi_connection.find_gns3_vm()
+    )
+    if vm is None:
+        typer.echo("GNS3 VM: not found", err=True)
+        raise typer.Exit(code=1)
+
+    ip_address = esxi_connection.get_vm_ip_address(vm.name)
+    if ip_address is None:
+        typer.echo(
+            f"GNS3 VM '{vm.name}': found, but no IP address reported yet", err=True
+        )
+        raise typer.Exit(code=1)
+
+    client = GNS3Client(f"http://{ip_address}")
+    version = client.get_version()
+    typer.echo(
+        f"GNS3 VM '{vm.name}' at {ip_address}: reachable "
+        f"(GNS3 {version.get('version', '?')})"
+    )
+
+    projects = client.list_projects()
+    if not projects:
+        typer.echo("No GNS3 projects.")
+        return
+
+    for project in projects:
+        nodes = client.list_nodes(project["project_id"])
+        started = sum(1 for node in nodes if node.get("status") == "started")
+        typer.echo(
+            f"  Project '{project['name']}' ({project.get('status', '?')}): "
+            f"{len(nodes)} node(s), {started} started"
+        )
 
 
 @app.command()

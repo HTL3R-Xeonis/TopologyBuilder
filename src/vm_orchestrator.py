@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 from src.connections_handler import SSHConnection, ESXiConnection, APIFunctions
-from src.gns3_client import deploy_topology, is_console_port_collision_error
+from src.gns3_client import GNS3Client, deploy_topology, is_console_port_collision_error
 from src.logger_adapter import get_logger
 from src.gns3_vm_interface_setup import GNS3VMInterfaceSetup
 from src.ova_importer import OVAImporter
@@ -277,6 +277,25 @@ class VMOrchestrator:
                 f"Could not capture console port collision diagnostics: "
                 f"{diagnostic_error}"
             )
+
+    def destroy_gns3_topology(
+        self, project_name: str, vm_name: str | None = None
+    ) -> None:
+        """
+        Deletes every node (and, as a consequence, every link between them)
+        in the given GNS3 project, e.g. as part of tearing down a previously
+        deployed topology. Mirrors deploy_gns3_topology's own project
+        resolution - if no project by that name exists yet,
+        get_or_create_project creates an empty one, which is harmless here
+        since there's nothing to delete from it either way.
+        :param project_name: name of the GNS3 project to clear
+        :param vm_name: name of the GNS3 VM, or None to auto-detect
+        :return:
+        """
+        gns3_ip_address = self._get_gns3_vm_ip(vm_name)
+        client = GNS3Client(f"http://{gns3_ip_address}")
+        project = client.get_or_create_project(project_name)
+        client.delete_all_nodes(project["project_id"])
 
     def deploy_esxi_nodes(
         self,

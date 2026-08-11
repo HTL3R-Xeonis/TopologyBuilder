@@ -708,3 +708,60 @@ def gns3_client_025() -> None:
             client.start_all_nodes("proj-1")
 
     assert post.call_count == 2
+
+
+@allure.title("get_version liefert die GNS3-Server-Versionsinfo")
+@allure.description(
+    "Überprüft, dass get_version das Ergebnis von GET /v2/version unverändert "
+    "zurückgibt - dient rein als Erreichbarkeitscheck"
+)
+@allure.tag("positiv-test", "gns3_client")
+@allure.feature("gns3_client")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_client_026() -> None:
+    with patch("src.gns3_client.requests.get") as get:
+        get.return_value = _response(json_data={"version": "2.2.45", "local": True})
+        client = GNS3Client(BASE_URL)
+        version = client.get_version()
+
+    assert version == {"version": "2.2.45", "local": True}
+    get.assert_called_once_with(f"{BASE_URL}/v2/version", timeout=30)
+
+
+@allure.title("list_projects liefert alle Projekte")
+@allure.description(
+    "Überprüft, dass list_projects das Ergebnis von GET /v2/projects unverändert "
+    "zurückgibt, unabhängig vom Öffnungsstatus"
+)
+@allure.tag("positiv-test", "gns3_client")
+@allure.feature("gns3_client")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_client_027() -> None:
+    with patch("src.gns3_client.requests.get") as get:
+        get.return_value = _response(
+            json_data=[{"project_id": "p1", "name": "Lab", "status": "closed"}]
+        )
+        client = GNS3Client(BASE_URL)
+        projects = client.list_projects()
+
+    assert projects == [{"project_id": "p1", "name": "Lab", "status": "closed"}]
+
+
+@allure.title("list_nodes liefert alle Nodes eines Projekts")
+@allure.description(
+    "Überprüft, dass list_nodes das Ergebnis von GET /v2/projects/{id}/nodes "
+    "unverändert zurückgibt"
+)
+@allure.tag("positiv-test", "gns3_client")
+@allure.feature("gns3_client")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_client_028() -> None:
+    with patch("src.gns3_client.requests.get") as get:
+        get.return_value = _response(
+            json_data=[{"node_id": "n1", "name": "PC1", "status": "started"}]
+        )
+        client = GNS3Client(BASE_URL)
+        nodes = client.list_nodes("proj-1")
+
+    assert nodes == [{"node_id": "n1", "name": "PC1", "status": "started"}]
+    get.assert_called_once_with(f"{BASE_URL}/v2/projects/proj-1/nodes", timeout=30)
