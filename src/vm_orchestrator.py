@@ -211,15 +211,49 @@ class VMOrchestrator:
             self.esxi_connection.ensure_port_group(esxi_vlan_name, vlan_id)
         logger.info(f"Ensured {len(vlan_assignments)} ESXi port group(s)")
 
+        resolved_vm_name = self._resolve_gns3_vm_name(vm_name, require_existing=True)
+
         if trunk_network_name is not None:
             self.esxi_connection.ensure_bridging_security_policy(trunk_network_name)
+            self._verify_trunk_network_wiring(resolved_vm_name, trunk_network_name)
 
-        gns3_ip_address = self._get_gns3_vm_ip(vm_name)
+        gns3_ip_address = self._get_gns3_vm_ip(resolved_vm_name)
 
         gns3_connection = SSHConnection(gns3_ip_address, "gns3", "gns3")
         gns3_settings_setter = GNS3VMInterfaceSetup(gns3_connection)
         gns3_settings_setter.write_config_file(nodes, trunk_interface=trunk_interface)
         logger.info(f"Wrote GNS3 configuration for {len(nodes)} node(s)")
+
+    def _verify_trunk_network_wiring(
+        self, vm_name: str, trunk_network_name: str
+    ) -> None:
+        """
+        Confirms the GNS3 VM has a network adapter actually connected to the
+        given trunk port group, before trusting that VLAN subinterfaces built
+        on its guest-OS trunk interface will reach it. ESXi gives no error or
+        warning if a NIC is wired to the wrong port group (e.g. left on
+        PG-MGMT after a manual edit, or a botched --fresh-gns3-vm import) -
+        the ESXi<->GNS3 Cloud-node bridge just silently doesn't work. The
+        same class of invisible failure ensure_bridging_security_policy
+        already guards against on the security-policy side; this exact
+        drift has been observed on real infra.
+        :param vm_name: name of the GNS3 VM
+        :param trunk_network_name: expected ESXi port group name for its trunk NIC
+        :return:
+        """
+        vm = self.esxi_connection.get_vm(vm_name)
+        if vm is None:
+            return
+
+        network_names = self.esxi_connection.get_vm_network_names(vm)
+        if trunk_network_name not in network_names:
+            raise logger.alert(
+                ValueError,
+                f"'{vm_name}' VM has no network adapter connected to port "
+                f"group '{trunk_network_name}' (connected to: "
+                f"{network_names}). The ESXi<->GNS3 bridge will not work "
+                f"until a NIC is rewired to that port group in vSphere.",
+            )
 
     def deploy_gns3_topology(
         self,

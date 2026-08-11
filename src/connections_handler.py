@@ -561,6 +561,24 @@ class ESXiConnection(GenericConnection):
                 return device.macAddress
         return None
 
+    def get_vm_network_names(self, vm: vim.VirtualMachine) -> list[str]:
+        """
+        Returns the ESXi port group name each of the VM's Ethernet network
+        adapters is currently connected to, in device order. Used to verify
+        a NIC is actually wired to an expected port group before trusting
+        traffic sent to it - ESXi gives no error or warning for a NIC left
+        connected to the wrong port group (e.g. after a manual edit, or a
+        botched --fresh-gns3-vm import), it just silently doesn't carry the
+        traffic anyone expects it to.
+        :param vm: the VM to inspect
+        :return: list of port group names, one per Ethernet adapter
+        """
+        names = []
+        for device in vm.config.hardware.device:
+            if isinstance(device, vim.vm.device.VirtualEthernetCard):
+                names.append(getattr(device.backing, "deviceName", None))
+        return names
+
     def set_vm_mac_address(self, vm: vim.VirtualMachine, mac_address: str) -> None:
         """
         Sets the MAC address of the VM's first Ethernet network adapter to a

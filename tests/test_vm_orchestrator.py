@@ -416,3 +416,98 @@ def vm_orchestrator_014() -> None:
     client_cls.assert_called_once_with("http://10.20.20.231")
     client.get_or_create_project.assert_called_once_with("Lab")
     client.delete_all_nodes.assert_called_once_with("proj-1")
+
+
+@allure.title(
+    "create_gns3_configuration_file bricht ab, wenn die Trunk-NIC falsch verkabelt ist"
+)
+@allure.description(
+    "Überprüft, dass create_gns3_configuration_file einen ValueError wirft, "
+    "wenn die GNS3-VM keinen Netzwerkadapter hat, der mit der angegebenen "
+    "Trunk-Port-Group verbunden ist - ESXi meldet diese Fehlkonfiguration "
+    "sonst nirgendwo, die Cloud-Node-Bridge würde einfach stillschweigend "
+    "nicht funktionieren"
+)
+@allure.tag("negativ-test", "vm_orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_015() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.get_vm_ip_address.return_value = "10.20.20.221"
+    trunk_vm = MagicMock()
+    esxi_connection.get_vm.return_value = trunk_vm
+    esxi_connection.get_vm_network_names.return_value = ["PG-MGMT"]
+
+    nf = NodeFactory()
+    vm: GenericNode = nf.create_node("Ubuntu-Server", "VM", "VM1")
+    vm.add_interface("ens160")
+    nodes = {"VM1": vm}
+
+    with pytest.raises(
+        ValueError, match=r"no network adapter connected to port group 'PG-GNS3-TRUNK'"
+    ):
+        orchestrator.create_gns3_configuration_file(
+            nodes, vm_name="GNS3", trunk_network_name="PG-GNS3-TRUNK"
+        )
+
+    esxi_connection.get_vm.assert_called_once_with("GNS3")
+    esxi_connection.get_vm_network_names.assert_called_once_with(trunk_vm)
+
+
+@allure.title(
+    "create_gns3_configuration_file läuft normal weiter, wenn die Trunk-NIC "
+    "korrekt verkabelt ist"
+)
+@allure.description(
+    "Überprüft, dass create_gns3_configuration_file mit einer korrekt "
+    "verkabelten Trunk-NIC ganz normal bis zum Schreiben der GNS3-Konfiguration "
+    "durchläuft"
+)
+@allure.tag("positiv-test", "vm_orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_016() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.get_vm_ip_address.return_value = "10.20.20.221"
+    esxi_connection.get_vm.return_value = MagicMock()
+    esxi_connection.get_vm_network_names.return_value = ["PG-MGMT", "PG-GNS3-TRUNK"]
+
+    nf = NodeFactory()
+    vm: GenericNode = nf.create_node("Ubuntu-Server", "VM", "VM1")
+    vm.add_interface("ens160")
+    nodes = {"VM1": vm}
+
+    with (
+        patch("src.vm_orchestrator.SSHConnection") as ssh_cls,
+        patch("src.vm_orchestrator.GNS3VMInterfaceSetup") as setup_cls,
+    ):
+        orchestrator.create_gns3_configuration_file(
+            nodes, vm_name="GNS3", trunk_network_name="PG-GNS3-TRUNK"
+        )
+        setup_cls.return_value.write_config_file.assert_called_once()
+
+    ssh_cls.assert_called_once_with("10.20.20.221", "gns3", "gns3")
+
+
+@allure.title(
+    "Trunk-Verkabelungs-Check überspringt sich selbst, wenn die VM nicht gefunden wird"
+)
+@allure.description(
+    "Überprüft, dass create_gns3_configuration_file bei get_vm=None keinen "
+    "eigenen Fehler zur Verkabelung wirft, sondern die spätere IP-Abfrage "
+    "die eigentliche 'VM nicht gefunden'-Fehlermeldung liefert"
+)
+@allure.tag("negativ-test", "vm_orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.NORMAL)
+def vm_orchestrator_017() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.get_vm.return_value = None
+    esxi_connection.get_vm_ip_address.return_value = None
+
+    with pytest.raises(ConnectionError, match=r"Cannot connect to 'GNS3' VM"):
+        orchestrator.create_gns3_configuration_file(
+            {}, vm_name="GNS3", trunk_network_name="PG-GNS3-TRUNK"
+        )
+
+    esxi_connection.get_vm_network_names.assert_not_called()

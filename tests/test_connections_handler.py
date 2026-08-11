@@ -428,3 +428,28 @@ def connections_handler_019(tmp_path) -> None:
         )
     finally:
         set_esxi_template_api_url(original)
+
+
+@allure.title("get_vm_network_names liefert die Port-Group jedes Ethernet-Adapters")
+@allure.description(
+    "Überprüft, dass get_vm_network_names für jeden VirtualEthernetCard das "
+    "backing.deviceName (die Port-Group) zurückgibt, in Geräte-Reihenfolge, "
+    "und andere Gerätetypen (z.B. Disks) ignoriert"
+)
+@allure.tag("positiv-test", "connections_handler")
+@allure.feature("connections_handler")
+@allure.severity(allure.severity_level.NORMAL)
+def connections_handler_020() -> None:
+    conn = ESXiConnection.__new__(ESXiConnection)
+    nic1 = MagicMock()
+    nic1.__class__ = vim.vm.device.VirtualEthernetCard
+    nic1.backing.deviceName = "PG-MGMT"
+    nic2 = MagicMock()
+    nic2.__class__ = vim.vm.device.VirtualEthernetCard
+    nic2.backing.deviceName = "PG-GNS3-TRUNK"
+    disk = MagicMock()
+    disk.__class__ = vim.vm.device.VirtualDisk
+    vm = MagicMock()
+    vm.config.hardware.device = [nic1, disk, nic2]
+
+    assert conn.get_vm_network_names(vm) == ["PG-MGMT", "PG-GNS3-TRUNK"]
