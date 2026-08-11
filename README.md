@@ -156,6 +156,9 @@ same port group.
 | `topologybuilder build <config> [--graph] [--list]` | Validate and build the in-memory topology graph; optionally print an ASCII visualization (`--graph`) or a connection tree (`--list`). |
 | `topologybuilder generate <prompt>` | Generate a topology config file from a natural-language prompt via the Topology Generator API. |
 | `topologybuilder deploy <config> --esxi-host ... --esxi-username ...` | Validate, build, and deploy the topology to GNS3/ESXi. |
+| `topologybuilder destroy <config> --esxi-host ... --esxi-username ...` | Tear down a previously deployed topology: deletes its GNS3 nodes/links and its ESXi-hosted VMs/port groups. |
+| `topologybuilder status --esxi-host ... --esxi-username ...` | Check connectivity to the ESXi host and GNS3 VM, and list GNS3 projects and each one's node/started counts. No config file needed. |
+| `topologybuilder templates` | List available ESXi and GNS3 template names — valid values for a node's `image` field. |
 | `topologybuilder portgroups --esxi-host ... --esxi-username ...` | List the port groups configured on the ESXi host's vSwitches. |
 | `topologybuilder logs [--lines N]` | Show the last `N` (default 50) lines of the log file. |
 
