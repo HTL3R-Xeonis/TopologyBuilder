@@ -13,6 +13,7 @@ import typer
 from src.cli_config import load_cli_config
 from src.config_file_handler import ConfigFileHandler
 from src.connections_handler import (
+    APIFunctions,
     ESXiConnection,
     set_esxi_template_api_url,
     set_gns3_template_api_url,
@@ -464,6 +465,24 @@ def status(
             f"  Project '{project['name']}' ({project.get('status', '?')}): "
             f"{len(nodes)} node(s), {started} started"
         )
+
+
+@app.command()
+def templates() -> None:
+    """
+    List available ESXi and GNS3 template names - valid values for a
+    node's 'image' field in a topology config file.
+    """
+    esxi_templates = sorted(APIFunctions.get_esxi_template_names())
+    gns3_templates = sorted(APIFunctions.get_gns3_template_names())
+
+    typer.echo(f"ESXi templates ({len(esxi_templates)}):")
+    for name in esxi_templates:
+        typer.echo(f"  - {name}")
+
+    typer.echo(f"GNS3 templates ({len(gns3_templates)}):")
+    for name in gns3_templates:
+        typer.echo(f"  - {name}")
 
 
 @app.command()

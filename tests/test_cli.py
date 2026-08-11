@@ -811,3 +811,32 @@ def cli_032() -> None:
     esxi_connection.get_vm.assert_called_once_with("GNS3")
     esxi_connection.find_gns3_vm.assert_not_called()
     assert "No GNS3 projects." in result.output
+
+
+# --- templates command -----------------------------------------------------
+
+
+@allure.title("templates-Befehl listet ESXi- und GNS3-Templates getrennt auf")
+@allure.description(
+    "Überprüft, dass der templates-Befehl beide Template-Mengen sortiert "
+    "und mit Anzahl-Header ausgibt"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.NORMAL)
+def cli_033() -> None:
+    with (
+        patch(
+            "src.cli.APIFunctions.get_esxi_template_names",
+            return_value={"Ubuntu-Server", "Rocky 9.2"},
+        ),
+        patch("src.cli.APIFunctions.get_gns3_template_names", return_value={"VPCS"}),
+    ):
+        result = runner.invoke(app, ["templates"])
+
+    assert result.exit_code == 0
+    assert "ESXi templates (2):" in result.output
+    assert "  - Rocky 9.2" in result.output
+    assert "  - Ubuntu-Server" in result.output
+    assert "GNS3 templates (1):" in result.output
+    assert "  - VPCS" in result.output
