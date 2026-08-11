@@ -1206,3 +1206,102 @@ def connections_handler_052(tmp_path) -> None:
             APIFunctions.download_esxi_template("Ubuntu-Server", str(dest_path))
 
     assert mock_tar_open.call_count == 3
+
+
+@allure.title("get_vm_annotation liefert das Annotation-Feld der VM")
+@allure.description(
+    "Überprüft, dass get_vm_annotation den Text aus vm.config.annotation zurückgibt"
+)
+@allure.tag("positiv-test", "connections_handler")
+@allure.feature("connections_handler")
+@allure.severity(allure.severity_level.NORMAL)
+def connections_handler_053() -> None:
+    conn = ESXiConnection.__new__(ESXiConnection)
+    vm = MagicMock()
+    vm.config.annotation = "topologybuilder-image:Ubuntu-Server"
+
+    assert conn.get_vm_annotation(vm) == "topologybuilder-image:Ubuntu-Server"
+
+
+@allure.title("get_vm_annotation liefert None bei leerem Annotation-Feld")
+@allure.description(
+    "Überprüft, dass get_vm_annotation None statt eines leeren Strings "
+    "zurückgibt, wenn die VM keine Annotation hat"
+)
+@allure.tag("negativ-test", "connections_handler")
+@allure.feature("connections_handler")
+@allure.severity(allure.severity_level.NORMAL)
+def connections_handler_054() -> None:
+    conn = ESXiConnection.__new__(ESXiConnection)
+    vm = MagicMock()
+    vm.config.annotation = ""
+
+    assert conn.get_vm_annotation(vm) is None
+
+
+@allure.title("set_vm_annotation rekonfiguriert das Annotation-Feld")
+@allure.description(
+    "Überprüft, dass set_vm_annotation ReconfigVM_Task mit dem gegebenen "
+    "Text als annotation aufruft und darauf wartet"
+)
+@allure.tag("positiv-test", "connections_handler")
+@allure.feature("connections_handler")
+@allure.severity(allure.severity_level.CRITICAL)
+def connections_handler_055() -> None:
+    conn = ESXiConnection.__new__(ESXiConnection)
+    conn._wait_for_task = MagicMock()
+    vm = MagicMock()
+
+    conn.set_vm_annotation(vm, "topologybuilder-image:Ubuntu-Server")
+
+    config_spec = vm.ReconfigVM_Task.call_args.kwargs["spec"]
+    assert config_spec.annotation == "topologybuilder-image:Ubuntu-Server"
+    conn._wait_for_task.assert_called_once_with(vm.ReconfigVM_Task.return_value)
+
+
+@allure.title("is_vm_powered_on erkennt eine eingeschaltete VM")
+@allure.description(
+    "Überprüft, dass is_vm_powered_on True zurückgibt, wenn "
+    "vm.runtime.powerState 'poweredOn' ist"
+)
+@allure.tag("positiv-test", "connections_handler")
+@allure.feature("connections_handler")
+@allure.severity(allure.severity_level.NORMAL)
+def connections_handler_056() -> None:
+    conn = ESXiConnection.__new__(ESXiConnection)
+    vm = MagicMock()
+    vm.runtime.powerState = vim.VirtualMachine.PowerState.poweredOn
+
+    assert conn.is_vm_powered_on(vm) is True
+
+
+@allure.title("is_vm_powered_on erkennt eine ausgeschaltete VM")
+@allure.description(
+    "Überprüft, dass is_vm_powered_on False zurückgibt, wenn "
+    "vm.runtime.powerState nicht 'poweredOn' ist"
+)
+@allure.tag("negativ-test", "connections_handler")
+@allure.feature("connections_handler")
+@allure.severity(allure.severity_level.NORMAL)
+def connections_handler_057() -> None:
+    conn = ESXiConnection.__new__(ESXiConnection)
+    vm = MagicMock()
+    vm.runtime.powerState = vim.VirtualMachine.PowerState.poweredOff
+
+    assert conn.is_vm_powered_on(vm) is False
+
+
+@allure.title("list_vms liefert alle VMs auf dem Host")
+@allure.description(
+    "Überprüft, dass list_vms jede VM aus der ContainerView zurückgibt, "
+    "unabhängig vom Namen"
+)
+@allure.tag("positiv-test", "connections_handler")
+@allure.feature("connections_handler")
+@allure.severity(allure.severity_level.NORMAL)
+def connections_handler_058() -> None:
+    conn = _make_esxi_connection(["PC4", "GNS3-VM", "unrelated-vm"])
+
+    names = {vm.name for vm in conn.list_vms()}
+
+    assert names == {"PC4", "GNS3-VM", "unrelated-vm"}

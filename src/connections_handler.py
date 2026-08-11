@@ -300,6 +300,19 @@ class ESXiConnection(GenericConnection):
 
         return None
 
+    def list_vms(self) -> list[ManagedObject]:
+        """
+        Lists every VM on the host, regardless of name.
+        :return: list of all VMs
+        """
+        container_view = self.content.viewManager.CreateContainerView(
+            self.content.rootFolder, [vim.VirtualMachine], True
+        )
+        try:
+            return list(container_view.view)
+        finally:
+            container_view.Destroy()
+
     def find_gns3_vm(self) -> Optional[ManagedObject]:
         """
         Searches for a VM that looks like a typical GNS3 VM, i.e. one whose
@@ -574,6 +587,24 @@ class ESXiConnection(GenericConnection):
                 names.append(getattr(device.backing, "deviceName", None))
         return names
 
+    def get_vm_annotation(self, vm: vim.VirtualMachine) -> Optional[str]:
+        """
+        Returns the VM's notes/annotation field.
+        :param vm: the VM to inspect
+        :return: the annotation text, or None if it's empty
+        """
+        return vm.config.annotation or None
+
+    def set_vm_annotation(self, vm: vim.VirtualMachine, text: str) -> None:
+        """
+        Sets the VM's notes/annotation field.
+        :param vm: the VM to reconfigure
+        :param text: the annotation text to set
+        :return:
+        """
+        config_spec = vim.vm.ConfigSpec(annotation=text)
+        self._wait_for_task(vm.ReconfigVM_Task(spec=config_spec))
+
     def set_vm_mac_address(self, vm: vim.VirtualMachine, mac_address: str) -> None:
         """
         Sets the MAC address of the VM's first Ethernet network adapter to a
@@ -628,6 +659,14 @@ class ESXiConnection(GenericConnection):
         config_spec = vim.vm.ConfigSpec(deviceChange=device_changes)
         self._wait_for_task(vm.ReconfigVM_Task(spec=config_spec))
         logger.info(f"Added network adapter(s) to VM '{vm.name}' for: {network_names}")
+
+    def is_vm_powered_on(self, vm: vim.VirtualMachine) -> bool:
+        """
+        Checks whether the given VM is currently powered on.
+        :param vm: the VM to check
+        :return: True if powered on
+        """
+        return vm.runtime.powerState == vim.VirtualMachine.PowerState.poweredOn
 
     def power_off_vm(self, vm: vim.VirtualMachine) -> None:
         """

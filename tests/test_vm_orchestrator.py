@@ -212,7 +212,9 @@ def vm_orchestrator_005() -> None:
     with patch("src.vm_orchestrator.deploy_topology") as deploy:
         orchestrator.deploy_gns3_topology(nodes, "Lab", vm_name="GNS3-VM")
 
-    deploy.assert_called_once_with("http://10.20.20.231", "Lab", nodes)
+    deploy.assert_called_once_with(
+        "http://10.20.20.231", "Lab", nodes, incremental=False
+    )
 
 
 @allure.title("GNS3-VM-Name wird automatisch erkannt, wenn keiner angegeben ist")
@@ -551,6 +553,12 @@ def vm_orchestrator_018() -> None:
     assert importer.import_ova.call_count == 2
     esxi_connection.power_on_vm.assert_any_call("vm1-handle")
     esxi_connection.power_on_vm.assert_any_call("vm2-handle")
+    esxi_connection.set_vm_annotation.assert_any_call(
+        "vm1-handle", "topologybuilder-image:Ubuntu-Server"
+    )
+    esxi_connection.set_vm_annotation.assert_any_call(
+        "vm2-handle", "topologybuilder-image:Ubuntu-Server"
+    )
 
 
 @allure.title("deploy_esxi_nodes legt das OVA-Cache-Verzeichnis an, falls angegeben")
@@ -569,3 +577,517 @@ def vm_orchestrator_019(tmp_path) -> None:
         orchestrator.deploy_esxi_nodes({}, "datastore1", download_dir=str(download_dir))
 
     assert download_dir.is_dir()
+
+
+@allure.title(
+    "deploy_esxi_nodes überspringt bereits vorhandene VMs im incremental-Modus"
+)
+@allure.description(
+    "Überprüft, dass deploy_esxi_nodes mit incremental=True weder OVA "
+    "herunterlädt noch importiert, wenn find_vms_matching bereits eine "
+    "passende VM findet"
+)
+@allure.tag("positiv-test", "vm_orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_020() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    nf = NodeFactory()
+    vm: GenericNode = nf.create_node("Ubuntu-Server", "VM", "VM1")
+    vm.add_interface("ens160")
+    nodes = {"VM1": vm}
+    esxi_connection.find_vms_matching.return_value = [MagicMock()]
+
+    with (
+        patch(
+            "src.vm_orchestrator.APIFunctions.download_esxi_template"
+        ) as mock_download,
+        patch("src.vm_orchestrator.OVAImporter") as importer_cls,
+    ):
+        orchestrator.deploy_esxi_nodes(nodes, "datastore1", incremental=True)
+
+    mock_download.assert_not_called()
+    importer_cls.return_value.import_ova.assert_not_called()
+
+
+@allure.title(
+    "plan_destroy meldet zu löschende ESXi-Ressourcen und GNS3-Nodes, löscht aber nichts"
+)
+@allure.description(
+    "Überprüft, dass plan_destroy die vorhandene ESXi-VM, ihre Port-Group "
+    "und den vorhandenen GNS3-Node als 'würde gelöscht' meldet, ohne "
+    "delete_vm/delete_all_nodes tatsächlich aufzurufen"
+)
+@allure.tag("positiv-test", "vm_orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_021() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.get_vm_ip_address.return_value = "10.20.20.231"
+
+    nf = NodeFactory()
+    vm: GenericNode = nf.create_node("Ubuntu-Server", "VM", "VM1")
+    vm.add_interface("ens160")
+    nodes = {"VM1": vm}
+
+    stale_vm = MagicMock()
+    stale_vm.name = "VM1"
+    esxi_connection.find_vms_matching.return_value = [stale_vm]
+
+    with patch("src.vm_orchestrator.GNS3Client") as client_cls:
+        client = client_cls.return_value
+        client.list_projects.return_value = [{"project_id": "p1", "name": "Lab"}]
+        client.list_nodes.return_value = [{"node_id": "n1", "name": "R1"}]
+
+        lines = orchestrator.plan_destroy(nodes, "Lab", vm_name="GNS3-VM")
+
+    esxi_connection.delete_vm.assert_not_called()
+    client.delete_all_nodes.assert_not_called()
+    assert any("Would delete ESXi VM 'VM1'" in line for line in lines)
+    assert any("Would delete GNS3 node 'R1'" in line for line in lines)
+
+
+@allure.title("plan_destroy meldet ein nicht existierendes GNS3-Projekt")
+@allure.description(
+    "Überprüft, dass plan_destroy meldet, dass das GNS3-Projekt nicht "
+    "existiert, statt einen Fehler zu werfen"
+)
+@allure.tag("negativ-test", "vm_orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.NORMAL)
+def vm_orchestrator_022() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.get_vm_ip_address.return_value = "10.20.20.231"
+    esxi_connection.find_vms_matching.return_value = []
+
+    with patch("src.vm_orchestrator.GNS3Client") as client_cls:
+        client_cls.return_value.list_projects.return_value = []
+        lines = orchestrator.plan_destroy({}, "Lab", vm_name="GNS3-VM")
+
+    assert any("does not exist" in line for line in lines)
+
+
+@allure.title("plan_deploy meldet zu erstellende Port-Groups, VMs und GNS3-Nodes")
+@allure.description(
+    "Überprüft, dass plan_deploy fehlende Port-Groups, zu importierende "
+    "ESXi-VMs und zu erstellende GNS3-Nodes meldet, ohne irgendetwas zu "
+    "verändern"
+)
+@allure.tag("positiv-test", "vm_orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_023() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.get_vm_ip_address.return_value = "10.20.20.231"
+    esxi_connection.list_port_groups.return_value = []
+    esxi_connection.find_vms_matching.return_value = []
+
+    nf = NodeFactory()
+    gns3_node = nf.create_node("VPCS", "ROUTER", "R1")
+    vm: GenericNode = nf.create_node("Ubuntu-Server", "VM", "VM1")
+    vm.add_interface("ens160")
+    nodes = {"R1": gns3_node, "VM1": vm}
+
+    with patch("src.vm_orchestrator.GNS3Client") as client_cls:
+        client_cls.return_value.list_projects.return_value = []
+
+        lines = orchestrator.plan_deploy(nodes, "Lab", vm_name="GNS3-VM")
+
+    esxi_connection.ensure_port_group.assert_not_called()
+    assert any("Would create ESXi port group" in line for line in lines)
+    assert any("Would import ESXi VM 'VM1'" in line for line in lines)
+    assert any("Would create GNS3 node 'R1'" in line for line in lines)
+
+
+@allure.title(
+    "plan_deploy überspringt den GNS3-Teil, wenn --fresh-gns3-vm laufen würde"
+)
+@allure.description(
+    "Überprüft, dass plan_deploy mit fresh_gns3_vm=True keinen GNS3Client "
+    "instanziiert, da die GNS3-VM in diesem Fall erst noch ersetzt würde"
+)
+@allure.tag("positiv-test", "vm_orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.NORMAL)
+def vm_orchestrator_024() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.list_port_groups.return_value = []
+
+    with patch("src.vm_orchestrator.GNS3Client") as client_cls:
+        lines = orchestrator.plan_deploy({}, "Lab", fresh_gns3_vm=True)
+
+    client_cls.assert_not_called()
+    assert any("--fresh-gns3-vm" in line for line in lines)
+
+
+@allure.title(
+    "verify_topology meldet gestarteten GNS3-Node und eingeschaltete ESXi-VM als bestanden"
+)
+@allure.description(
+    "Überprüft, dass verify_topology für einen gestarteten GNS3-Node und "
+    "eine eingeschaltete ESXi-VM mit gemeldeter IP jeweils einen "
+    "bestandenen Check zurückgibt"
+)
+@allure.tag("positiv-test", "vm_orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_025() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.get_vm_ip_address.return_value = "10.20.20.231"
+    esxi_connection.list_port_groups.return_value = []
+    esxi_connection.get_vm.return_value = MagicMock()
+    esxi_connection.is_vm_powered_on.return_value = True
+
+    nf = NodeFactory()
+    gns3_node = nf.create_node("VPCS", "ROUTER", "R1")
+    vm: GenericNode = nf.create_node("Ubuntu-Server", "VM", "VM1")
+    nodes = {"R1": gns3_node, "VM1": vm}
+
+    with patch("src.vm_orchestrator.GNS3Client") as client_cls:
+        client = client_cls.return_value
+        client.list_projects.return_value = [{"project_id": "p1", "name": "Lab"}]
+        client.list_nodes.return_value = [
+            {"node_id": "n1", "name": "R1", "status": "started"}
+        ]
+        client.list_links.return_value = []
+
+        results = orchestrator.verify_topology(nodes, "Lab", vm_name="GNS3-VM")
+
+    assert any(ok and "R1" in d and "started" in d for ok, d in results)
+    assert any(ok and "VM1" in d and "powered on" in d for ok, d in results)
+
+
+@allure.title("verify_topology meldet eine nicht gefundene ESXi-VM als fehlgeschlagen")
+@allure.description(
+    "Überprüft, dass verify_topology einen fehlgeschlagenen Check meldet, "
+    "wenn die erwartete ESXi-VM nicht gefunden wird"
+)
+@allure.tag("negativ-test", "vm_orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_026() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.get_vm_ip_address.return_value = None
+    esxi_connection.list_port_groups.return_value = []
+    esxi_connection.get_vm.return_value = None
+
+    nf = NodeFactory()
+    vm: GenericNode = nf.create_node("Ubuntu-Server", "VM", "VM1")
+    nodes = {"VM1": vm}
+
+    with patch("src.vm_orchestrator.GNS3Client"):
+        results = orchestrator.verify_topology(nodes, "Lab", vm_name="GNS3-VM")
+
+    assert any(not ok and "VM1" in d and "not found" in d for ok, d in results)
+
+
+@allure.title(
+    "verify_topology erkennt eine VLAN-Kollision bei einem direkten ESXi-Link"
+)
+@allure.description(
+    "Überprüft, dass verify_topology einen fehlgeschlagenen Check meldet, "
+    "wenn die Port-Groups beider Seiten einer direkten ESXi-ESXi-"
+    "Verbindung unterschiedliche VLAN-IDs tragen"
+)
+@allure.tag("negativ-test", "vm_orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_027() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.get_vm_ip_address.return_value = None
+    esxi_connection.get_vm.return_value = MagicMock()
+    esxi_connection.is_vm_powered_on.return_value = True
+
+    nf = NodeFactory()
+    vm1: GenericNode = nf.create_node("Ubuntu-Server", "VM", "VM1")
+    vm2: GenericNode = nf.create_node("Ubuntu-Server", "VM", "VM2")
+    if1 = vm1.add_interface("ens160")
+    if2 = vm2.add_interface("ens160")
+    NodeFactory.create_edge(if1, if2)
+    nodes = {"VM1": vm1, "VM2": vm2}
+
+    esxi_connection.list_port_groups.return_value = [
+        {"name": if1.esxi_vlan, "vlan_id": 2, "vswitch": "vSwitch0"},
+        {"name": if2.esxi_vlan, "vlan_id": 3, "vswitch": "vSwitch0"},
+    ]
+
+    with patch("src.vm_orchestrator.GNS3Client"):
+        results = orchestrator.verify_topology(nodes, "Lab", vm_name="GNS3-VM")
+
+    assert any(not ok and "VLAN mismatch" in d for ok, d in results)
+
+
+@allure.title("export_topology rekonstruiert GNS3-interne Nodes und Links")
+@allure.description(
+    "Überprüft, dass export_topology zwei GNS3-Nodes desselben Templates "
+    "zu einer Knotengruppe zusammenfasst (Rolle aus der Template-Kategorie "
+    "abgeleitet) und den Link zwischen ihnen als Edge rekonstruiert"
+)
+@allure.tag("positiv-test", "vm_orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_028() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.get_vm_ip_address.return_value = "10.20.20.231"
+    esxi_connection.list_vms.return_value = []
+    esxi_connection.list_port_groups.return_value = []
+
+    with patch("src.vm_orchestrator.GNS3Client") as client_cls:
+        client = client_cls.return_value
+        client.list_projects.return_value = [{"project_id": "p1", "name": "Lab"}]
+        client.get_templates.return_value = [
+            {"template_id": "t1", "name": "Cisco IOSv 15.6(1)T", "category": "router"}
+        ]
+        node_r1 = {
+            "node_id": "n1",
+            "name": "R1",
+            "node_type": "qemu",
+            "template_id": "t1",
+            "ports": [{"name": "gi0/0", "adapter_number": 0, "port_number": 0}],
+        }
+        node_r2 = {
+            "node_id": "n2",
+            "name": "R2",
+            "node_type": "qemu",
+            "template_id": "t1",
+            "ports": [{"name": "gi0/0", "adapter_number": 0, "port_number": 0}],
+        }
+        client.list_nodes.return_value = [node_r1, node_r2]
+        client.list_links.return_value = [
+            {
+                "nodes": [
+                    {"node_id": "n1", "adapter_number": 0, "port_number": 0},
+                    {"node_id": "n2", "adapter_number": 0, "port_number": 0},
+                ]
+            }
+        ]
+
+        result = orchestrator.export_topology("Lab", vm_name="GNS3-VM")
+
+    assert result["nodes"] == [
+        {"image": "Cisco IOSv 15.6(1)T", "role": "ROUTER", "names": ["R1", "R2"]}
+    ]
+    assert result["edges"] == [["R1", "gi0/0", "R2", "gi0/0"]]
+
+
+@allure.title("export_topology nimmt nur ESXi-VMs mit Image-Annotation auf")
+@allure.description(
+    "Überprüft, dass export_topology eine ESXi-VM mit "
+    "'topologybuilder-image:'-Annotation als Node aufnimmt, eine VM ohne "
+    "diese Annotation aber stillschweigend überspringt"
+)
+@allure.tag("positiv-test", "vm_orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_029() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.get_vm_ip_address.return_value = "10.20.20.231"
+    esxi_connection.list_port_groups.return_value = []
+
+    annotated_vm = MagicMock()
+    annotated_vm.name = "VM1"
+    unannotated_vm = MagicMock()
+    unannotated_vm.name = "unrelated"
+    esxi_connection.list_vms.return_value = [annotated_vm, unannotated_vm]
+    esxi_connection.get_vm_annotation.side_effect = lambda vm: (
+        "topologybuilder-image:Ubuntu-Server" if vm is annotated_vm else None
+    )
+    esxi_connection.get_vm_network_names.return_value = []
+
+    with patch("src.vm_orchestrator.GNS3Client") as client_cls:
+        client = client_cls.return_value
+        client.list_projects.return_value = [{"project_id": "p1", "name": "Lab"}]
+        client.get_templates.return_value = []
+        client.list_nodes.return_value = []
+        client.list_links.return_value = []
+
+        result = orchestrator.export_topology("Lab", vm_name="GNS3-VM")
+
+    assert {"image": "Ubuntu-Server", "role": "VM", "names": ["VM1"]} in result["nodes"]
+    assert not any(n["names"] == ["unrelated"] for n in result["nodes"])
+
+
+@allure.title(
+    "export_topology rekonstruiert eine Cloud-Node-Bridge per Port-Group-Namensabgleich"
+)
+@allure.description(
+    "Überprüft, dass export_topology eine ESXi<->GNS3-Bridge korrekt "
+    "rekonstruiert, indem der von der Cloud-Node gebundene Interface-Name "
+    "exakt mit dem Namen der ESXi-Port-Group abgeglichen wird"
+)
+@allure.tag("positiv-test", "vm_orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_030() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.get_vm_ip_address.return_value = "10.20.20.231"
+
+    vm = MagicMock()
+    vm.name = "VM1"
+    esxi_connection.list_vms.return_value = [vm]
+    esxi_connection.get_vm_annotation.return_value = (
+        "topologybuilder-image:Ubuntu-Server"
+    )
+    esxi_connection.get_vm_network_names.return_value = ["VM1_ens160"]
+    esxi_connection.list_port_groups.return_value = [
+        {"name": "VM1_ens160", "vlan_id": 2, "vswitch": "vSwitch0"}
+    ]
+
+    with patch("src.vm_orchestrator.GNS3Client") as client_cls:
+        client = client_cls.return_value
+        client.list_projects.return_value = [{"project_id": "p1", "name": "Lab"}]
+        client.get_templates.return_value = [
+            {"template_id": "t1", "name": "Cisco IOSv 15.6(1)T", "category": "router"}
+        ]
+        router = {
+            "node_id": "n1",
+            "name": "R1",
+            "node_type": "qemu",
+            "template_id": "t1",
+            "ports": [{"name": "gi0/0", "adapter_number": 0, "port_number": 0}],
+        }
+        cloud = {
+            "node_id": "c1",
+            "name": "cloud-VM1_ens160",
+            "node_type": "cloud",
+            "properties": {
+                "ports_mapping": [
+                    {"interface": "VM1_ens160", "name": "eth0", "port_number": 0}
+                ]
+            },
+            "ports": [{"name": "eth0", "adapter_number": 0, "port_number": 0}],
+        }
+        client.list_nodes.return_value = [router, cloud]
+        client.list_links.return_value = [
+            {
+                "nodes": [
+                    {"node_id": "n1", "adapter_number": 0, "port_number": 0},
+                    {"node_id": "c1", "adapter_number": 0, "port_number": 0},
+                ]
+            }
+        ]
+
+        result = orchestrator.export_topology("Lab", vm_name="GNS3-VM")
+
+    assert ["VM1", "ens160", "R1", "gi0/0"] in result["edges"]
+
+
+@allure.title(
+    "export_topology rekonstruiert eine direkte ESXi-ESXi-Verbindung über eine gemeinsame VLAN-ID"
+)
+@allure.description(
+    "Überprüft, dass export_topology zwei unbeanspruchte ESXi-Port-Groups "
+    "mit derselben VLAN-ID als direkte ESXi-ESXi-Kante rekonstruiert, ohne "
+    "dass dafür ein GNS3-Node beteiligt sein muss"
+)
+@allure.tag("positiv-test", "vm_orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_031() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.get_vm_ip_address.return_value = "10.20.20.231"
+
+    vm1 = MagicMock()
+    vm1.name = "VM1"
+    vm2 = MagicMock()
+    vm2.name = "VM2"
+    esxi_connection.list_vms.return_value = [vm1, vm2]
+    esxi_connection.get_vm_annotation.return_value = (
+        "topologybuilder-image:Ubuntu-Server"
+    )
+    esxi_connection.get_vm_network_names.side_effect = lambda vm: (
+        ["VM1_ens160"] if vm is vm1 else ["VM2_ens160"]
+    )
+    esxi_connection.list_port_groups.return_value = [
+        {"name": "VM1_ens160", "vlan_id": 2, "vswitch": "vSwitch0"},
+        {"name": "VM2_ens160", "vlan_id": 2, "vswitch": "vSwitch0"},
+    ]
+
+    with patch("src.vm_orchestrator.GNS3Client") as client_cls:
+        client = client_cls.return_value
+        client.list_projects.return_value = [{"project_id": "p1", "name": "Lab"}]
+        client.get_templates.return_value = []
+        client.list_nodes.return_value = []
+        client.list_links.return_value = []
+
+        result = orchestrator.export_topology("Lab", vm_name="GNS3-VM")
+
+    assert ["VM1", "ens160", "VM2", "ens160"] in result["edges"]
+
+
+@allure.title(
+    "verify_topology bestätigt eine ESXi<->GNS3-Bridge, wenn Port-Group und Cloud-Node existieren"
+)
+@allure.description(
+    "Überprüft, dass verify_topology einen bestandenen Check meldet, wenn "
+    "sowohl die erwartete ESXi-Port-Group als auch der passende Cloud-Node "
+    "im GNS3-Projekt existieren"
+)
+@allure.tag("positiv-test", "vm_orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_032() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.get_vm_ip_address.return_value = "10.20.20.231"
+    esxi_connection.get_vm.return_value = None
+
+    nf = NodeFactory()
+    router = nf.create_node("VPCS", "ROUTER", "R1")
+    vm: GenericNode = nf.create_node("Ubuntu-Server", "VM", "VM1")
+    router_if = router.add_interface("gi0/0")
+    vm_if = vm.add_interface("ens160")
+    NodeFactory.create_edge(router_if, vm_if)
+    nodes = {"R1": router, "VM1": vm}
+
+    esxi_connection.list_port_groups.return_value = [
+        {"name": vm_if.esxi_vlan, "vlan_id": 2, "vswitch": "vSwitch0"}
+    ]
+
+    with patch("src.vm_orchestrator.GNS3Client") as client_cls:
+        client = client_cls.return_value
+        client.list_projects.return_value = [{"project_id": "p1", "name": "Lab"}]
+        client.list_nodes.return_value = [
+            {"node_id": "n1", "name": "R1", "status": "started"},
+            {"node_id": "c1", "name": f"cloud-{vm_if.esxi_vlan}", "status": "started"},
+        ]
+        client.list_links.return_value = []
+
+        results = orchestrator.verify_topology(nodes, "Lab", vm_name="GNS3-VM")
+
+    assert any(ok and "bridged via" in d for ok, d in results)
+
+
+@allure.title("verify_topology bestätigt einen bestehenden GNS3-internen Link")
+@allure.description(
+    "Überprüft, dass verify_topology einen bestandenen Check meldet, wenn "
+    "zwischen zwei rein GNS3-gehosteten Nodes tatsächlich ein Link mit den "
+    "erwarteten Node-IDs existiert"
+)
+@allure.tag("positiv-test", "vm_orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_033() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.get_vm_ip_address.return_value = "10.20.20.231"
+    esxi_connection.list_port_groups.return_value = []
+
+    nf = NodeFactory()
+    r1 = nf.create_node("VPCS", "ROUTER", "R1")
+    r2 = nf.create_node("VPCS", "ROUTER", "R2")
+    NodeFactory.create_edge(r1.add_interface("gi0/0"), r2.add_interface("gi0/0"))
+    nodes = {"R1": r1, "R2": r2}
+
+    with patch("src.vm_orchestrator.GNS3Client") as client_cls:
+        client = client_cls.return_value
+        client.list_projects.return_value = [{"project_id": "p1", "name": "Lab"}]
+        client.list_nodes.return_value = [
+            {"node_id": "n1", "name": "R1", "status": "started"},
+            {"node_id": "n2", "name": "R2", "status": "started"},
+        ]
+        client.list_links.return_value = [
+            {"nodes": [{"node_id": "n1"}, {"node_id": "n2"}]}
+        ]
+
+        results = orchestrator.verify_topology(nodes, "Lab", vm_name="GNS3-VM")
+
+    assert any(ok and "R1:gi0/0 <-> R2:gi0/0: linked" in d for ok, d in results)

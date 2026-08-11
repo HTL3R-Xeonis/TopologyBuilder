@@ -197,6 +197,15 @@ class GNS3Client:
         """
         return self._get(f"/v2/projects/{project_id}/nodes")
 
+    def list_links(self, project_id: str) -> list[dict]:
+        """
+        Lists every link currently in the given project.
+        :param project_id: the project to list links for
+        :return: list of link dicts, each with a 'nodes' list of
+            {'node_id', 'adapter_number', 'port_number'} for both endpoints
+        """
+        return self._get(f"/v2/projects/{project_id}/links")
+
     def get_or_create_project(self, name: str) -> dict:
         """
         Finds an existing project by name, or creates one if none exists.
@@ -449,7 +458,10 @@ class GNS3Client:
 
 
 def deploy_topology(
-    base_url: str, project_name: str, nodes: dict[str, GenericNode]
+    base_url: str,
+    project_name: str,
+    nodes: dict[str, GenericNode],
+    incremental: bool = False,
 ) -> None:
     """
     Builds the given topology inside a GNS3 project: creates a node for every
@@ -463,21 +475,51 @@ def deploy_topology(
 
     Any nodes already in the project (e.g. from a previous deploy) are
     deleted first, so redeploying the same topology converges to a clean,
-    correct state instead of accumulating duplicates.
+    correct state instead of accumulating duplicates - unless `incremental`
+    is set, see below.
     :param base_url: base URL of the GNS3 VM, e.g. http://10.20.20.231
     :param project_name: name of the GNS3 project to create or reuse
     :param nodes: built topology of nodes, as returned by GraphBuilder.build()
+    :param incremental: if True, skips deleting existing nodes first, and
+        only creates nodes/Cloud-nodes/links that don't already exist by
+        name/endpoint - anything already present is left running,
+        untouched. Never removes anything that was dropped from `nodes` -
+        use a full (non-incremental) deploy or `destroy` for that. Also
+        doesn't pick up an existing node's image changing while its name
+        stays the same, since it only checks whether a same-named node
+        already exists, not whether it still matches the desired template.
     """
     client = GNS3Client(base_url)
     project = client.get_or_create_project(project_name)
     project_id = project["project_id"]
-    client.delete_all_nodes(project_id)
+
+    if incremental:
+        existing_nodes_by_name = {
+            node["name"]: node for node in client.list_nodes(project_id)
+        }
+        existing_links = client.list_links(project_id)
+    else:
+        client.delete_all_nodes(project_id)
+        existing_nodes_by_name = {}
+        existing_links = []
+
+    def _link_exists(node_id_a: str, node_id_b: str) -> bool:
+        wanted = {node_id_a, node_id_b}
+        return any(
+            {endpoint["node_id"] for endpoint in link["nodes"]} == wanted
+            for link in existing_links
+        )
 
     positions = compute_node_positions(nodes)
 
     gns3_nodes: dict[str, dict] = {}
     for name, node in nodes.items():
         if node.env != Environment.ON_GNS3:
+            continue
+        existing = existing_nodes_by_name.get(name)
+        if existing is not None:
+            gns3_nodes[name] = existing
+            logger.info(f"GNS3 node '{name}' already exists, reusing it (incremental)")
             continue
         template = client.find_template(node.image)
         x, y = positions[name]
@@ -499,6 +541,11 @@ def deploy_topology(
             gns3_2 = node_2.env == Environment.ON_GNS3
 
             if gns3_1 and gns3_2:
+                if incremental and _link_exists(
+                    gns3_nodes[node_1.name]["node_id"],
+                    gns3_nodes[node_2.name]["node_id"],
+                ):
+                    continue
                 client.create_link(
                     project_id,
                     gns3_nodes[node_1.name],
@@ -512,14 +559,22 @@ def deploy_topology(
                     if gns3_1
                     else (edge.incidence_2, edge.incidence_1)
                 )
-                x, y = positions[gns3_interface.node.name]
-                cloud_node = client.create_cloud_node(
-                    project_id,
-                    f"cloud-{esxi_interface.esxi_vlan}",
-                    esxi_interface.esxi_vlan,
-                    int(x) - 1000 + 100,
-                    int(y) - 500 + 100,
-                )
+                cloud_node_name = f"cloud-{esxi_interface.esxi_vlan}"
+                cloud_node = existing_nodes_by_name.get(cloud_node_name)
+                if cloud_node is None:
+                    x, y = positions[gns3_interface.node.name]
+                    cloud_node = client.create_cloud_node(
+                        project_id,
+                        cloud_node_name,
+                        esxi_interface.esxi_vlan,
+                        int(x) - 1000 + 100,
+                        int(y) - 500 + 100,
+                    )
+                elif incremental and _link_exists(
+                    gns3_nodes[gns3_interface.node.name]["node_id"],
+                    cloud_node["node_id"],
+                ):
+                    continue
                 client.create_link(
                     project_id,
                     gns3_nodes[gns3_interface.node.name],

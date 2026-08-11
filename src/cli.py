@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 import typer
+import yaml
 
 from src.cli_config import load_cli_config
 from src.config_file_handler import ConfigFileHandler
@@ -316,6 +317,22 @@ def deploy(
         "Defaults to the system temp dir, which may not have room for "
         "multi-gigabyte OVAs - point this at a larger volume if needed.",
     ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Print what deploy would do (port groups, VMs, and GNS3 "
+        "nodes/links created or deleted) without changing anything.",
+    ),
+    incremental: bool = typer.Option(
+        False,
+        "--incremental",
+        help="Skip deleting/recreating anything that already exists by "
+        "name - only create what's missing, leaving already-running nodes "
+        "untouched. Faster for adding to a running topology, but never "
+        "removes nodes dropped from the config and won't pick up an "
+        "existing node's image changing while its name stays the same - "
+        "use a full (non-incremental) deploy or destroy for either of those.",
+    ),
 ) -> None:
     """
     Validate a config file, build the topology, and deploy it to GNS3/ESXi.
@@ -355,6 +372,16 @@ def deploy(
 
     orchestrator = VMOrchestrator(esxi_host, esxi_username, esxi_password)
 
+    if dry_run:
+        for line in orchestrator.plan_deploy(
+            nodes,
+            gns3_project or Path(config_path).stem,
+            vm_name=gns3_vm_name,
+            fresh_gns3_vm=fresh_gns3_vm,
+        ):
+            typer.echo(line)
+        return
+
     if fresh_gns3_vm:
         orchestrator.deploy_fresh_gns3_vm(
             gns3_ova_path,
@@ -364,7 +391,8 @@ def deploy(
             vm_name=gns3_vm_name,
         )
 
-    orchestrator.delete_stale_esxi_resources(nodes)
+    if not incremental:
+        orchestrator.delete_stale_esxi_resources(nodes)
     orchestrator.create_gns3_configuration_file(
         nodes,
         vm_name=gns3_vm_name,
@@ -372,10 +400,13 @@ def deploy(
         trunk_interface=gns3_trunk_interface,
     )
     orchestrator.deploy_esxi_nodes(
-        nodes, esxi_datastore, download_dir=esxi_ova_cache_dir
+        nodes, esxi_datastore, download_dir=esxi_ova_cache_dir, incremental=incremental
     )
     orchestrator.deploy_gns3_topology(
-        nodes, gns3_project or Path(config_path).stem, vm_name=gns3_vm_name
+        nodes,
+        gns3_project or Path(config_path).stem,
+        vm_name=gns3_vm_name,
+        incremental=incremental,
     )
     typer.echo("Deployment complete.")
 
@@ -388,6 +419,12 @@ def destroy(
     esxi_password: Optional[str] = ESXI_PASSWORD_OPTION,
     gns3_project: Optional[str] = GNS3_PROJECT_OPTION,
     gns3_vm_name: Optional[str] = GNS3_VM_NAME_OPTION,
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Print what destroy would delete (ESXi VMs/port groups, GNS3 "
+        "nodes) without deleting anything.",
+    ),
 ) -> None:
     """
     Tear down a previously deployed topology: deletes its GNS3 nodes/links
@@ -405,11 +442,109 @@ def destroy(
     nodes = graph_builder.build()
 
     orchestrator = VMOrchestrator(esxi_host, esxi_username, esxi_password)
+
+    if dry_run:
+        for line in orchestrator.plan_destroy(
+            nodes, gns3_project or Path(config_path).stem, vm_name=gns3_vm_name
+        ):
+            typer.echo(line)
+        return
+
     orchestrator.delete_stale_esxi_resources(nodes)
     orchestrator.destroy_gns3_topology(
         gns3_project or Path(config_path).stem, vm_name=gns3_vm_name
     )
     typer.echo("Destroy complete.")
+
+
+@app.command()
+def verify(
+    config_path: Optional[str] = CONFIG_ARG,
+    esxi_host: Optional[str] = ESXI_HOST_OPTION,
+    esxi_username: Optional[str] = ESXI_USERNAME_OPTION,
+    esxi_password: Optional[str] = ESXI_PASSWORD_OPTION,
+    gns3_project: Optional[str] = GNS3_PROJECT_OPTION,
+    gns3_vm_name: Optional[str] = GNS3_VM_NAME_OPTION,
+    gns3_trunk_network: Optional[str] = typer.Option(
+        _CLI_CONFIG.get("gns3_trunk_network"),
+        "--gns3-trunk-network",
+        help="ESXi port group expected to carry the GNS3 VM's VLAN trunk "
+        "NIC. If given, verify also checks the trunk NIC is actually wired "
+        "to it. Skipped if omitted.",
+    ),
+) -> None:
+    """
+    Run a structural health check against a deployed topology: confirms
+    every GNS3 node is started, every ESXi VM is powered on and reports an
+    IP, the trunk NIC is wired correctly, and both sides of a link agree on
+    VLAN ID. This is NOT a connectivity/ping test - topologybuilder never
+    assigns an IP address to any node, so there is no address to ping.
+    """
+    config_path = _resolve_config_path(config_path)
+    esxi_host, esxi_username, esxi_password = _resolve_esxi_credentials(
+        esxi_host, esxi_username, esxi_password
+    )
+
+    handler = ConfigFileHandler(config_path)
+    handler.validate_file()
+    graph_builder = GraphBuilder(handler.nodes, handler.edges)
+    nodes = graph_builder.build()
+
+    orchestrator = VMOrchestrator(esxi_host, esxi_username, esxi_password)
+    results = orchestrator.verify_topology(
+        nodes,
+        gns3_project or Path(config_path).stem,
+        vm_name=gns3_vm_name,
+        trunk_network_name=gns3_trunk_network,
+    )
+
+    passed = 0
+    for ok, description in results:
+        typer.echo(f"{'[OK]  ' if ok else '[FAIL]'} {description}")
+        passed += ok
+
+    typer.echo(f"{passed}/{len(results)} checks passed")
+    if passed != len(results):
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def export(
+    output: str = typer.Argument(
+        ..., help="Path to write the exported topology YAML to."
+    ),
+    esxi_host: Optional[str] = ESXI_HOST_OPTION,
+    esxi_username: Optional[str] = ESXI_USERNAME_OPTION,
+    esxi_password: Optional[str] = ESXI_PASSWORD_OPTION,
+    gns3_project: str = typer.Option(
+        ...,
+        "--gns3-project",
+        help="Name of the GNS3 project to capture. Required - there's no "
+        "config file here to default it from.",
+    ),
+    gns3_vm_name: Optional[str] = GNS3_VM_NAME_OPTION,
+) -> None:
+    """
+    Capture a currently deployed topology's live state back into a
+    topology config YAML - a best-effort reverse of deploy. Only ESXi VMs
+    deploy_esxi_nodes tagged with its image annotation are included; VMs
+    from before that existed (or created some other way) are skipped with
+    a warning, not guessed at. See VMOrchestrator.export_topology's
+    docstring for the other best-effort limitations (role inference,
+    interface-name recovery).
+    """
+    esxi_host, esxi_username, esxi_password = _resolve_esxi_credentials(
+        esxi_host, esxi_username, esxi_password
+    )
+
+    orchestrator = VMOrchestrator(esxi_host, esxi_username, esxi_password)
+    topology = orchestrator.export_topology(gns3_project, vm_name=gns3_vm_name)
+
+    Path(output).write_text(yaml.safe_dump(topology, sort_keys=False))
+    typer.echo(
+        f"Wrote {len(topology['nodes'])} node group(s), {len(topology['edges'])} "
+        f"edge(s) to {output}"
+    )
 
 
 @app.command()

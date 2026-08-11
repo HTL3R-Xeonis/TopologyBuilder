@@ -765,3 +765,104 @@ def gns3_client_028() -> None:
 
     assert nodes == [{"node_id": "n1", "name": "PC1", "status": "started"}]
     get.assert_called_once_with(f"{BASE_URL}/v2/projects/proj-1/nodes", timeout=30)
+
+
+@allure.title("list_links liefert alle Links eines Projekts")
+@allure.description(
+    "Überprüft, dass list_links das Ergebnis von "
+    "GET /v2/projects/{id}/links unverändert zurückgibt"
+)
+@allure.tag("positiv-test", "gns3_client")
+@allure.feature("gns3_client")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_client_029() -> None:
+    with patch("src.gns3_client.requests.get") as get:
+        get.return_value = _response(
+            json_data=[
+                {"link_id": "l1", "nodes": [{"node_id": "n1"}, {"node_id": "n2"}]}
+            ]
+        )
+        client = GNS3Client(BASE_URL)
+        links = client.list_links("proj-1")
+
+    assert links == [{"link_id": "l1", "nodes": [{"node_id": "n1"}, {"node_id": "n2"}]}]
+    get.assert_called_once_with(f"{BASE_URL}/v2/projects/proj-1/links", timeout=30)
+
+
+@allure.title("deploy_topology überspringt delete_all_nodes im incremental-Modus")
+@allure.description(
+    "Überprüft, dass deploy_topology mit incremental=True delete_all_nodes "
+    "nicht aufruft, sondern list_nodes/list_links liest, um zu entscheiden, "
+    "was bereits existiert"
+)
+@allure.tag("positiv-test", "gns3_client")
+@allure.feature("gns3_client")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_client_030() -> None:
+    nf = NodeFactory()
+    pc1: GenericNode = nf.create_node("VPCS", "PC", "PC1")
+    pc2: GenericNode = nf.create_node("VPCS", "PC", "PC2")
+    NodeFactory.create_edge(
+        pc1.add_interface("Ethernet0"), pc2.add_interface("Ethernet0")
+    )
+    nodes = {"PC1": pc1, "PC2": pc2}
+
+    with patch("src.gns3_client.GNS3Client") as client_cls:
+        client = client_cls.return_value
+        client.get_or_create_project.return_value = {"project_id": "proj-1"}
+        client.list_nodes.return_value = []
+        client.list_links.return_value = []
+        client.find_template.return_value = {
+            "template_id": "t1",
+            "template_type": "vpcs",
+            "properties": {},
+        }
+        client.create_node.side_effect = [
+            {"node_id": "n1", "name": "PC1", "ports": [{"name": "Ethernet0"}]},
+            {"node_id": "n2", "name": "PC2", "ports": [{"name": "Ethernet0"}]},
+        ]
+
+        deploy_topology(BASE_URL, "Lab", nodes, incremental=True)
+
+    client.delete_all_nodes.assert_not_called()
+    assert client.create_node.call_count == 2
+    client.create_link.assert_called_once()
+
+
+@allure.title(
+    "deploy_topology überspringt bereits vorhandene Nodes/Links im incremental-Modus"
+)
+@allure.description(
+    "Überprüft, dass deploy_topology mit incremental=True einen bereits "
+    "vorhandenen gleichnamigen Node wiederverwendet statt neu zu erstellen, "
+    "und einen bereits existierenden Link nicht erneut anlegt"
+)
+@allure.tag("positiv-test", "gns3_client")
+@allure.feature("gns3_client")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_client_031() -> None:
+    nf = NodeFactory()
+    pc1: GenericNode = nf.create_node("VPCS", "PC", "PC1")
+    pc2: GenericNode = nf.create_node("VPCS", "PC", "PC2")
+    NodeFactory.create_edge(
+        pc1.add_interface("Ethernet0"), pc2.add_interface("Ethernet0")
+    )
+    nodes = {"PC1": pc1, "PC2": pc2}
+
+    existing_n1 = {"node_id": "n1", "name": "PC1", "ports": [{"name": "Ethernet0"}]}
+    existing_n2 = {"node_id": "n2", "name": "PC2", "ports": [{"name": "Ethernet0"}]}
+
+    with patch("src.gns3_client.GNS3Client") as client_cls:
+        client = client_cls.return_value
+        client.get_or_create_project.return_value = {"project_id": "proj-1"}
+        client.list_nodes.return_value = [existing_n1, existing_n2]
+        client.list_links.return_value = [
+            {"nodes": [{"node_id": "n1"}, {"node_id": "n2"}]}
+        ]
+
+        deploy_topology(BASE_URL, "Lab", nodes, incremental=True)
+
+    client.delete_all_nodes.assert_not_called()
+    client.create_node.assert_not_called()
+    client.create_link.assert_not_called()
+    client.start_all_nodes.assert_called_once_with("proj-1")

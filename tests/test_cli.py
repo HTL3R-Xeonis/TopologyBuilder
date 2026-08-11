@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 import allure
 import pytest
 import typer
+import yaml
 from typer.testing import CliRunner
 
 from src import logger_adapter
@@ -461,10 +462,10 @@ def cli_019() -> None:
         nodes, vm_name=None, trunk_network_name=None, trunk_interface=None
     )
     orchestrator.deploy_esxi_nodes.assert_called_once_with(
-        nodes, None, download_dir=None
+        nodes, None, download_dir=None, incremental=False
     )
     orchestrator.deploy_gns3_topology.assert_called_once_with(
-        nodes, "config_ex", vm_name=None
+        nodes, "config_ex", vm_name=None, incremental=False
     )
     assert "Deployment complete." in result.output
 
@@ -840,3 +841,220 @@ def cli_033() -> None:
     assert "  - Ubuntu-Server" in result.output
     assert "GNS3 templates (1):" in result.output
     assert "  - VPCS" in result.output
+
+
+# --- deploy --dry-run / --incremental ---------------------------------------
+
+
+@allure.title("deploy --dry-run zeigt den Plan an, ohne etwas zu verändern")
+@allure.description(
+    "Überprüft, dass deploy --dry-run VMOrchestrator.plan_deploy aufruft, "
+    "dessen Zeilen ausgibt und keine der echten Deploy-Methoden aufruft"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.CRITICAL)
+def cli_034() -> None:
+    gns3_node = MagicMock()
+    gns3_node.env = Environment.ON_GNS3
+    nodes = {"R1": gns3_node}
+    with (
+        patch("src.cli.ConfigFileHandler"),
+        patch("src.cli.GraphBuilder") as graph_builder_cls,
+        patch("src.cli.VMOrchestrator") as orchestrator_cls,
+    ):
+        graph_builder_cls.return_value.build.return_value = nodes
+        orchestrator = orchestrator_cls.return_value
+        orchestrator.plan_deploy.return_value = ["Would create GNS3 node 'R1'"]
+
+        result = runner.invoke(
+            app, ["deploy", "config_ex.yml", *_DEPLOY_CREDS, "--dry-run"]
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "Would create GNS3 node 'R1'" in result.output
+    orchestrator.plan_deploy.assert_called_once_with(
+        nodes, "config_ex", vm_name=None, fresh_gns3_vm=False
+    )
+    orchestrator.delete_stale_esxi_resources.assert_not_called()
+    orchestrator.deploy_esxi_nodes.assert_not_called()
+    orchestrator.deploy_gns3_topology.assert_not_called()
+    assert "Deployment complete." not in result.output
+
+
+@allure.title("deploy --incremental überspringt delete_stale_esxi_resources")
+@allure.description(
+    "Überprüft, dass deploy --incremental delete_stale_esxi_resources nicht "
+    "aufruft und incremental=True an deploy_esxi_nodes/deploy_gns3_topology "
+    "weiterreicht"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.CRITICAL)
+def cli_035() -> None:
+    gns3_node = MagicMock()
+    gns3_node.env = Environment.ON_GNS3
+    nodes = {"R1": gns3_node}
+    with (
+        patch("src.cli.ConfigFileHandler"),
+        patch("src.cli.GraphBuilder") as graph_builder_cls,
+        patch("src.cli.VMOrchestrator") as orchestrator_cls,
+    ):
+        graph_builder_cls.return_value.build.return_value = nodes
+        orchestrator = orchestrator_cls.return_value
+
+        result = runner.invoke(
+            app, ["deploy", "config_ex.yml", *_DEPLOY_CREDS, "--incremental"]
+        )
+
+    assert result.exit_code == 0, result.output
+    orchestrator.delete_stale_esxi_resources.assert_not_called()
+    orchestrator.deploy_esxi_nodes.assert_called_once_with(
+        nodes, None, download_dir=None, incremental=True
+    )
+    orchestrator.deploy_gns3_topology.assert_called_once_with(
+        nodes, "config_ex", vm_name=None, incremental=True
+    )
+    assert "Deployment complete." in result.output
+
+
+# --- destroy --dry-run -------------------------------------------------------
+
+
+@allure.title("destroy --dry-run zeigt den Plan an, ohne etwas zu löschen")
+@allure.description(
+    "Überprüft, dass destroy --dry-run VMOrchestrator.plan_destroy aufruft, "
+    "dessen Zeilen ausgibt und keine der echten Destroy-Methoden aufruft"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.CRITICAL)
+def cli_036() -> None:
+    with (
+        patch("src.cli.ConfigFileHandler"),
+        patch("src.cli.GraphBuilder") as graph_builder_cls,
+        patch("src.cli.VMOrchestrator") as orchestrator_cls,
+    ):
+        graph_builder_cls.return_value.build.return_value = {}
+        orchestrator = orchestrator_cls.return_value
+        orchestrator.plan_destroy.return_value = ["Would delete GNS3 node 'R1'"]
+
+        result = runner.invoke(
+            app, ["destroy", "config_ex.yml", *_DEPLOY_CREDS, "--dry-run"]
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "Would delete GNS3 node 'R1'" in result.output
+    orchestrator.delete_stale_esxi_resources.assert_not_called()
+    orchestrator.destroy_gns3_topology.assert_not_called()
+    assert "Destroy complete." not in result.output
+
+
+# --- verify command -----------------------------------------------------
+
+
+@allure.title("verify-Befehl meldet Erfolg, wenn alle Checks bestehen")
+@allure.description(
+    "Überprüft, dass der verify-Befehl bei durchweg bestandenen Checks "
+    "Exit-Code 0 und eine 'N/N checks passed'-Zusammenfassung liefert"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.CRITICAL)
+def cli_037() -> None:
+    with (
+        patch("src.cli.ConfigFileHandler"),
+        patch("src.cli.GraphBuilder") as graph_builder_cls,
+        patch("src.cli.VMOrchestrator") as orchestrator_cls,
+    ):
+        graph_builder_cls.return_value.build.return_value = {}
+        orchestrator = orchestrator_cls.return_value
+        orchestrator.verify_topology.return_value = [
+            (True, "R1: started"),
+            (True, "VM1: powered on"),
+        ]
+
+        result = runner.invoke(app, ["verify", "config_ex.yml", *_DEPLOY_CREDS])
+
+    assert result.exit_code == 0, result.output
+    assert "[OK]" in result.output
+    assert "2/2 checks passed" in result.output
+
+
+@allure.title("verify-Befehl bricht mit Exit-Code 1 ab, wenn ein Check fehlschlägt")
+@allure.description(
+    "Überprüft, dass der verify-Befehl mit Exit-Code 1 abbricht und "
+    "fehlgeschlagene Checks als [FAIL] markiert, sobald mindestens ein "
+    "Check nicht bestanden wurde"
+)
+@allure.tag("negativ-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.CRITICAL)
+def cli_038() -> None:
+    with (
+        patch("src.cli.ConfigFileHandler"),
+        patch("src.cli.GraphBuilder") as graph_builder_cls,
+        patch("src.cli.VMOrchestrator") as orchestrator_cls,
+    ):
+        graph_builder_cls.return_value.build.return_value = {}
+        orchestrator = orchestrator_cls.return_value
+        orchestrator.verify_topology.return_value = [
+            (True, "R1: started"),
+            (False, "VM1: not found"),
+        ]
+
+        result = runner.invoke(app, ["verify", "config_ex.yml", *_DEPLOY_CREDS])
+
+    assert result.exit_code == 1
+    assert "[FAIL]" in result.output
+    assert "1/2 checks passed" in result.output
+
+
+# --- export command -----------------------------------------------------
+
+
+@allure.title("export-Befehl schreibt die erfasste Topologie als YAML")
+@allure.description(
+    "Überprüft, dass der export-Befehl export_topology mit dem gegebenen "
+    "Projektnamen aufruft und dessen Ergebnis als YAML-Datei schreibt"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.CRITICAL)
+def cli_039(tmp_path) -> None:
+    output_path = tmp_path / "exported.yml"
+    with patch("src.cli.VMOrchestrator") as orchestrator_cls:
+        orchestrator = orchestrator_cls.return_value
+        orchestrator.export_topology.return_value = {
+            "nodes": [{"image": "Ubuntu-Server", "role": "VM", "names": ["VM1"]}],
+            "edges": [],
+        }
+        result = runner.invoke(
+            app,
+            ["export", str(output_path), *_DEPLOY_CREDS, "--gns3-project", "Lab"],
+        )
+
+    assert result.exit_code == 0, result.output
+    orchestrator.export_topology.assert_called_once_with("Lab", vm_name=None)
+    written = yaml.safe_load(output_path.read_text())
+    assert written["nodes"] == [
+        {"image": "Ubuntu-Server", "role": "VM", "names": ["VM1"]}
+    ]
+    assert "Wrote 1 node group(s), 0 edge(s)" in result.output
+
+
+@allure.title("export-Befehl verlangt --gns3-project")
+@allure.description(
+    "Überprüft, dass der export-Befehl ohne --gns3-project mit einem "
+    "Fehler abbricht, da es keine Config-Datei gibt, aus der ein "
+    "Standardwert abgeleitet werden könnte"
+)
+@allure.tag("negativ-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.NORMAL)
+def cli_040(tmp_path) -> None:
+    output_path = tmp_path / "exported.yml"
+    result = runner.invoke(app, ["export", str(output_path), *_DEPLOY_CREDS])
+
+    assert result.exit_code != 0
+    assert not output_path.exists()
