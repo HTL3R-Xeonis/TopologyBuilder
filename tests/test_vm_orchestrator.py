@@ -309,3 +309,87 @@ def vm_orchestrator_009() -> None:
     esxi_connection.delete_port_group.assert_called_once_with(
         esxi_node.interfaces["ens160"].esxi_vlan
     )
+
+
+@allure.title("GNS3-Deployment erfasst SSH-Diagnosen bei Konsolen-Port-Kollision")
+@allure.description(
+    "Überprüft, dass deploy_gns3_topology bei einem RuntimeError mit "
+    "Konsolen-Port-Kollisions-Signatur per SSH auf die GNS3-VM zugreift, um "
+    "'ss -tlnp' und 'ps aux | grep qemu' zu protokollieren, und den "
+    "ursprünglichen Fehler danach trotzdem weiterwirft"
+)
+@allure.tag("negativ-test", "vm_orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_011() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.get_vm_ip_address.return_value = "10.20.20.231"
+
+    with (
+        patch("src.vm_orchestrator.deploy_topology") as deploy,
+        patch("src.vm_orchestrator.SSHConnection") as ssh_cls,
+    ):
+        deploy.side_effect = RuntimeError(
+            "Failed to start 1/1 node(s): ['R1']: address already in use"
+        )
+        ssh_connection = ssh_cls.return_value
+        stdout = MagicMock()
+        stdout.read.return_value = b"tcp LISTEN 0 128 *:5000"
+        ssh_connection.exec_command.return_value = (None, stdout, None)
+
+        with pytest.raises(RuntimeError, match=r"address already in use"):
+            orchestrator.deploy_gns3_topology({}, "Lab", vm_name="GNS3-VM")
+
+    ssh_cls.assert_called_once_with("10.20.20.231", "gns3", "gns3")
+    assert ssh_connection.exec_command.call_count == 2
+
+
+@allure.title("GNS3-Deployment versucht keine SSH-Diagnose bei anderen Fehlern")
+@allure.description(
+    "Überprüft, dass deploy_gns3_topology bei einem RuntimeError ohne "
+    "Konsolen-Port-Kollisions-Signatur keine SSH-Verbindung aufbaut und den "
+    "Fehler unverändert weiterwirft"
+)
+@allure.tag("negativ-test", "vm_orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.NORMAL)
+def vm_orchestrator_012() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.get_vm_ip_address.return_value = "10.20.20.231"
+
+    with (
+        patch("src.vm_orchestrator.deploy_topology") as deploy,
+        patch("src.vm_orchestrator.SSHConnection") as ssh_cls,
+    ):
+        deploy.side_effect = RuntimeError("Failed to start 1/1 node(s): ['R1']: boom")
+
+        with pytest.raises(RuntimeError, match=r"boom"):
+            orchestrator.deploy_gns3_topology({}, "Lab", vm_name="GNS3-VM")
+
+    ssh_cls.assert_not_called()
+
+
+@allure.title("SSH-Diagnosefehler maskiert den ursprünglichen Deployment-Fehler nicht")
+@allure.description(
+    "Überprüft, dass deploy_gns3_topology den ursprünglichen "
+    "Konsolen-Port-Kollisionsfehler weiterhin wirft, selbst wenn die "
+    "SSH-Diagnose selbst fehlschlägt (z.B. SSH-Verbindung nicht möglich)"
+)
+@allure.tag("negativ-test", "vm_orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.NORMAL)
+def vm_orchestrator_013() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.get_vm_ip_address.return_value = "10.20.20.231"
+
+    with (
+        patch("src.vm_orchestrator.deploy_topology") as deploy,
+        patch("src.vm_orchestrator.SSHConnection") as ssh_cls,
+    ):
+        deploy.side_effect = RuntimeError(
+            "Failed to start 1/1 node(s): ['R1']: address already in use"
+        )
+        ssh_cls.side_effect = ConnectionError("no route to host")
+
+        with pytest.raises(RuntimeError, match=r"address already in use"):
+            orchestrator.deploy_gns3_topology({}, "Lab", vm_name="GNS3-VM")

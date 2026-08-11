@@ -648,3 +648,63 @@ def gns3_client_023() -> None:
         client.delete_all_nodes("proj-1")  # must not raise
 
     assert delete.call_count == 3
+
+
+@allure.title("start_all_nodes wiederholt Start bei Konsolen-Port-Kollision einmal")
+@allure.description(
+    "Überprüft, dass start_all_nodes bei einer Portkollision auf der Konsole "
+    "(z.B. 'address already in use') nach kurzer Wartezeit einen erneuten "
+    "Start-Versuch unternimmt, statt die Node sofort als fehlgeschlagen zu zählen"
+)
+@allure.tag("positiv-test", "gns3_client")
+@allure.feature("gns3_client")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_client_024() -> None:
+    with (
+        patch("src.gns3_client.requests.get") as get,
+        patch("src.gns3_client.requests.post") as post,
+        patch("src.gns3_client.time.sleep") as sleep,
+    ):
+        get.return_value = _response(json_data=[{"node_id": "n1", "name": "PC1"}])
+        post.side_effect = [
+            _response(
+                ok=False, status_code=409, text="Console port 5000 is already in use"
+            ),
+            _response(ok=True, content=False),
+        ]
+        client = GNS3Client(BASE_URL)
+        client.start_all_nodes("proj-1")
+
+    assert post.call_count == 2
+    sleep.assert_called_once()
+
+
+@allure.title(
+    "start_all_nodes zählt Node bei wiederholter Portkollision als fehlgeschlagen"
+)
+@allure.description(
+    "Überprüft, dass start_all_nodes eine Node als fehlgeschlagen zählt, wenn "
+    "auch der einmalige Wiederholungsversuch nach einer Konsolen-Port-Kollision "
+    "erneut fehlschlägt"
+)
+@allure.tag("negativ-test", "gns3_client")
+@allure.feature("gns3_client")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_client_025() -> None:
+    with (
+        patch("src.gns3_client.requests.get") as get,
+        patch("src.gns3_client.requests.post") as post,
+        patch("src.gns3_client.time.sleep"),
+    ):
+        get.return_value = _response(json_data=[{"node_id": "n1", "name": "PC1"}])
+        post.side_effect = [
+            _response(ok=False, status_code=409, text="address already in use"),
+            _response(ok=False, status_code=409, text="address already in use"),
+        ]
+        client = GNS3Client(BASE_URL)
+        with pytest.raises(
+            RuntimeError, match=r"Failed to start 1/1 node\(s\): \['PC1'\]"
+        ):
+            client.start_all_nodes("proj-1")
+
+    assert post.call_count == 2

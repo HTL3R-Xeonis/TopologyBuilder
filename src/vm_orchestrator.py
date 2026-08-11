@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 from src.connections_handler import SSHConnection, ESXiConnection, APIFunctions
-from src.gns3_client import deploy_topology
+from src.gns3_client import deploy_topology, is_console_port_collision_error
 from src.logger_adapter import get_logger
 from src.gns3_vm_interface_setup import GNS3VMInterfaceSetup
 from src.ova_importer import OVAImporter
@@ -232,13 +232,51 @@ class VMOrchestrator:
         via the GNS3 v2 controller API. ESXi-hosted nodes get bridged in via
         Cloud nodes bound to the VLAN subinterfaces create_gns3_configuration_file
         sets up - call that first so the subinterfaces already exist.
+
+        If node starting fails with the console-port-collision signature
+        even after gns3_client.start_all_nodes' own single retry, captures
+        SSH diagnostics from the GNS3 VM before re-raising - see
+        _log_console_port_collision_diagnostics.
         :param nodes: built topology of the nodes
         :param project_name: name of the GNS3 project to create or reuse
         :param vm_name: name of the GNS3 VM, or None to auto-detect
         :return:
         """
         gns3_ip_address = self._get_gns3_vm_ip(vm_name)
-        deploy_topology(f"http://{gns3_ip_address}", project_name, nodes)
+        try:
+            deploy_topology(f"http://{gns3_ip_address}", project_name, nodes)
+        except RuntimeError as error:
+            if is_console_port_collision_error(error):
+                self._log_console_port_collision_diagnostics(gns3_ip_address)
+            raise
+
+    def _log_console_port_collision_diagnostics(self, gns3_ip_address: str) -> None:
+        """
+        Best-effort diagnostic capture for a console-port-collision failure
+        that survived gns3_client.start_all_nodes' own retry - SSHes into
+        the GNS3 VM to record which process is actually holding the
+        console port, so the next occurrence leaves real evidence in
+        logs/log.txt instead of only a presumed cause (this has been
+        observed twice, "fixed" both times by restarting the whole
+        topology, without ever confirming what actually held the port).
+        Never raises - a failed diagnostic attempt must not mask the real
+        deploy error it was trying to help explain.
+        :param gns3_ip_address: IP address of the GNS3 VM
+        :return:
+        """
+        try:
+            gns3_connection = SSHConnection(gns3_ip_address, "gns3", "gns3")
+            for command in ("ss -tlnp", "ps aux | grep qemu"):
+                _, stdout, _ = gns3_connection.exec_command(command)
+                output = stdout.read().decode().strip()
+                logger.error(
+                    f"Console port collision diagnostics - '{command}':\n{output}"
+                )
+        except Exception as diagnostic_error:
+            logger.warning(
+                f"Could not capture console port collision diagnostics: "
+                f"{diagnostic_error}"
+            )
 
     def deploy_esxi_nodes(
         self,

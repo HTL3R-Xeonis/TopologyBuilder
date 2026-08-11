@@ -8,6 +8,7 @@ subinterfaces src/gns3_vm_interface_setup.py sets up).
 __license__ = "GNU GPLv3"
 
 import re
+import time
 
 import requests
 
@@ -26,6 +27,31 @@ _DEFAULT_TIMEOUT_SECONDS = 30
 # timeout. This is comfortably above that, so we don't time out client-side
 # before GNS3 itself gives up on a slow node.
 _NODE_LIFECYCLE_TIMEOUT_SECONDS = 300
+
+# Matches the error GNS3 raises when a node's console TCP port is already
+# bound by another process - observed intermittently on node start, most
+# likely an orphaned QEMU process from an earlier delete not yet finished
+# releasing the port (see Hard-won knowledge #21 in HANDOFF.md - never
+# actually confirmed live before now). Retried once below since the port
+# often frees itself within a few seconds.
+_CONSOLE_PORT_COLLISION_PATTERN = re.compile(
+    r"already in use|errno 98", re.IGNORECASE
+)
+_CONSOLE_PORT_COLLISION_RETRY_BACKOFF_SECONDS = 5
+
+
+def is_console_port_collision_error(error: Exception) -> bool:
+    """
+    True if the given exception's message matches the known console-port-
+    collision signature GNS3 returns on a node-start failure. Exposed at
+    module level (not just used internally by start_all_nodes) so
+    vm_orchestrator.py can recognize the same failure and capture SSH
+    diagnostics when the retry in start_all_nodes doesn't resolve it.
+    :param error: the exception raised by a failed node-start request
+    :return: True if it matches the console-port-collision signature
+    """
+    return bool(_CONSOLE_PORT_COLLISION_PATTERN.search(str(error)))
+
 
 # Fields on a template object that describe the template itself, not the
 # device it configures (e.g. platform, qemu_path, ram, hda_disk_image, ...).
@@ -355,6 +381,11 @@ class GNS3Client:
         start simultaneously, and on a failure reports exactly which
         node(s) failed instead of an opaque all-or-nothing batch error -
         nodes that did start successfully are left running.
+
+        A node-start failure matching the known console-port-collision
+        signature (see is_console_port_collision_error) gets one retry
+        after a short backoff before being counted as failed, since it's
+        often a transient orphaned-process condition that clears itself.
         """
         nodes = self._get(f"/v2/projects/{project_id}/nodes")
         failed_names = []
@@ -364,7 +395,24 @@ class GNS3Client:
                     f"/v2/projects/{project_id}/nodes/{node['node_id']}/start",
                     timeout=_NODE_LIFECYCLE_TIMEOUT_SECONDS,
                 )
+                continue
             except requests.exceptions.RequestException as error:
+                if is_console_port_collision_error(error):
+                    logger.warning(
+                        f"Node '{node['name']}' hit a console port collision "
+                        f"on start, retrying once after "
+                        f"{_CONSOLE_PORT_COLLISION_RETRY_BACKOFF_SECONDS}s"
+                    )
+                    time.sleep(_CONSOLE_PORT_COLLISION_RETRY_BACKOFF_SECONDS)
+                    try:
+                        self._post(
+                            f"/v2/projects/{project_id}/nodes/{node['node_id']}/start",
+                            timeout=_NODE_LIFECYCLE_TIMEOUT_SECONDS,
+                        )
+                        continue
+                    except requests.exceptions.RequestException as retry_error:
+                        error = retry_error
+
                 failed_names.append(node["name"])
                 logger.error(f"Failed to start node '{node['name']}': {error}")
 
