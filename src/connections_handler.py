@@ -11,15 +11,20 @@ __status__ = "In development"
 import atexit
 import ipaddress
 from abc import ABC, abstractmethod
-from typing import Optional, Any
+from typing import Optional, Any, List
+from src.logger_adapter import get_logger
 
 import paramiko
 import ssl
+
+import pyVmomi
 import requests
 from pyVim.connect import SmartConnect, Disconnect
 from pyVmomi import vim
 from pyVmomi.VmomiSupport import ManagedObject
 from src.settings import Settings
+
+logger = get_logger()
 
 
 class APIFunctions:
@@ -137,6 +142,14 @@ class ESXiConnection(GenericConnection):
 
         self.content: vim.ServiceInstanceContent = self.connection.RetrieveContent()
 
+        container_view = self.content.viewManager.CreateContainerView(
+            self.content.rootFolder,
+            [vim.HostSystem],
+            True,
+        )
+        self.view = container_view.view
+        container_view.Destroy()
+
     def connect(self) -> vim.ServiceInstance:
         """
         Connect to the ESXi API.
@@ -201,3 +214,63 @@ class ESXiConnection(GenericConnection):
                     continue
                 return address
         return None
+
+    def get_virtual_switch(self) -> vim.host.VirtualSwitch:
+        """
+        Looks for the virtual Switch, specified in Settings.Esxi.VIRTUAL_SWITCH, on the ESXi Host.
+        :return: The virtual Switch will be returned.
+        :raises: If no virtual Switch with the corresponding name was found, a ValueError will be raised.
+        """
+        host: ManagedObject = self.view[0]
+
+        network: pyVmomi.vim.host.NetworkSystem = host.configManager.networkSystem
+        vswitch_list = network.networkInfo.vswitch
+
+        for vswitch in vswitch_list:
+            if vswitch.name == Settings.Esxi.VIRTUAL_SWITCH:
+                return vswitch
+
+        raise logger.alert(ValueError, f"vSwitch {vswitch} not found.")
+
+    def get_port_groups(self) -> List[pyVmomi.vim.host.PortGroup]:
+        """
+        Collects all ports from the virtual Switch specified in Settings.Esxi.VIRTUAL_SWITCH.
+        :return: Returns the collected port groups in a list
+        """
+        host: ManagedObject = self.view[0]
+        network: pyVmomi.vim.host.NetworkSystem = host.configManager.networkSystem
+
+        return [
+            pg
+            for pg in network.networkInfo.portgroup
+            if pg.spec.vswitchName == Settings.Esxi.VIRTUAL_SWITCH
+        ]
+
+    def remove_port_group(self, port_group: str) -> None:
+        """
+        Removes the given port group on the virtual Switch, specified in Settings.Esxi.VIRTUAL_SWITCH.
+        :param port_group: Name of the port group to remove
+        :return:
+        """
+        host = self.view[0]
+        network: pyVmomi.vim.host.NetworkSystem = host.configManager.networkSystem
+
+        network.RemovePortGroup(pgName=port_group)
+
+    def add_port_group(self, port_group: str, vlan_id: int) -> None:
+        """
+        Adds the given port group with the given VLAN ID to the virtual Switch, specified in Settings.Esxi.VIRTUAL_SWITCH.
+        The policies are inherited from the virtual Switch.
+        :param port_group: Name of the port group to add
+        :param vlan_id: VLAN ID of the port group
+        :return:
+        """
+        host = self.view[0]
+
+        spec = vim.host.PortGroup.Specification()
+        spec.name = port_group
+        spec.vswitchName = Settings.Esxi.VIRTUAL_SWITCH
+        spec.vlanId = vlan_id
+        spec.policy = vim.host.NetworkPolicy()
+
+        host.configManager.networkSystem.AddPortGroup(spec)

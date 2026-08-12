@@ -30,6 +30,7 @@ class GNS3VMInterfaceSetup:
         @TODO create pytest
         """
         self.gns3_connection = gns3_connection
+        self.interface_map = {}
         self.configuration_file_path = Path(
             f"./esxi_instances/config_i{gns3_connection.ip_address[-1]}_gns3.txt"
         )
@@ -74,7 +75,7 @@ class GNS3VMInterfaceSetup:
 
     def _create_subinterfaces_commands(
         self, interface_name: str, nodes: dict[str, GenericNode]
-    ) -> None:
+    ) -> dict[str, int]:
         """
         Writes the commands to a file, which is located in ./esxi_instances/, to create and turn up the needed subinterfaces accordingly to the topology
         :param interface_name: name of interface to which to add the subinterfaces
@@ -97,6 +98,7 @@ class GNS3VMInterfaceSetup:
                     f"ip link add link {interface_name} name {node_interface.esxi_vlan} type vlan id {vlan_id}\n"
                     + f"ip link set {node_interface.esxi_vlan} up\n"
                 )
+                self.interface_map[node_interface.esxi_vlan] = vlan_id
 
                 vlan_id += 1
         self._write_command(commands)

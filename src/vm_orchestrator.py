@@ -12,6 +12,7 @@ from src.connections_handler import SSHConnection, ESXiConnection
 from src.logger_adapter import get_logger
 from src.gns3_vm_interface_setup import GNS3VMInterfaceSetup
 from src.factories import GenericNode
+from src.settings import Settings
 
 logger = get_logger()
 
@@ -33,7 +34,9 @@ class VMOrchestrator:
         """
         self.esxi_connection = ESXiConnection(esxi_host, username, password)
 
-    def create_gns3_configuration_file(self, nodes: dict[str, GenericNode]) -> None:
+    def create_gns3_configuration_file(
+        self, nodes: dict[str, GenericNode]
+    ) -> dict[str, int]:
         """
         Writes the config file for the GNS3 VM to delete and create the needed subinterfaces.
         :param nodes: built topology of the nodes
@@ -50,3 +53,35 @@ class VMOrchestrator:
         gns3_connection = SSHConnection(gns3_ip_address, "gns3", "gns3")
         gns3_settings_setter = GNS3VMInterfaceSetup(gns3_connection)
         gns3_settings_setter.write_config_file(nodes)
+        return gns3_settings_setter.interface_map
+
+    def reset_esxi_host(self) -> None:
+        """
+        Resets the ESXi host, so that the VM orchestration has no problems with setting the vSwitch and the other VMs up.
+        :return:
+        @TODO create pytest
+        """
+        self._remove_port_groups()
+
+    def _remove_port_groups(self) -> None:
+        """
+        Removes all the port groups from the vSwitch, specified in Settings.Esxi.VIRTUAL_SWITCH,
+        except for the port groups which are specified in Settings.Esxi.IGNORE_PORT_GROUPS.
+        :return:
+        @TODO create pytest
+        """
+        port_groups = self.esxi_connection.get_port_groups()
+        for pg in port_groups:
+            if pg.spec.name in Settings.Esxi.IGNORE_PORT_GROUPS | {"PG_GNS3_TRUNK"}:
+                continue
+            self.esxi_connection.remove_port_group(pg.spec.name)
+
+    def add_port_groups(self, map: dict[str, int]) -> None:
+        """
+        Adds all the needed ports, for the corresponding GNS3 connection, to the vSwitch specified in Settings.Esxi.VIRTUAL_SWITCH.
+        :param map: Interface-name mapped to the VLAN ID.
+        :return:
+        @TODO create pytest
+        """
+        for name, vlan_id in map.items():
+            self.esxi_connection.add_port_group(name, vlan_id)

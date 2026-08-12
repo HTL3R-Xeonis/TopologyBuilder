@@ -18,4 +18,6 @@ if __name__ == "__main__":
     nodes = g.build()
 
     orchestrator = VMOrchestrator("10.20.20.201", "root", "cisco123!")
-    orchestrator.create_gns3_configuration_file(nodes)
+    interface_mapped_to_vlan = orchestrator.create_gns3_configuration_file(nodes)
+    orchestrator.reset_esxi_host()
+    orchestrator.add_port_groups(interface_mapped_to_vlan)
