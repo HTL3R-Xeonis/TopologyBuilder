@@ -160,7 +160,6 @@ same port group.
 | `topologybuilder verify <config> --esxi-host ... --esxi-username ... [--gns3-trunk-network ...]` | Structural health check against a deployed topology (GNS3 nodes started, ESXi VMs powered on with an IP, trunk NIC wiring, VLAN agreement on both sides of a link). Not a ping test — topologybuilder never assigns IP addresses to nodes, so there's no address to ping. |
 | `topologybuilder status --esxi-host ... --esxi-username ...` | Check connectivity to the ESXi host and GNS3 VM, and list GNS3 projects and each one's node/started counts. No config file needed. |
 | `topologybuilder templates` | List available ESXi and GNS3 template names — valid values for a node's `image` field. |
-| `topologybuilder export <output.yml> --esxi-host ... --esxi-username ... --gns3-project <name>` | Capture a currently deployed topology's live state back into a topology config YAML — a best-effort reverse of `deploy`. Only includes ESXi VMs that `deploy` tagged with its image annotation; VMs from before that existed are skipped with a warning. |
 | `topologybuilder portgroups --esxi-host ... --esxi-username ...` | List the port groups configured on the ESXi host's vSwitches. |
 | `topologybuilder logs [--lines N]` | Show the last `N` (default 50) lines of the log file. |
 

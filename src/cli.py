@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Optional
 
 import typer
-import yaml
 
 from src.cli_config import load_cli_config
 from src.config_file_handler import ConfigFileHandler
@@ -506,45 +505,6 @@ def verify(
     typer.echo(f"{passed}/{len(results)} checks passed")
     if passed != len(results):
         raise typer.Exit(code=1)
-
-
-@app.command()
-def export(
-    output: str = typer.Argument(
-        ..., help="Path to write the exported topology YAML to."
-    ),
-    esxi_host: Optional[str] = ESXI_HOST_OPTION,
-    esxi_username: Optional[str] = ESXI_USERNAME_OPTION,
-    esxi_password: Optional[str] = ESXI_PASSWORD_OPTION,
-    gns3_project: str = typer.Option(
-        ...,
-        "--gns3-project",
-        help="Name of the GNS3 project to capture. Required - there's no "
-        "config file here to default it from.",
-    ),
-    gns3_vm_name: Optional[str] = GNS3_VM_NAME_OPTION,
-) -> None:
-    """
-    Capture a currently deployed topology's live state back into a
-    topology config YAML - a best-effort reverse of deploy. Only ESXi VMs
-    deploy_esxi_nodes tagged with its image annotation are included; VMs
-    from before that existed (or created some other way) are skipped with
-    a warning, not guessed at. See VMOrchestrator.export_topology's
-    docstring for the other best-effort limitations (role inference,
-    interface-name recovery).
-    """
-    esxi_host, esxi_username, esxi_password = _resolve_esxi_credentials(
-        esxi_host, esxi_username, esxi_password
-    )
-
-    orchestrator = VMOrchestrator(esxi_host, esxi_username, esxi_password)
-    topology = orchestrator.export_topology(gns3_project, vm_name=gns3_vm_name)
-
-    Path(output).write_text(yaml.safe_dump(topology, sort_keys=False))
-    typer.echo(
-        f"Wrote {len(topology['nodes'])} node group(s), {len(topology['edges'])} "
-        f"edge(s) to {output}"
-    )
 
 
 @app.command()

@@ -10,7 +10,6 @@ from unittest.mock import MagicMock, patch
 import allure
 import pytest
 import typer
-import yaml
 from typer.testing import CliRunner
 
 from src import logger_adapter
@@ -1008,53 +1007,3 @@ def cli_038() -> None:
     assert result.exit_code == 1
     assert "[FAIL]" in result.output
     assert "1/2 checks passed" in result.output
-
-
-# --- export command -----------------------------------------------------
-
-
-@allure.title("export-Befehl schreibt die erfasste Topologie als YAML")
-@allure.description(
-    "Überprüft, dass der export-Befehl export_topology mit dem gegebenen "
-    "Projektnamen aufruft und dessen Ergebnis als YAML-Datei schreibt"
-)
-@allure.tag("positiv-test", "cli")
-@allure.feature("cli")
-@allure.severity(allure.severity_level.CRITICAL)
-def cli_039(tmp_path) -> None:
-    output_path = tmp_path / "exported.yml"
-    with patch("src.cli.VMOrchestrator") as orchestrator_cls:
-        orchestrator = orchestrator_cls.return_value
-        orchestrator.export_topology.return_value = {
-            "nodes": [{"image": "Ubuntu-Server", "role": "VM", "names": ["VM1"]}],
-            "edges": [],
-        }
-        result = runner.invoke(
-            app,
-            ["export", str(output_path), *_DEPLOY_CREDS, "--gns3-project", "Lab"],
-        )
-
-    assert result.exit_code == 0, result.output
-    orchestrator.export_topology.assert_called_once_with("Lab", vm_name=None)
-    written = yaml.safe_load(output_path.read_text())
-    assert written["nodes"] == [
-        {"image": "Ubuntu-Server", "role": "VM", "names": ["VM1"]}
-    ]
-    assert "Wrote 1 node group(s), 0 edge(s)" in result.output
-
-
-@allure.title("export-Befehl verlangt --gns3-project")
-@allure.description(
-    "Überprüft, dass der export-Befehl ohne --gns3-project mit einem "
-    "Fehler abbricht, da es keine Config-Datei gibt, aus der ein "
-    "Standardwert abgeleitet werden könnte"
-)
-@allure.tag("negativ-test", "cli")
-@allure.feature("cli")
-@allure.severity(allure.severity_level.NORMAL)
-def cli_040(tmp_path) -> None:
-    output_path = tmp_path / "exported.yml"
-    result = runner.invoke(app, ["export", str(output_path), *_DEPLOY_CREDS])
-
-    assert result.exit_code != 0
-    assert not output_path.exists()
