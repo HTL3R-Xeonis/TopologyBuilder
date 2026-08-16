@@ -168,9 +168,26 @@ def factories_005() -> None:
     assert intf.name == "gi0/0"
     assert intf.node == node
     assert intf.edge is None
+    assert intf.ip is None
     assert str(intf) == "gi0/0"
     cp = eval(repr(intf))
     assert cp.name == intf.name and cp.node.image == intf.node.image
+
+
+@allure.title("Interface IP-Adresse setzen")
+@allure.description(
+    "Überprüft, dass Interface.ip standardmäßig None ist und über den Setter "
+    "gesetzt werden kann"
+)
+@allure.tag("positiv-test", "factory")
+@allure.feature("factory")
+@allure.severity(allure.severity_level.NORMAL)
+def factories_024() -> None:
+    node = GenericNode("VPCS", "PC")
+    intf = Interface("gi0/0", node)
+    assert intf.ip is None
+    intf.ip = "10.0.0.1/24"
+    assert intf.ip == "10.0.0.1/24"
 
 
 @allure.title("Edge Klasse testen")

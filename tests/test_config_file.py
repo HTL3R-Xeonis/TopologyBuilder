@@ -393,6 +393,85 @@ def conf_file_025() -> None:
     c.validate_file()
 
 
+@allure.title("Gültiger 'addressing' Eintrag")
+@allure.description(
+    "Überprüft, ob ein gültiger Eintrag im optionalen 'addressing' Key akzeptiert wird"
+)
+@allure.tag("user-input", "positiv-test", "config-file")
+@allure.feature("config_file")
+@allure.severity(allure.severity_level.NORMAL)
+def conf_file_027() -> None:
+    c = ConfigFileHandler(add_folder_path("config_file_027.yml"))
+    c.validate_file()
+    assert c.addressing == [{"node": "PC4", "interface": "gi0/0", "ip": "10.0.0.1/24"}]
+
+
+@allure.title("'addressing' IP ungültig")
+@allure.description(
+    "Überprüft, ob erkannt wird, dass ein 'ip' Wert in 'addressing' keine gültige IP-Adresse ist"
+)
+@allure.tag("user-input", "negativ-test", "config-file")
+@allure.feature("config_file")
+@allure.severity(allure.severity_level.MINOR)
+def conf_file_028() -> None:
+    c = ConfigFileHandler(add_folder_path("config_file_028.yml"))
+    with pytest.raises(
+        ValueError,
+        match=r"Invalid IP address in .addressing. entry: not-an-ip",
+    ):
+        c.validate_file()
+
+
+@allure.title("'addressing' unbekannte Node")
+@allure.description(
+    "Überprüft, ob erkannt wird, dass ein 'addressing' Eintrag auf eine unbekannte Node verweist"
+)
+@allure.tag("user-input", "negativ-test", "config-file")
+@allure.feature("config_file")
+@allure.severity(allure.severity_level.MINOR)
+def conf_file_029() -> None:
+    c = ConfigFileHandler(add_folder_path("config_file_029.yml"))
+    with pytest.raises(
+        ValueError,
+        match=r"'addressing' entry refers to unknown node: PC-UNKNOWN",
+    ):
+        c.validate_file()
+
+
+@allure.title("'addressing' unbekanntes Interface")
+@allure.description(
+    "Überprüft, ob erkannt wird, dass ein 'addressing' Eintrag auf ein Interface "
+    "verweist, das in keiner edge der Node vorkommt"
+)
+@allure.tag("user-input", "negativ-test", "config-file")
+@allure.feature("config_file")
+@allure.severity(allure.severity_level.MINOR)
+def conf_file_030() -> None:
+    c = ConfigFileHandler(add_folder_path("config_file_030.yml"))
+    with pytest.raises(
+        ValueError,
+        match=r"'addressing' entry refers to interface gi0/9 not used in any edge of node PC4",
+    ):
+        c.validate_file()
+
+
+@allure.title("'addressing' Interface doppelt adressiert")
+@allure.description(
+    "Überprüft, ob erkannt wird, dass dasselbe Interface einer Node zweimal in "
+    "'addressing' vorkommt"
+)
+@allure.tag("user-input", "negativ-test", "config-file")
+@allure.feature("config_file")
+@allure.severity(allure.severity_level.MINOR)
+def conf_file_031() -> None:
+    c = ConfigFileHandler(add_folder_path("config_file_031.yml"))
+    with pytest.raises(
+        ValueError,
+        match=r"Interface gi0/0 of node PC4 is addressed twice in .addressing.",
+    ):
+        c.validate_file()
+
+
 @allure.title("Datei mit falscher Endung")
 @allure.description(
     "Überprüft, ob ConfigFileHandler() erkennt, ob eine existierende Datei nicht auf *.yaml oder *.yml endet"

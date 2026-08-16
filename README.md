@@ -148,6 +148,22 @@ VLAN subinterface on the GNS3 VM. An edge between two ESXi-hosted nodes needs
 no GNS3-side wiring at all — VLAN assignment alone puts both VMs' vNICs on the
 same port group.
 
+An optional third top-level key, `addressing`, assigns an IP address to a
+specific node's interface — purely opt-in, nothing is auto-derived. An
+interface with no matching entry stays unaddressed:
+
+```yaml
+addressing:
+  - node: PC4
+    interface: gi0/0
+    ip: 10.0.0.1/24
+```
+
+`node`/`interface` must refer to a node/interface already used in `edges`.
+`ip` accepts any address `ipaddress.ip_interface()` parses, e.g. CIDR
+notation. This is consumed by `topologybuilder inventory` (see below) — it
+does not otherwise affect `deploy`.
+
 ## Usage
 
 | Command | Purpose |

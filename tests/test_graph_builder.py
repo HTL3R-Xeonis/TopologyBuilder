@@ -258,3 +258,22 @@ def graph_builder_003() -> None:
 
     assert nodes["FW-C1-2"].get_neighbour("gi0/0") == nodes["POP-ISP1-1"]
     assert nodes["FW-C1-2"].get_neighbour("gi0/1") == nodes["SW-C1"]
+
+
+@allure.title("Addressing wird den richtigen Interfaces zugeordnet")
+@allure.description(
+    "Überprüft, ob der GraphBuilder die optionalen 'addressing' Einträge nach "
+    "dem Bauen der edges auf die richtigen Interfaces anwendet, und "
+    "unadressierte Interfaces None bleiben"
+)
+@allure.tag("positiv-test", "graph-builder")
+@allure.feature("graph-builder")
+@allure.severity(allure.severity_level.CRITICAL)
+def graph_builder_004() -> None:
+    cfh = ConfigFileHandler("./tests/files/config_file_027.yml")
+    cfh.validate_file()
+    g = GraphBuilder(cfh.nodes, cfh.edges, cfh.addressing)
+    nodes = g.build()
+
+    assert nodes["PC4"].interfaces["gi0/0"].ip == "10.0.0.1/24"
+    assert nodes["SW-C1"].interfaces["gi0/2"].ip is None

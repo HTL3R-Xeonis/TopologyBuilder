@@ -210,6 +210,7 @@ class Interface:
         self._if_name = if_name
         self._node = node
         self._edge = None
+        self._ip = None
         self._esxi_vlan = None
         if node.env == Environment.ON_ESXI:
             self._esxi_vlan = _sanitize_ifname(f"{node.name}_{if_name}")
@@ -217,6 +218,24 @@ class Interface:
     @property
     def esxi_vlan(self) -> str | None:
         return self._esxi_vlan
+
+    @property
+    def ip(self) -> str | None:
+        """
+        Returns the IP address assigned to this interface via the config
+        file's optional 'addressing' list, or None if it was left unaddressed.
+        :return:
+        """
+        return self._ip
+
+    @ip.setter
+    def ip(self, ip: str) -> None:
+        """
+        Sets the IP address assigned to this interface.
+        :param ip:
+        :return:
+        """
+        self._ip = ip
 
     @property
     def name(self) -> str:

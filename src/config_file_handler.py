@@ -4,6 +4,7 @@ Module which contains classes and functions to handle and validate the contents 
 
 __license__ = "GNU GPLv3"
 
+import ipaddress
 from pathlib import Path
 import yaml
 from src.logger_adapter import get_logger
@@ -44,6 +45,7 @@ class ConfigFileHandler:
         self.path = Path(path)
         self.__NODE_NAMES = set()
         self.__node_map = {}
+        self.__addressed_interfaces = set()
         self.available_templates = self.get_available_templates()
 
     @staticmethod
@@ -94,6 +96,7 @@ class ConfigFileHandler:
 
         self.nodes = content["nodes"]
         self.edges = content["edges"]
+        self.addressing = content.get("addressing") or []
 
         if not isinstance(self.nodes, list):
             raise logger.alert(
@@ -105,11 +108,18 @@ class ConfigFileHandler:
                 TypeError,
                 f"'edges' must be of type list. Current type: {type(self.edges)}",
             )
+        if not isinstance(self.addressing, list):
+            raise logger.alert(
+                TypeError,
+                f"'addressing' must be of type list. Current type: {type(self.addressing)}",
+            )
 
         for node_group in self.nodes:
             self.__validate_node_group(node_group)
         for edge in self.edges:
             self.__validate_edges(edge)
+        for entry in self.addressing:
+            self.__validate_addressing(entry)
 
     def __validate_node_group(self, node_group: dict) -> None:
         """
@@ -214,3 +224,52 @@ class ConfigFileHandler:
         intf_list_2.append(edge[3])
         self.__node_map[edge[0]] = intf_list_1
         self.__node_map[edge[2]] = intf_list_2
+
+    def __validate_addressing(self, entry: dict) -> None:
+        """
+        Helper method for validate_file. Validates one entry of the optional
+        top-level 'addressing' list, which assigns an IP address to a single
+        node's interface. Purely opt-in - an interface with no matching entry
+        stays unaddressed.
+        :param entry: dict with 'node', 'interface' and 'ip' keys
+        :return:
+        """
+        if not isinstance(entry, dict):
+            raise logger.alert(
+                TypeError,
+                f"Entries of 'addressing' must be of type dict. Current type: {type(entry)}",
+            )
+        if not {"node", "interface", "ip"} <= entry.keys():
+            raise logger.alert(
+                KeyError,
+                f"Key 'node', 'interface' or 'ip' not found in an 'addressing' entry. "
+                f"Current keys: {entry.keys()}",
+            )
+
+        node = entry["node"]
+        if node not in self.__NODE_NAMES:
+            raise logger.alert(
+                ValueError, f"'addressing' entry refers to unknown node: {node}"
+            )
+
+        interface = entry["interface"]
+        if interface not in self.__node_map.get(node, []):
+            raise logger.alert(
+                ValueError,
+                f"'addressing' entry refers to interface {interface} not used "
+                f"in any edge of node {node}",
+            )
+
+        try:
+            ipaddress.ip_interface(entry["ip"])
+        except ValueError as e:
+            raise logger.alert(
+                ValueError, f"Invalid IP address in 'addressing' entry: {entry['ip']}"
+            ) from e
+
+        if (node, interface) in self.__addressed_interfaces:
+            raise logger.alert(
+                ValueError,
+                f"Interface {interface} of node {node} is addressed twice in 'addressing'",
+            )
+        self.__addressed_interfaces.add((node, interface))

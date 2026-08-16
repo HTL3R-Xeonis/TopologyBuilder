@@ -235,7 +235,7 @@ def build(
     config_path = _resolve_config_path(config_path)
     handler = ConfigFileHandler(config_path)
     handler.validate_file()
-    graph_builder = GraphBuilder(handler.nodes, handler.edges)
+    graph_builder = GraphBuilder(handler.nodes, handler.edges, handler.addressing)
     nodes = graph_builder.build()
 
     typer.echo(f"Built {len(nodes)} node(s):")
@@ -359,7 +359,7 @@ def deploy(
 
     handler = ConfigFileHandler(config_path)
     handler.validate_file()
-    graph_builder = GraphBuilder(handler.nodes, handler.edges)
+    graph_builder = GraphBuilder(handler.nodes, handler.edges, handler.addressing)
     nodes = graph_builder.build()
 
     if esxi_datastore is None and any(
@@ -437,7 +437,7 @@ def destroy(
 
     handler = ConfigFileHandler(config_path)
     handler.validate_file()
-    graph_builder = GraphBuilder(handler.nodes, handler.edges)
+    graph_builder = GraphBuilder(handler.nodes, handler.edges, handler.addressing)
     nodes = graph_builder.build()
 
     orchestrator = VMOrchestrator(esxi_host, esxi_username, esxi_password)
@@ -486,7 +486,7 @@ def verify(
 
     handler = ConfigFileHandler(config_path)
     handler.validate_file()
-    graph_builder = GraphBuilder(handler.nodes, handler.edges)
+    graph_builder = GraphBuilder(handler.nodes, handler.edges, handler.addressing)
     nodes = graph_builder.build()
 
     orchestrator = VMOrchestrator(esxi_host, esxi_username, esxi_password)
