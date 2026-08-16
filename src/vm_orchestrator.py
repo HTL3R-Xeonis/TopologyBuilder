@@ -12,6 +12,7 @@ from pathlib import Path
 
 from src.connections_handler import SSHConnection, ESXiConnection, APIFunctions
 from src.gns3_client import GNS3Client, deploy_topology, is_console_port_collision_error
+from src.inventory_generator import generate_ansible_inventory
 from src.logger_adapter import get_logger
 from src.gns3_vm_interface_setup import GNS3VMInterfaceSetup
 from src.ova_importer import OVAImporter
@@ -782,3 +783,61 @@ class VMOrchestrator:
                     )
 
         return results
+
+    def generate_inventory(
+        self,
+        nodes: dict[str, GenericNode],
+        project_name: str,
+        vm_name: str | None = None,
+    ) -> dict:
+        """
+        Generates an Ansible inventory from this topology's live state (see
+        HANDOFF.md's Ansible expansion scoping for the design this
+        implements). Requires the topology to already be deployed - this
+        only reads live GNS3/ESXi state, it never deploys anything itself.
+        Gathers exactly the same live state verify_topology does (GNS3 VM
+        IP, project's nodes) plus each ESXi-hosted node's vSphere instance
+        UUID, then delegates the actual inventory shape to
+        inventory_generator.generate_ansible_inventory.
+        :param nodes: built topology of the nodes
+        :param project_name: name of the GNS3 project to read node state from
+        :param vm_name: name of the GNS3 VM, or None to auto-detect
+        :return: an ansible-inventory-compatible dict
+        """
+        gns3_ip_address = None
+        gns3_nodes_by_name: dict[str, dict] = {}
+        try:
+            gns3_ip_address = self._get_gns3_vm_ip(vm_name)
+        except (ConnectionError, ValueError) as error:
+            logger.warning(f"Could not resolve the GNS3 VM: {error}")
+
+        if gns3_ip_address is not None:
+            client = GNS3Client(f"http://{gns3_ip_address}")
+            project = next(
+                (p for p in client.list_projects() if p.get("name") == project_name),
+                None,
+            )
+            if project is None:
+                logger.warning(f"GNS3 project '{project_name}' not found")
+            else:
+                gns3_nodes_by_name = {
+                    node.get("name"): node
+                    for node in client.list_nodes(project["project_id"])
+                }
+
+        vm_uuids_by_name: dict[str, str] = {}
+        for name, node in nodes.items():
+            if node.env != Environment.ON_ESXI:
+                continue
+            vm = self.esxi_connection.get_vm(name)
+            if vm is not None:
+                vm_uuids_by_name[name] = self.esxi_connection.get_vm_uuid(vm)
+
+        return generate_ansible_inventory(
+            nodes,
+            gns3_ip_address,
+            gns3_nodes_by_name,
+            self.esxi_connection.ip_address,
+            self.esxi_connection.username,
+            vm_uuids_by_name,
+        )

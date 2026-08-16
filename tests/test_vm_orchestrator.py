@@ -887,3 +887,82 @@ def vm_orchestrator_033() -> None:
         results = orchestrator.verify_topology(nodes, "Lab", vm_name="GNS3-VM")
 
     assert any(ok and "R1:gi0/0 <-> R2:gi0/0: linked" in d for ok, d in results)
+
+
+@allure.title("generate_inventory baut ein Inventory mit ESXi-, GNS3- und Docker-Hosts")
+@allure.description(
+    "Überprüft, dass generate_inventory eine ESXi-VM in die esxi_vms Gruppe "
+    "mit ihrer vSphere-UUID einordnet, einen normalen GNS3-Node mit seinem "
+    "Konsolen-Port in gns3_devices, und einen Docker-Node in docker_nodes"
+)
+@allure.tag("positiv-test", "vm_orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_034() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.get_vm_ip_address.return_value = "10.20.20.231"
+    esxi_connection.ip_address = "10.20.20.202"
+    esxi_connection.username = "root"
+    vm_mock = MagicMock()
+    esxi_connection.get_vm.return_value = vm_mock
+    esxi_connection.get_vm_uuid.return_value = "uuid-vm1"
+
+    nf = NodeFactory()
+    router = nf.create_node("VPCS", "ROUTER", "R1")
+    container = nf.create_node("VPCS", "PC", "C1")
+    vm: GenericNode = nf.create_node("Ubuntu-Server", "VM", "VM1")
+    nodes = {"R1": router, "C1": container, "VM1": vm}
+
+    with patch("src.vm_orchestrator.GNS3Client") as client_cls:
+        client = client_cls.return_value
+        client.list_projects.return_value = [{"project_id": "p1", "name": "Lab"}]
+        client.list_nodes.return_value = [
+            {"name": "R1", "node_type": "qemu", "console": 5001},
+            {"name": "C1", "node_type": "docker", "console": 5002},
+        ]
+
+        inventory = orchestrator.generate_inventory(nodes, "Lab", vm_name="GNS3-VM")
+
+    esxi_hosts = inventory["all"]["children"]["esxi_vms"]["hosts"]
+    gns3_hosts = inventory["all"]["children"]["gns3_devices"]["hosts"]
+    docker_hosts = inventory["all"]["children"]["docker_nodes"]["hosts"]
+
+    assert esxi_hosts["VM1"]["ansible_vmware_guest_uuid"] == "uuid-vm1"
+    assert esxi_hosts["VM1"]["ansible_vmware_host"] == "10.20.20.202"
+    assert gns3_hosts["R1"]["console_port"] == 5001
+    assert gns3_hosts["R1"]["ansible_host"] == "10.20.20.231"
+    assert docker_hosts["C1"]["container_name"] == "C1"
+    assert "R1" not in docker_hosts and "C1" not in gns3_hosts
+
+
+@allure.title(
+    "generate_inventory lässt GNS3-Gruppen leer, wenn die GNS3-VM unerreichbar ist"
+)
+@allure.description(
+    "Überprüft, dass generate_inventory bei unerreichbarer GNS3-VM keine "
+    "Exception wirft, sondern gns3_devices/docker_nodes leer lässt und "
+    "esxi_vms trotzdem befüllt"
+)
+@allure.tag("negativ-test", "vm_orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.NORMAL)
+def vm_orchestrator_035() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.get_vm_ip_address.return_value = None
+    esxi_connection.get_vm.return_value = MagicMock()
+    esxi_connection.get_vm_uuid.return_value = "uuid-vm1"
+
+    nf = NodeFactory()
+    vm: GenericNode = nf.create_node("Ubuntu-Server", "VM", "VM1")
+    nodes = {"VM1": vm}
+
+    inventory = orchestrator.generate_inventory(nodes, "Lab", vm_name="GNS3-VM")
+
+    assert (
+        inventory["all"]["children"]["esxi_vms"]["hosts"]["VM1"][
+            "ansible_vmware_guest_uuid"
+        ]
+        == "uuid-vm1"
+    )
+    assert inventory["all"]["children"]["gns3_devices"]["hosts"] == {}
+    assert inventory["all"]["children"]["docker_nodes"]["hosts"] == {}

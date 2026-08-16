@@ -1007,3 +1007,82 @@ def cli_038() -> None:
     assert result.exit_code == 1
     assert "[FAIL]" in result.output
     assert "1/2 checks passed" in result.output
+
+
+@allure.title("inventory-Befehl druckt das Inventory auf stdout ohne --output")
+@allure.description(
+    "Überprüft, dass der inventory-Befehl ohne --output das generierte "
+    "Ansible-Inventory als YAML auf stdout ausgibt"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.CRITICAL)
+def cli_039() -> None:
+    with (
+        patch("src.cli.ConfigFileHandler"),
+        patch("src.cli.GraphBuilder") as graph_builder_cls,
+        patch("src.cli.VMOrchestrator") as orchestrator_cls,
+    ):
+        graph_builder_cls.return_value.build.return_value = {}
+        orchestrator = orchestrator_cls.return_value
+        orchestrator.generate_inventory.return_value = {
+            "all": {
+                "children": {
+                    "esxi_vms": {"hosts": {}},
+                    "gns3_devices": {"hosts": {"R1": {"ansible_host": "10.20.20.231"}}},
+                    "docker_nodes": {"hosts": {}},
+                }
+            }
+        }
+
+        result = runner.invoke(app, ["inventory", "config_ex.yml", *_DEPLOY_CREDS])
+
+    assert result.exit_code == 0, result.output
+    assert "gns3_devices" in result.output
+    assert "10.20.20.231" in result.output
+
+
+@allure.title("inventory-Befehl schreibt das Inventory mit --output in eine Datei")
+@allure.description(
+    "Überprüft, dass der inventory-Befehl mit --output das generierte "
+    "Ansible-Inventory als YAML in die angegebene Datei schreibt, statt es "
+    "auszugeben"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.CRITICAL)
+def cli_040(tmp_path) -> None:
+    output_path = tmp_path / "inventory.yml"
+    with (
+        patch("src.cli.ConfigFileHandler"),
+        patch("src.cli.GraphBuilder") as graph_builder_cls,
+        patch("src.cli.VMOrchestrator") as orchestrator_cls,
+    ):
+        graph_builder_cls.return_value.build.return_value = {}
+        orchestrator = orchestrator_cls.return_value
+        orchestrator.generate_inventory.return_value = {
+            "all": {
+                "children": {
+                    "esxi_vms": {
+                        "hosts": {"VM1": {"ansible_vmware_host": "10.20.20.202"}}
+                    },
+                    "gns3_devices": {"hosts": {}},
+                    "docker_nodes": {"hosts": {}},
+                }
+            }
+        }
+
+        result = runner.invoke(
+            app,
+            [
+                "inventory",
+                "config_ex.yml",
+                *_DEPLOY_CREDS,
+                "--output",
+                str(output_path),
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert f"Wrote Ansible inventory to {output_path}" in result.output
+    assert "10.20.20.202" in output_path.read_text()

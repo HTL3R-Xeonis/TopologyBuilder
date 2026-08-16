@@ -1238,3 +1238,16 @@ def connections_handler_057() -> None:
     vm.runtime.powerState = vim.VirtualMachine.PowerState.poweredOff
 
     assert conn.is_vm_powered_on(vm) is False
+
+
+@allure.title("get_vm_uuid liefert die instanceUuid der VM")
+@allure.description("Überprüft, dass get_vm_uuid vm.config.instanceUuid zurückgibt")
+@allure.tag("positiv-test", "connections_handler")
+@allure.feature("connections_handler")
+@allure.severity(allure.severity_level.NORMAL)
+def connections_handler_058() -> None:
+    conn = ESXiConnection.__new__(ESXiConnection)
+    vm = MagicMock()
+    vm.config.instanceUuid = "5032c8a5-9f1e-4b3c-8f6a-1234567890ab"
+
+    assert conn.get_vm_uuid(vm) == "5032c8a5-9f1e-4b3c-8f6a-1234567890ab"

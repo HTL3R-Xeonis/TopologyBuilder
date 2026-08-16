@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 import typer
+import yaml
 
 from src.cli_config import load_cli_config
 from src.config_file_handler import ConfigFileHandler
@@ -505,6 +506,50 @@ def verify(
     typer.echo(f"{passed}/{len(results)} checks passed")
     if passed != len(results):
         raise typer.Exit(code=1)
+
+
+@app.command()
+def inventory(
+    config_path: Optional[str] = CONFIG_ARG,
+    esxi_host: Optional[str] = ESXI_HOST_OPTION,
+    esxi_username: Optional[str] = ESXI_USERNAME_OPTION,
+    esxi_password: Optional[str] = ESXI_PASSWORD_OPTION,
+    gns3_project: Optional[str] = GNS3_PROJECT_OPTION,
+    gns3_vm_name: Optional[str] = GNS3_VM_NAME_OPTION,
+    output: Optional[str] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Write the inventory YAML to this file instead of printing it.",
+    ),
+) -> None:
+    """
+    Generate an Ansible inventory from a deployed topology's live state
+    (GNS3 console ports, ESXi VM UUIDs) plus any addressing declared in the
+    config's 'addressing' key. Requires the topology to already be deployed -
+    this only reads live GNS3/ESXi state, it does not deploy anything.
+    """
+    config_path = _resolve_config_path(config_path)
+    esxi_host, esxi_username, esxi_password = _resolve_esxi_credentials(
+        esxi_host, esxi_username, esxi_password
+    )
+
+    handler = ConfigFileHandler(config_path)
+    handler.validate_file()
+    graph_builder = GraphBuilder(handler.nodes, handler.edges, handler.addressing)
+    nodes = graph_builder.build()
+
+    orchestrator = VMOrchestrator(esxi_host, esxi_username, esxi_password)
+    inventory_dict = orchestrator.generate_inventory(
+        nodes, gns3_project or Path(config_path).stem, vm_name=gns3_vm_name
+    )
+    inventory_yaml = yaml.safe_dump(inventory_dict, sort_keys=False)
+
+    if output:
+        Path(output).write_text(inventory_yaml)
+        typer.echo(f"Wrote Ansible inventory to {output}")
+    else:
+        typer.echo(inventory_yaml)
 
 
 @app.command()

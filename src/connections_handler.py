@@ -556,6 +556,18 @@ class ESXiConnection(GenericConnection):
                 return device.macAddress
         return None
 
+    def get_vm_uuid(self, vm: vim.VirtualMachine) -> str:
+        """
+        Returns the VM's instance UUID, a stable identifier vSphere assigns
+        on creation - used to identify a VM to Ansible's
+        community.vmware.vmware_tools connection plugin
+        (ansible_vmware_guest_uuid) without depending on its name or
+        inventory path.
+        :param vm: the VM to inspect
+        :return: the VM's instance UUID
+        """
+        return vm.config.instanceUuid
+
     def get_vm_network_names(self, vm: vim.VirtualMachine) -> list[str]:
         """
         Returns the ESXi port group name each of the VM's Ethernet network

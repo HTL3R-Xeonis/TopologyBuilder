@@ -174,6 +174,7 @@ does not otherwise affect `deploy`.
 | `topologybuilder deploy <config> --esxi-host ... --esxi-username ... [--dry-run] [--incremental]` | Validate, build, and deploy the topology to GNS3/ESXi. `--dry-run` prints the plan without changing anything; `--incremental` only creates what's missing instead of a full teardown+rebuild (never removes nodes dropped from the config, and won't pick up an existing node's image changing). |
 | `topologybuilder destroy <config> --esxi-host ... --esxi-username ... [--dry-run]` | Tear down a previously deployed topology: deletes its GNS3 nodes/links and its ESXi-hosted VMs/port groups. `--dry-run` prints what would be deleted without deleting anything. |
 | `topologybuilder verify <config> --esxi-host ... --esxi-username ... [--gns3-trunk-network ...]` | Structural health check against a deployed topology (GNS3 nodes started, ESXi VMs powered on with an IP, trunk NIC wiring, VLAN agreement on both sides of a link). Not a ping test — topologybuilder never assigns IP addresses to nodes, so there's no address to ping. |
+| `topologybuilder inventory <config> --esxi-host ... --esxi-username ... [--output FILE]` | Generate an Ansible inventory YAML from a *deployed* topology's live state (GNS3 console ports, ESXi VM UUIDs) plus any `addressing` declared in the config. Three groups: `esxi_vms` (`community.vmware.vmware_tools`), `gns3_devices` (console-port vars for `ansible.netcommon.telnet`), `docker_nodes` (plain SSH to the GNS3 VM). Prints to stdout without `--output`. Read-only — does not deploy anything. |
 | `topologybuilder status --esxi-host ... --esxi-username ...` | Check connectivity to the ESXi host and GNS3 VM, and list GNS3 projects and each one's node/started counts. No config file needed. |
 | `topologybuilder templates` | List available ESXi and GNS3 template names — valid values for a node's `image` field. |
 | `topologybuilder portgroups --esxi-host ... --esxi-username ...` | List the port groups configured on the ESXi host's vSwitches. |
@@ -184,6 +185,14 @@ suppress everything but errors (the log file at `logs/log.txt` always records
 everything regardless). Run `topologybuilder <command> --help` for the full,
 current option list — options that have config-file/env-var equivalents (like
 `--esxi-host`) are documented there too.
+
+The inventory `inventory` generates never embeds the ESXi password in
+plaintext — it emits `{{ lookup('env', 'ESXI_PASSWORD') }}` instead, so
+`ESXI_PASSWORD` must be set in the environment `ansible-playbook` runs in.
+Each ESXi VM's guest-OS login (`ansible_vmware_tools_user`/`_password`) is
+left as a `CHANGE_ME` placeholder — topologybuilder has no concept of
+guest-OS credentials, so these need to be filled in by hand (or via
+`--extra-vars`/a vault) before running a playbook against that group.
 
 A typical first deploy, with nothing set in `topologybuilder.yml`:
 
