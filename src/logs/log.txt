@@ -1,0 +1,2 @@
+2026-08-19 16:28:13,802 - ERROR :: [ValueError] Image router_1 not found on ESXi or GNS3.
+2026-08-19 16:28:13,802 - ERROR :: [ValueError] Image router_1 not found on ESXi or GNS3.

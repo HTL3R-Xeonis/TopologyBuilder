@@ -3,7 +3,7 @@ __date__ = "17/07/2026"
 __license__ = "GNU GPLv3"
 __status__ = "In development"
 
-from src.factories import NodeFactory, GenericNode
+from src.graph_builder.factories import NodeFactory, GenericNode
 
 
 class GraphBuilder:

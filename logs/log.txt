@@ -24,3 +24,6 @@
 2026-07-19 12:49:10,066 - ERROR :: [TypeError] Test
 2026-07-19 12:49:10,066 - ERROR :: [TypeError] Test
 2026-07-19 12:49:10,066 - ERROR :: [TypeError] Test
+2026-08-18 10:02:45,606 - ERROR :: [ValueError] Project already exists with name to_deletae on 10.20.20.221
+2026-08-18 10:06:25,696 - ERROR :: [ValueError] Project already exists with name to_deletae on 10.20.20.221
+2026-08-18 10:08:23,912 - ERROR :: [ValueError] Project already exists with the name to_deletae on GNS3 host: 10.20.20.221

@@ -12,7 +12,7 @@ import pytest
 
 from src import logger_adapter
 from src.config_file_handler import ConfigFileHandler
-from src.factories import (
+from src.graph_builder.factories import (
     NodeFactory,
     Edge,
     Interface,

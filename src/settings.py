@@ -13,6 +13,9 @@ class Settings:
         # Given port groups will not be deleted from the vSwitch
         IGNORE_PORT_GROUPS = {"PG_GNS3_TRUNK"}
 
+        # Name of the datastore to store all the ESXi VMs
+        DATASTORE = "datastore1"
+
     class Testing:
         """
         Settings related to Testing

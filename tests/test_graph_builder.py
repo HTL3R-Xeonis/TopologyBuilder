@@ -11,8 +11,8 @@ import allure
 
 from src import logger_adapter
 from src.config_file_handler import ConfigFileHandler
-from src.factories import PC, VM, Switch, Router, Firewall
-from src.graph_builder import GraphBuilder
+from src.graph_builder.factories import PC, VM, Switch, Router, Firewall
+from src.graph_builder.graph_builder import GraphBuilder
 
 
 logger_adapter.LoggerAdapter.is_test_run = True
@@ -76,7 +76,7 @@ def graph_builder_001() -> None:
 
     assert (
         (cn := nodes["PC4"]).__class__ == VM
-        and cn.image == "Ubuntu-Server"
+        and cn.image == "OPNsense"
         and cn.name == "PC4"
     )
     assert (
@@ -162,9 +162,9 @@ def graph_builder_002() -> None:
     g = GraphBuilder(cfh.nodes, cfh.edges)
     nodes = g.build()
 
-    assert sorted(nodes["PC1"].interfaces.keys()) == ["gi0/0"]
-    assert sorted(nodes["PC2"].interfaces.keys()) == ["gi0/0"]
-    assert sorted(nodes["PC3"].interfaces.keys()) == ["gi0/0"]
+    assert sorted(nodes["PC1"].interfaces.keys()) == ["Ethernet0"]
+    assert sorted(nodes["PC2"].interfaces.keys()) == ["Ethernet0"]
+    assert sorted(nodes["PC3"].interfaces.keys()) == ["Ethernet0"]
 
     assert sorted(nodes["PC4"].interfaces.keys()) == ["gi0/0"]
     assert sorted(nodes["PC5"].interfaces.keys()) == ["gi0/0"]
@@ -213,9 +213,9 @@ def graph_builder_003() -> None:
     g = GraphBuilder(cfh.nodes, cfh.edges)
     nodes = g.build()
 
-    assert nodes["PC1"].get_neighbour("gi0/0") == nodes["SW-C1"]
-    assert nodes["PC2"].get_neighbour("gi0/0") == nodes["SW-C1"]
-    assert nodes["PC3"].get_neighbour("gi0/0") == nodes["FW-C2"]
+    assert nodes["PC1"].get_neighbour("Ethernet0") == nodes["SW-C1"]
+    assert nodes["PC2"].get_neighbour("Ethernet0") == nodes["SW-C1"]
+    assert nodes["PC3"].get_neighbour("Ethernet0") == nodes["FW-C2"]
     assert nodes["PC4"].get_neighbour("gi0/0") == nodes["FW-C3"]
     assert nodes["PC5"].get_neighbour("gi0/0") == nodes["POP-ISP1-2"]
 

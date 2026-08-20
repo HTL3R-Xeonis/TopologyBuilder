@@ -9,9 +9,9 @@ __status__ = "In development"
 
 from pathlib import Path
 
-from src.connections_handler import SSHConnection
-from src.factories import Environment
-from src.factories import GenericNode
+from src.connection_handler.ssh_connection import SSHConnection
+from src.graph_builder.factories import Environment
+from src.graph_builder.factories import GenericNode
 from src.logger_adapter import get_logger
 
 logger = get_logger()
@@ -49,33 +49,34 @@ class GNS3VMInterfaceSetup:
         lines = [line.strip() for line in lines]
         return lines
 
-    def _write_command(self, command: str) -> None:
+    def _write_commands(self, commands: str) -> None:
         """
-        Appends the given command to the a file which is located in ./esxi_instances/
-        :param command: string to write
+        Writes the given string to the a file which is located in ./esxi_instances/
+        :param commands: string to write
         :return:
         @TODO create pytest
         """
-        if not self.configuration_file_path.exists():
-            logger.alert(
-                FileNotFoundError, f"File not found: {self.configuration_file_path}"
-            )
-        with open(self.configuration_file_path, "a") as f:
-            f.write(f"{command}\n")
+        config_file_path = self.configuration_file_path
+        config_file_path.parent.mkdir(parents=True, exist_ok=True)
 
-    def _reset_subinterfaces_commands(self, interface: str) -> None:
+        with open(self.configuration_file_path, "w", newline="\n") as f:
+            f.write(f"{commands}")
+
+    def _reset_subinterfaces_commands(self, interface: str) -> str:
         """
         Writes the commands to a file, which is located in ./esxi_instances/, to delete the subinterfaces
         :param interface: name of interface, from which the subinterfaces are
         :return:
         @TODO create pytest
         """
+        commands = ""
         for si in self._get_subinterfaces(interface):
-            self._write_command(f"ip link delete {si}")
+            commands += f"ip link delete {si}\n"
+        return commands
 
     def _create_subinterfaces_commands(
         self, interface_name: str, nodes: dict[str, GenericNode]
-    ) -> dict[str, int]:
+    ) -> str:
         """
         Writes the commands to a file, which is located in ./esxi_instances/, to create and turn up the needed subinterfaces accordingly to the topology
         :param interface_name: name of interface to which to add the subinterfaces
@@ -101,7 +102,7 @@ class GNS3VMInterfaceSetup:
                 self.interface_map[node_interface.esxi_vlan] = vlan_id
 
                 vlan_id += 1
-        self._write_command(commands)
+        return commands
 
     def write_config_file(self, nodes: dict[str, GenericNode]) -> None:
         """
@@ -110,12 +111,7 @@ class GNS3VMInterfaceSetup:
         :return:
         @TODO create pytest
         """
-
-        config_file_path = self.configuration_file_path
-        config_file_path.parent.mkdir(parents=True, exist_ok=True)
-
-        with open(config_file_path, "w") as f:
-            f.write("#!/bin/bash\nsudo su\n")
-
-        self._reset_subinterfaces_commands("eth1")
-        self._create_subinterfaces_commands("eth1", nodes)
+        commands = "#!/bin/bash\n"
+        commands += self._reset_subinterfaces_commands("eth1")
+        commands += self._create_subinterfaces_commands("eth1", nodes)
+        self._write_commands(commands)

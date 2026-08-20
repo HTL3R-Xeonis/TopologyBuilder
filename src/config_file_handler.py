@@ -10,7 +10,7 @@ __status__ = "In development"
 from pathlib import Path
 import yaml
 from src.logger_adapter import get_logger
-from src.connections_handler import APIFunctions
+from src.connection_handler.topology_builder_services import TopologyBuilderServices
 
 logger = get_logger()
 
@@ -55,8 +55,8 @@ class ConfigFileHandler:
         Templates with same name on GNS3 and ESXi are not allowed, hence an ValueError will be raised.
         :return: Set of all available templates names.
         """
-        esxi_templates = APIFunctions.get_esxi_template_names()
-        gns3_templates = APIFunctions.get_gns3_template_names()
+        esxi_templates = TopologyBuilderServices.get_esxi_template_names()
+        gns3_templates = TopologyBuilderServices.get_gns3_template_names()
         if esxi_templates & gns3_templates:
             raise logger.alert(
                 ValueError,

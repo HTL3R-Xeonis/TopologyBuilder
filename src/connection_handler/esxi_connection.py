@@ -1,144 +1,26 @@
-"""
-Provides classes for connection types like SSH or the API connections to GNS3 and ESXi.
-These classes have methods which can be used to operate these APIs.
-"""
+from typing import Optional, List
 
-__autor__ = "Leon Eiböck"
-__date__ = "28/07/2026"
-__license__ = "GNU GPLv3"
-__status__ = "In development"
-
-import atexit
-import ipaddress
-from abc import ABC, abstractmethod
-from typing import Optional, Any, List
-from src.logger_adapter import get_logger
-
-import paramiko
-import ssl
+from src.connection_handler.generic_connection import GenericConnection
 
 import pyVmomi
-import requests
 from pyVim.connect import SmartConnect, Disconnect
 from pyVmomi import vim
 from pyVmomi.VmomiSupport import ManagedObject
+import atexit
+import ssl
+import ipaddress
+
+from src.connection_handler.api_handler import APIHandler
 from src.settings import Settings
+
+from src.logger_adapter import get_logger
 
 logger = get_logger()
 
 
-class APIFunctions:
-    """
-    Provides various methods for API calls.
-    """
-
-    @staticmethod
-    def _send_get_request(url: str) -> dict[str, Any] | str:
-        """
-        General method to make an API GET request
-        :param url: API url
-        :return:
-        """
-        response = requests.get(url)
-        response.raise_for_status()
-        try:
-            return response.json()
-        except not ValueError:
-            return response.text
-
-    @staticmethod
-    def get_esxi_template_names():
-        """
-        Returns a set of available template names for ESXi
-        :return:
-        """
-        if Settings.Testing.GithubWorkflow.LITERAL_API_VALUES:
-            return Settings.Testing.GithubWorkflow.LITERAL_ESXI_TEMPLATES
-        json = APIFunctions._send_get_request("http://10.20.20.171:8000/api/templates")
-        return {template["name"] for template in json["templates"]}
-
-    @staticmethod
-    def get_gns3_template_names():
-        """
-        Returns a set of available template names for GNS3
-        :return:
-        """
-        if Settings.Testing.GithubWorkflow.LITERAL_API_VALUES:
-            return Settings.Testing.GithubWorkflow.LITERAL_GNS3_TEMPLATES
-        json = APIFunctions._send_get_request("http://10.20.20.171:8001/api/templates")
-        return {template["name"] for template in json["templates"]}
-
-
-class GenericConnection(ABC):
-    def __init__(self, ip_address: str, username: str, password: str | None) -> None:
-        """
-        :param ip_address: IP address of the instance
-        :param username: Hosts username
-        :param password: corresponding password for user
-        @TODO create pytest
-        """
-        ipaddress.ip_address(ip_address)
-
-        self._ip_address = ip_address
-        self._username = username
-        self._password = password
-
-        self._connection = self.connect()
-
-    def __getattr__(self, name: str):
-        return getattr(self._connection, name)
-
-    @property
-    def ip_address(self) -> str:
-        return self._ip_address
-
-    @property
-    def username(self) -> str:
-        return self._username
-
-    @property
-    def password(self) -> str | None:
-        return self._password
-
-    @property
-    def connection(self):
-        return self._connection
-
-    @abstractmethod
-    def connect(self) -> None:
-        pass
-
-
-class SSHConnection(GenericConnection, paramiko.SSHClient):
-    def connect(self) -> paramiko.SSHClient:
-        """
-        Connect to an SSH server.
-        :return: Returns the client
-        @TODO create pytest
-        """
-        client = paramiko.SSHClient()
-        client.load_system_host_keys()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-
-        client.connect(
-            hostname=self.ip_address,
-            port=22,
-            username=self.username,
-            password=self.password,
-            timeout=10,
-        )
-
-        return client
-
-
-class GNS3Connection(GenericConnection):
-    def connect(self):
-        pass
-
-
 class ESXiConnection(GenericConnection):
     def __init__(self, ip_address: str, username: str, password: str | None):
-        super().__init__(ip_address, username, password)
+        super().__init__(ip_address, 443, username, password)
 
         self.content: vim.ServiceInstanceContent = self.connection.RetrieveContent()
 
@@ -274,3 +156,43 @@ class ESXiConnection(GenericConnection):
         spec.policy = vim.host.NetworkPolicy()
 
         host.configManager.networkSystem.AddPortGroup(spec)
+
+    def initialize_vswitch(self, mapped_vlans: dict[str, int]) -> None:
+        for name, vlan_id in mapped_vlans.items():
+            self.add_port_group(name, vlan_id)
+
+    def reset(self) -> None:
+        """
+        Resets the ESXi host, so that the VM orchestration has no problems with setting the vSwitch and the other VMs up.
+        :return:
+        @TODO create pytest
+        """
+        self._remove_port_groups()
+
+    def _remove_port_groups(self) -> None:
+        """
+        Removes all the port groups from the vSwitch, specified in Settings.Esxi.VIRTUAL_SWITCH,
+        except for the port groups which are specified in Settings.Esxi.IGNORE_PORT_GROUPS.
+        :return:
+        @TODO create pytest
+        """
+        port_groups = self.get_port_groups()
+        for pg in port_groups:
+            if pg.spec.name in Settings.Esxi.IGNORE_PORT_GROUPS | {"PG_GNS3_TRUNK"}:
+                continue
+            self.remove_port_group(pg.spec.name)
+
+    def deploy_vm(
+        self, vm_name: str, datastore: str, ova_filename: str, mapped_network: dict
+    ):
+        APIHandler.post(
+            url="http://10.20.20.172:8003/deploy/ova",
+            json={
+                "ip": self.ip_address,
+                "port": self.port,
+                "vm_name": vm_name,
+                "ova_filename": ova_filename,
+                "datastore": datastore,
+                "network": mapped_network,
+            },
+        )

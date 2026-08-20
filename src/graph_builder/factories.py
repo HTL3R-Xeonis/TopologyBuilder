@@ -12,7 +12,7 @@ from functools import lru_cache
 from typing import Literal, Tuple
 
 from src.logger_adapter import get_logger
-from src.connections_handler import APIFunctions
+from src.connection_handler.topology_builder_services import TopologyBuilderServices
 
 logger = get_logger()
 
@@ -29,8 +29,8 @@ class Environment(Enum):
         Returns a tuple Frozen-sets with the available template names on GNS3 and ESXi
         :return: Tupel with two Frozen-sets. First index is for GNS3, second is for ESXi
         """
-        gns3_templates = frozenset(APIFunctions.get_gns3_template_names())
-        esxi_templates = frozenset(APIFunctions.get_esxi_template_names())
+        gns3_templates = frozenset(TopologyBuilderServices.get_gns3_template_names())
+        esxi_templates = frozenset(TopologyBuilderServices.get_esxi_template_names())
         return gns3_templates, esxi_templates
 
     @staticmethod
@@ -118,7 +118,7 @@ class Interface:
         self._edge = None
         self._esxi_vlan = None
         if node.env == Environment.ON_ESXI:
-            self._esxi_vlan = f"{node.name}_{if_name}"
+            self._esxi_vlan = f"{node.name}_{if_name.replace('/', '-')}"
 
     @property
     def esxi_vlan(self) -> str | None:
@@ -224,6 +224,8 @@ class GenericNode:
         self._interfaces = {}
 
         self.env = Environment.get_environment(image)
+        self.gns3_node_info = None
+
         if self.env == Environment.ON_NOTHING:
             raise logger.alert(ValueError, f"Image {image} not found on ESXi or GNS3.")
 
@@ -231,7 +233,7 @@ class GenericNode:
     def interfaces(self):
         return self._interfaces
 
-    def get_neighbour(self, intf) -> GenericNode:
+    def get_neighbour(self, intf: Interface) -> GenericNode:
         """
         Finds the node which is connected to given interface
         :param intf: connection to look for neighbour
@@ -249,6 +251,17 @@ class GenericNode:
         if not i == i.edge.incidence_1:
             return i.edge.incidence_1.node
         return i.edge.incidence_2.node
+
+    def get_interface_to_neighbour(self, neighbour: GenericNode) -> Interface | None:
+        """
+        Finds the interface which is connected to given node.
+        :param neighbour: Neighbour of this interface.
+        :return: Interface to which this node is connected to given node
+        """
+        for intf_name, intf_object in self.interfaces.items():
+            if self.get_neighbour(intf_name) == neighbour:
+                return intf_object
+        return None
 
     def add_interface(self, if_name: str) -> Interface:
         """

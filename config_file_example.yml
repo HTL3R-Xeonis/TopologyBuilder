@@ -11,7 +11,7 @@ nodes:
     names:
        # Names Empty
 
-  - image: Ubuntu-Server
+  - image: OPNsense
     role: VM
     names:
       - PC4
@@ -29,6 +29,7 @@ nodes:
 
   - image: Cisco IOSv 15.6(1)T
     role: ROUTER
+    interfaces: [gi0/0, gi0/1, gi0/2, gi0/3]
     names:
       - POP-ISP1-1
       - ISP1-BB1
@@ -47,8 +48,8 @@ nodes:
       - FW-C1-2
 
 edges:
-  - [ PC1, gi0/0, SW-C1, gi0/2 ]
-  - [ PC2, gi0/0, SW-C1, gi0/3 ]
+  - [ PC1, Ethernet0, SW-C1, gi0/2 ]
+  - [ PC2, Ethernet0, SW-C1, gi0/3 ]
   - [ FW-C1-1, gi0/0, SW-C1, gi0/0 ]
   - [ FW-C1-2, gi0/1, SW-C1, gi0/1 ]
   - [ FW-C1-2, gi0/0, POP-ISP1-1, gi0/0 ]
@@ -62,6 +63,6 @@ edges:
   - [ POP-ISP1-2, gi0/1, ISP3, gi0/0 ]
   - [ POP-ISP1-2, gi0/2, ISP2, gi0/0 ]
   - [ ISP2, gi0/2, FW-C2, gi0/2 ]
-  - [ FW-C2, gi0/0, PC3, gi0/0 ]
+  - [ FW-C2, gi0/0, PC3, Ethernet0 ]
   - [ ISP3, gi0/1, FW-C3, gi0/1 ]
   - [ FW-C3, gi0/0, PC4, gi0/0 ]

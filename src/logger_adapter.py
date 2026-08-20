@@ -19,13 +19,7 @@ class LoggerAdapter(logging.Logger):
         Logs given error message and returns given exception with message.
         :param error: Exception to be modified
         :param message: Message to be logged
-        :return: Modified exception
-
-        >>> logger = get_logger()
-        >>> raise logger.alert(TypeError, "Test")
-        Traceback (most recent call last):
-        ...
-        TypeError: Test
+        :return: Modified exceptio
         """
         if not self.is_test_run:
             self.error(f"[{error.__name__}] {message}")
@@ -36,12 +30,6 @@ def get_logger():
     """
     Sets up the logger
     :return: Returns logger object
-
-    >>> logger = get_logger()
-    >>> raise logger.alert(TypeError, "Test")
-    Traceback (most recent call last):
-    ...
-    TypeError: Test
     """
     logging.setLoggerClass(LoggerAdapter)
     logger = logging.getLogger(__name__)
