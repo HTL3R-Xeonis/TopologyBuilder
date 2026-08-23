@@ -10,7 +10,7 @@ __status__ = "In development"
 from pathlib import Path
 import yaml
 from src.logger_adapter import get_logger
-from src.connection_handler.topology_builder_services import TopologyBuilderServices
+from src.connections import APIHandler
 
 logger = get_logger()
 
@@ -26,7 +26,6 @@ class ConfigFileHandler:
         """
         Initializes the ConfigFileHandler class
         :param path: Path to the YAML config-file
-        >>> config = ConfigFileHandler("./config_file_example.yml")
         """
         if not isinstance(path, str):
             raise logger.alert(
@@ -55,8 +54,8 @@ class ConfigFileHandler:
         Templates with same name on GNS3 and ESXi are not allowed, hence an ValueError will be raised.
         :return: Set of all available templates names.
         """
-        esxi_templates = TopologyBuilderServices.get_esxi_template_names()
-        gns3_templates = TopologyBuilderServices.get_gns3_template_names()
+        esxi_templates = APIHandler.get_esxi_template_names()
+        gns3_templates = APIHandler.get_gns3_template_names()
         if esxi_templates & gns3_templates:
             raise logger.alert(
                 ValueError,
@@ -68,10 +67,6 @@ class ConfigFileHandler:
         """
         Reads the contents of the YAML-file
         :return: The contents of the YAML-file as a dictionary
-
-        >>> config = ConfigFileHandler("./config_file_example.yml")
-        >>> config.read_file().keys()
-        dict_keys(['nodes', 'edges'])
         """
         try:
             with open(self.path, "r") as file:
@@ -83,8 +78,6 @@ class ConfigFileHandler:
         """
         Validates the contents of the YAML-file as defined and makes nodes and edges available.
         :return:
-        >>> config = ConfigFileHandler("./config_file_example.yml")
-        >>> config.validate_file()
         """
         content = self.read_file()
         if not {"edges", "nodes"} <= content.keys():

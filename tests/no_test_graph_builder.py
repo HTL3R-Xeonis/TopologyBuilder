@@ -11,8 +11,8 @@ import allure
 
 from src import logger_adapter
 from src.config_file_handler import ConfigFileHandler
-from src.graph_builder.factories import PC, VM, Switch, Router, Firewall
-from src.graph_builder.graph_builder import GraphBuilder
+from src.graph.factories import PC, VM, Switch, Router, Firewall
+from src.graph.graph_builder import GraphBuilder
 
 
 logger_adapter.LoggerAdapter.is_test_run = True

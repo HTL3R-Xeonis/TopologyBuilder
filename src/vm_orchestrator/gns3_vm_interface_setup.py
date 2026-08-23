@@ -1,117 +1,88 @@
-"""
-Provides a class for the creation of the configuration file for the subinterfaces of the GNS3 VM.
-"""
-
 __autor__ = "Leon Eiböck"
 __date__ = "28/07/2026"
 __license__ = "GNU GPLv3"
 __status__ = "In development"
 
-from pathlib import Path
-
-from src.connection_handler.ssh_connection import SSHConnection
-from src.graph_builder.factories import Environment
-from src.graph_builder.factories import GenericNode
-from src.logger_adapter import get_logger
-
-logger = get_logger()
+from src.connections import SSHConnection
+from src.graph import Graph
 
 
+# TODO upgrade ExceptionHandling
+# TODO pyTests
 class GNS3VMInterfaceSetup:
     """
-    class to handle the interface configuration of the GNS3 VM to ensure, that only the dedicated GNS3 device can communicate with the VM on the ESXi host.
+    Object to handle the interface configuration of the GNS3 VM to ensure, that only the dedicated GNS3 device can communicate with the VM on the ESXi host.
     This is done by subinterfaces with vlans on the GNS3 VM which correspond with the VLANs of the vSwitch on the ESXi host.
     """
 
-    def __init__(self, gns3_connection: SSHConnection) -> None:
+    def __init__(
+        self, gns3_ssh_connection: SSHConnection, parent_interface: str
+    ) -> None:
         """
-        Initialize the GNS3 VM interface setup class
-        :param gns3_connection: SSH connection to the GNS3 VM
-        @TODO create pytest
+        :param gns3_ssh_connection: SSH connection to the GNS3 VM
+        :param parent_interface: name of the interface on the GNS3 VM where the subinterfaces should be located.
         """
-        self.gns3_connection = gns3_connection
-        self.interface_map = {}
-        self.configuration_file_path = Path(
-            f"./esxi_instances/config_i{gns3_connection.ip_address[-1]}_gns3.txt"
-        )
+        self.gns3_ssh_connection = gns3_ssh_connection
+        self.parent_interface = parent_interface
+        self.script = "set -e\n"
 
-    def _get_subinterfaces(self, interface: str) -> list[str]:
+    def _get_existing_subinterfaces(self) -> list[str]:
         """
-        Gets the subinterface-names of given interface-name and returns them as a list.
-        :param interface: the name of the interface to look on for subinterfaces
+        Get the existing subinterface names of the parent interface on the GNS3 VM.
         :return: A list of found subinterface-names as strings or an empty list
-
-        @TODO create pytest
         """
-        lines = self.gns3_connection.exec_command(
-            f"ip -br link show type vlan | grep @{interface} | awk '{{sub(/@.*/, \"\", $1); print $1}}'"
+        lines = self.gns3_ssh_connection.exec_command(
+            f"ip -br link show type vlan | grep @{self.parent_interface} | awk '{{sub(/@.*/, \"\", $1); print $1}}'"
         )[1].readlines()
         lines = [line.strip() for line in lines]
         return lines
 
-    def _write_commands(self, commands: str) -> None:
+    def _create_subinterface_deletion_commands(self) -> None:
         """
-        Writes the given string to the a file which is located in ./esxi_instances/
-        :param commands: string to write
+        Creates the commands for the deletion of existing subinterfaces on the ``self.parent_interface`` interface.
         :return:
-        @TODO create pytest
         """
-        config_file_path = self.configuration_file_path
-        config_file_path.parent.mkdir(parents=True, exist_ok=True)
+        for subinterface in self._get_existing_subinterfaces():
+            self.script += f"ip link delete {subinterface}\n"
 
-        with open(self.configuration_file_path, "w", newline="\n") as f:
-            f.write(f"{commands}")
-
-    def _reset_subinterfaces_commands(self, interface: str) -> str:
+    def _create_subinterface_creation_commands(self, graph: Graph) -> None:
         """
-        Writes the commands to a file, which is located in ./esxi_instances/, to delete the subinterfaces
-        :param interface: name of interface, from which the subinterfaces are
+        Creates the commands for the creation of subinterfaces, on the ``self.parent_interface`` interface.
         :return:
-        @TODO create pytest
         """
-        commands = ""
-        for si in self._get_subinterfaces(interface):
-            commands += f"ip link delete {si}\n"
-        return commands
+        for node in graph.nodes.values():
+            for interface in node.interfaces.values():
+                vlan = interface.vlan
+                if vlan is None:
+                    continue
 
-    def _create_subinterfaces_commands(
-        self, interface_name: str, nodes: dict[str, GenericNode]
-    ) -> str:
-        """
-        Writes the commands to a file, which is located in ./esxi_instances/, to create and turn up the needed subinterfaces accordingly to the topology
-        :param interface_name: name of interface to which to add the subinterfaces
-        :param nodes: built topology of the nodes
-        :return:
-        @TODO create pytest
-        """
-        vlan_id = 2
-        commands = ""
-        for node in nodes.values():
-            if not node.env == Environment.ON_ESXI:
-                continue
-            for node_interface in node.interfaces.values():
-                if vlan_id >= 4094:
-                    logger.alert(
-                        ValueError,
-                        "VLANs on ESXi exceed the limit of 4094. Reduce the number of interfaces on VMs on ESXi",
-                    )
-                commands += (
-                    f"ip link add link {interface_name} name {node_interface.esxi_vlan} type vlan id {vlan_id}\n"
-                    + f"ip link set {node_interface.esxi_vlan} up\n"
+                self.script += (
+                    f"ip link add link {self.parent_interface} name {vlan.name} type vlan id {vlan.id}\n"
+                    + f"ip link set {vlan.name} up\n"
                 )
-                self.interface_map[node_interface.esxi_vlan] = vlan_id
 
-                vlan_id += 1
-        return commands
-
-    def write_config_file(self, nodes: dict[str, GenericNode]) -> None:
+    def initialize_commands(self, graph: Graph) -> None:
         """
-        Writes the config file for the GNS3 VM to delete and create the needed subinterfaces.
-        :param nodes: built topology of the nodes
+        Initializes the commands for the creation and deletion of subinterfaces, on the GNS3 VM.
+        :param graph: Create the commands based on given graph
         :return:
-        @TODO create pytest
         """
-        commands = "#!/bin/bash\n"
-        commands += self._reset_subinterfaces_commands("eth1")
-        commands += self._create_subinterfaces_commands("eth1", nodes)
-        self._write_commands(commands)
+        self._create_subinterface_deletion_commands()
+        self._create_subinterface_creation_commands(graph)
+
+    def execute_script(self) -> tuple[int, str, str]:
+        """
+        Executes the commands via a remote shell on the GNS3 VM.
+        :return: Returns the exit code, output and error messages
+        :raise: RuntimeError: Is thrown when the script runs into an error.
+        """
+        stdin, stdout, stderr = self.gns3_ssh_connection.exec_command("sudo bash -s")
+        stdin.write(self.script)
+        stdin.flush()
+        stdin.channel.shutdown_write()
+
+        output = stdout.read().decode()
+        errors = stderr.read().decode()
+        exit_code = stdout.channel.recv_exit_status()
+
+        return exit_code, output, errors

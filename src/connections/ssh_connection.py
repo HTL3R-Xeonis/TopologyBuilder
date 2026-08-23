@@ -1,8 +1,12 @@
-from src.connection_handler.generic_connection import GenericConnection
+from .generic_connection import GenericConnection
 import paramiko
 
 
 class SSHConnection(GenericConnection, paramiko.SSHClient):
+    """
+    Object which governs the SSH connection.
+    """
+
     def connect(self) -> paramiko.SSHClient:
         """
         Connect to an SSH server.
@@ -14,15 +18,11 @@ class SSHConnection(GenericConnection, paramiko.SSHClient):
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
         client.connect(
-            hostname=self.ip_address,
-            port=22,
+            hostname=self.ip,
+            port=self.port,
             username=self.username,
             password=self.password,
             timeout=10,
         )
 
         return client
-
-    def upload_file(self, file_path: str, upload_path: str):
-        with self.connection.open_sftp() as sftp:
-            sftp.put(file_path, upload_path)
