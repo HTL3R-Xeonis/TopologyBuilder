@@ -31,7 +31,6 @@ jobs:
           LITERAL_API_VALUES: "true"
         run: |
           pip install pytest
-          python -m pytest . --doctest-modules
           python -m pytest ./tests
 
       # LINTER

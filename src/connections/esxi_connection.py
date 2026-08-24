@@ -6,11 +6,14 @@ from typing import Optional, List, TypeVar
 import pyVmomi
 from pyVim.connect import SmartConnect, Disconnect
 from pyVmomi import vim
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.graph import Graph
+    from src.graph.blocks import VirtualLan
 
 from src.connections.api_handler import APIHandler
 from src.connections.generic_connection import GenericConnection
-from src.graph import Graph
-from src.graph.blocks import VirtualLan
 from src.logger_adapter import get_logger
 from src.settings import Settings
 
@@ -124,11 +127,11 @@ class ESXiConnection(GenericConnection):
         vswitch = getattr(config.network, "vswitch", [])
 
         for vswitch in vswitch:
-            if vswitch.name == Settings.Esxi.VIRTUAL_SWITCH:
+            if vswitch.name == Settings._Esxi.VIRTUAL_SWITCH:
                 return vswitch
 
         raise logger.alert(
-            ValueError, f"virtual switch {Settings.Esxi.VIRTUAL_SWITCH} not found."
+            ValueError, f"virtual switch {Settings._Esxi.VIRTUAL_SWITCH} not found."
         )
 
     def _add_port_group(self, vlan: VirtualLan) -> None:
@@ -141,7 +144,7 @@ class ESXiConnection(GenericConnection):
         """
         spec = vim.host.PortGroup.Specification()
         spec.name = vlan.name
-        spec.vswitchName = Settings.Esxi.VIRTUAL_SWITCH
+        spec.vswitchName = Settings._Esxi.VIRTUAL_SWITCH
         spec.vlanId = vlan.id
         spec.policy = vim.host.NetworkPolicy()
 
@@ -190,7 +193,7 @@ class ESXiConnection(GenericConnection):
         """
         port_groups = self._get_port_groups()
         for pg in port_groups:
-            if pg.spec.name in Settings.Esxi.IGNORE_PORT_GROUPS | {"PG_GNS3_TRUNK"}:
+            if pg.spec.name in Settings._Esxi.IGNORE_PORT_GROUPS | {"PG_GNS3_TRUNK"}:
                 continue
             self._remove_port_group(pg.spec.name)
 

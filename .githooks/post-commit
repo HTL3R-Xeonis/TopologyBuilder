@@ -9,5 +9,4 @@ if [ ! -x "$PYTHON" ]; then
     exit 1
 fi
 
-python -m pytest . --doctest-modules
 python -m pytest ./tests

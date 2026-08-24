@@ -10,7 +10,7 @@ __status__ = "In development"
 from pathlib import Path
 import yaml
 from src.logger_adapter import get_logger
-from src.connections import APIHandler
+from src.connections.api_handler import APIHandler
 
 logger = get_logger()
 

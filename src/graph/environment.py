@@ -2,7 +2,7 @@ from enum import Enum
 from functools import lru_cache
 from typing import Tuple, Literal
 
-from src.connections import APIHandler
+from src.connections.api_handler import APIHandler
 
 
 class Environment(Enum):

@@ -1,8 +1,11 @@
 from typing import Any
+from typing import TYPE_CHECKING
 
-from src.connections.api_handler import APIHandler
-from src.graph import Environment
-from src.graph.blocks import GenericNode, Interface
+if TYPE_CHECKING:
+    from src.graph.blocks import GenericNode, Interface
+
+from .api_handler import APIHandler
+
 from src.logger_adapter import get_logger
 
 logger = get_logger()
@@ -13,9 +16,7 @@ class GNS3Connection(APIHandler):
     Object which provides methods regarding the GNS3 API
     """
 
-    def __init__(
-        self, ip: str, port: int, project_name: str = "tb_gns3_project"
-    ) -> None:
+    def __init__(self, ip: str, port: int, project_name: str) -> None:
         """
         :param ip: GNS3 IP address
         :param port: GNS3 API port
@@ -93,6 +94,8 @@ class GNS3Connection(APIHandler):
         :return: Returns the newly generated GNS3 node information.
         :raises ValueError: Is thrown when the image of the node does not exist on the GNS3 instance.
         """
+        from src.graph import Environment
+
         if node.env == Environment.ON_ESXI:
             ports_mapping = self._create_ports_mapping(node)
             return self._create_builtin_nodes(node, "Cloud", ports_mapping)
