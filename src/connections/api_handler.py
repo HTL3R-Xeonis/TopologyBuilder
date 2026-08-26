@@ -1,6 +1,8 @@
 import requests
 from typing import Set
 
+from src.settings import Settings
+
 
 class APIHandler:
     """
@@ -61,7 +63,11 @@ class APIHandler:
         :return: The set containing received template names.
         :raises HTTPError: Is thrown when something went wrong with the API call.
         """
-        json = APIHandler.get("http://10.20.20.171:8000/api/templates").json()
+        if Settings.API.LITERAL_API_VALUES:
+            return Settings.API.LITERAL_ESXI_TEMPLATES
+        json = APIHandler.get(
+            f"{Settings.API.ESXI_TEMPLATE_SERVER_URL}/api/templates"
+        ).json()
         return {template["name"] for template in json["templates"]}
 
     @staticmethod
@@ -73,7 +79,7 @@ class APIHandler:
         :raises HTTPError: Is thrown when something went wrong with the API call.
         """
         json = APIHandler.get(
-            f"http://10.20.20.171:8000/api/search?name={template_name}"
+            f"{Settings.API.ESXI_TEMPLATE_SERVER_URL}/api/search?name={template_name}"
         ).json()
         return next((r for r in json["results"]))["template"]["file"]
 
@@ -84,5 +90,9 @@ class APIHandler:
         :return: The set containing received template names.
         :raises HTTPError: Is thrown when something went wrong with the API call.
         """
-        json = APIHandler.get("http://10.20.20.171:8001/api/templates").json()
+        if Settings.API.LITERAL_API_VALUES:
+            return Settings.API.LITERAL_GNS3_TEMPLATES
+        json = APIHandler.get(
+            f"{Settings.API.GNS3_TEMPLATE_SERVER_URL}/api/templates"
+        ).json()
         return {template["name"] for template in json["templates"]}

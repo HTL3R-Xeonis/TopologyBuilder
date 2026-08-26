@@ -15,7 +15,7 @@ from src.connections.api_handler import APIHandler
 logger = get_logger()
 
 
-class ConfigFileHandler:
+class TopologyFileValidation:
     """
     Class to handle and validate the contents of the config file
     """

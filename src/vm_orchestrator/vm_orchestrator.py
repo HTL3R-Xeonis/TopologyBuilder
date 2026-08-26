@@ -11,7 +11,7 @@ __status__ = "In development"
 from src.connections.esxi_connection import ESXiConnection
 from src.connections.ssh_connection import SSHConnection
 from src.connections.gns3_connection import GNS3Connection
-from src.graph.blocks import GenericNode
+from src.settings import Settings
 from src.graph import Environment, Graph
 from src.logger_adapter import get_logger
 from src.vm_orchestrator.gns3_vm_interface_setup import GNS3VMInterfaceSetup
@@ -30,18 +30,22 @@ class VMOrchestrator:
     def __init__(
         self,
         esxi_host: str,
+        esxi_port: int,
         esxi_username: str,
         esxi_password: str | None,
         gns3_vm_name: str,
     ) -> None:
         """
         :param esxi_host: IPv4 address of the ESXi host.
+        :param esxi_port: Port number of the ESXi host, where the API requests are expected.
         :param esxi_username: username of the ESXi host.
         :param esxi_password: corresponding password for user.
         :param gns3_vm_name: Name of the GNS3 VM on the ESXi host.
         :raises RuntimeError: Is thrown when the GNS3 VM is not found on the ESXi host.
         """
-        self.esxi_connection = ESXiConnection(esxi_host, esxi_username, esxi_password)
+        self.esxi_connection = ESXiConnection(
+            esxi_host, esxi_port, esxi_username, esxi_password
+        )
 
         gns3_vm_ip = self.esxi_connection.get_vm_ip_address(gns3_vm_name)
         if gns3_vm_ip is None:
@@ -67,19 +71,20 @@ class VMOrchestrator:
         self.esxi_connection.reset_virtual_switch()
         self.esxi_connection.initialize_virtual_switch(graph)
 
-        gns3_conn = GNS3Connection(self.gns3_vm_ip, 80)
+        gns3_conn = GNS3Connection(
+            self.gns3_vm_ip, Settings.GNS3.PORT, Settings.GNS3.PROJECT_NAME
+        )
 
         for node in graph.nodes.values():
-            if node.env == Environment.ON_ESXI:
-                """
+            if node.env == Environment.ON_ESXI and not Settings.ONLY_ON_GNS3:
                 self.esxi_connection.deploy_virtual_machine(
-                    vm_name=node.name,
-                    datastore=Settings.Esxi.DATASTORE,
-                    ova_filename=APIHandler.get_ova(node.image),
-                    mapped_network=self._create_mapped_network(node)
-                )"""
+                    node=node, datastore=Settings.ESXI.DATASTORE
+                )
+                gns3_conn.create_node(node)
 
-            gns3_conn.create_node(node)
+            if node.env == Environment.ON_GNS3 and not Settings.ONLY_ON_ESXI:
+                gns3_conn.create_node(node)
+
             self._partially_link_gns3_nodes(gns3_conn, node)
 
     @staticmethod
@@ -96,25 +101,6 @@ class VMOrchestrator:
                 continue
             gns3_connection.connect_nodes(node, neighbour)
 
-    @staticmethod
-    def _create_mapped_network(node: GenericNode) -> dict[str, str]:
-        """
-        Creates a network mapping for ESXi, so that the interfaces of the VM will connect to the correct port groups on the virtual switch.
-        :param node: Node to create this mapping for.
-        :return: Returns a dictionary with the interface name, mapped to its vlan name.
-        :raises RuntimeError: Is thrown when a vlan, which should exist, does not exist on the corresponding interface.
-        """
-        mapped_network = {}
-        for interface in node.interfaces.values():
-            vlan = interface.vlan
-            if vlan is None:
-                raise logger.alert(
-                    RuntimeError,
-                    f"Something went wrong with the graph initialization. Needed VLAN does not exist on {node.name}.{interface.name}",
-                )
-            mapped_network[interface.name] = vlan.name
-        return mapped_network
-
     # TODO Parent Interface Settings
     def _configure_gns3_interfaces(
         self, graph: Graph, gns3_username: str, gns3_password: str | None
@@ -130,6 +116,8 @@ class VMOrchestrator:
             self.gns3_vm_ip, 22, gns3_username, gns3_password
         )
 
-        gns3_interface_setup = GNS3VMInterfaceSetup(gns3_connection, "eth1")
+        gns3_interface_setup = GNS3VMInterfaceSetup(
+            gns3_connection, Settings.GNS3.PARENT_INTERFACE
+        )
         gns3_interface_setup.initialize_commands(graph)
         gns3_interface_setup.execute_script()

@@ -1,6 +1,8 @@
 from typing import Any
 from typing import TYPE_CHECKING
 
+from ..settings import Verbosity, Settings
+
 if TYPE_CHECKING:
     from src.graph.blocks import GenericNode, Interface
 
@@ -87,11 +89,11 @@ class GNS3Connection(APIHandler):
             )
         return ports_mapping
 
-    def create_node(self, node: GenericNode) -> dict[str, Any]:
+    def create_node(self, node: GenericNode) -> dict[str, Any] | None:
         """
         Creates a new GNS3 node on the GNS3 project.
         :param node: Node to be generated.
-        :return: Returns the newly generated GNS3 node information.
+        :return: Returns the newly generated GNS3 node information. ``None`` is returned, when the IS_DRY_RUN option is set.
         :raises ValueError: Is thrown when the image of the node does not exist on the GNS3 instance.
         """
         from src.graph import Environment
@@ -104,6 +106,17 @@ class GNS3Connection(APIHandler):
 
         if template["builtin"]:
             return self._create_builtin_nodes(node, template)
+
+        # --------------------------------------------------------------------------------------------------------------
+        if Settings.IS_DRY_RUN:
+            Verbosity.volumatic_print(
+                Verbosity.NORMAL, f"Would deploy {node.name} on GNS3. {node.image}"
+            )
+            return None
+        Verbosity.volumatic_print(
+            Verbosity.NORMAL, f"Deploys {node.name} on GNS3: {node.image}"
+        )
+        # --------------------------------------------------------------------------------------------------------------
 
         payload = {"name": node.name, "x": 100, "y": 100}
         response = self.post(
@@ -119,18 +132,39 @@ class GNS3Connection(APIHandler):
         node: GenericNode,
         template: str | dict[str, Any],
         ports_mapping: list = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | None:
         """
         Creates new GNS3 built-in nodes in the GNS3 project.
         :param node: Node to be generated.
         :param template: Name of the GNS3 template or already the GNS3 template.
         :param ports_mapping: Only used for nodes, whose environment is ``ON_ESXI`` and which are represented with the 'Cloud'-node,
         since this will alter the interface selection of the node. May not work with all node templates.
-        :return: Returns the newly generated GNS3 node information.
+        :return: Returns the newly generated GNS3 node information. ``None`` is returned, when the IS_DRY_RUN option is set.
         :raises ValueError: Is thrown when the image of the node does not exist on the GNS3 instance.
         """
         if isinstance(template, str):
+            # --------------------------------------------------------------------------------------------------------------
+            if Settings.IS_DRY_RUN:
+                Verbosity.volumatic_print(
+                    Verbosity.NORMAL, f"Would deploy {node.name} on GNS3. {template}"
+                )
+                return None
+            Verbosity.volumatic_print(
+                Verbosity.NORMAL, f"Deploys {node.name} on GNS3: {template}"
+            )
+            # --------------------------------------------------------------------------------------------------------------
             template = self._get_template(template)
+        # --------------------------------------------------------------------------------------------------------------
+        else:
+            if Settings.IS_DRY_RUN:
+                Verbosity.volumatic_print(
+                    Verbosity.NORMAL, f"Would deploy {node.name} on GNS3. {node.image}"
+                )
+                return None
+            Verbosity.volumatic_print(
+                Verbosity.NORMAL, f"Deploys {node.name} on GNS3: {node.image}"
+            )
+        # --------------------------------------------------------------------------------------------------------------
 
         payload = {
             "name": node.name,
@@ -175,7 +209,7 @@ class GNS3Connection(APIHandler):
         This may happen because the names are not the same.
         """
         for adapter in gns3_node_info["ports"]:
-            # @TODO shortform and longform name dedection
+            # @TODO shortform and longform / better name dedection
             if adapter["name"].lower() == intf.name.lower():
                 return adapter
 
@@ -183,12 +217,14 @@ class GNS3Connection(APIHandler):
             f"Interface {intf.name} on {intf.parent.name} cannot be associated to any adapter of the {gns3_node_info['name']} template."
         )
 
-    def connect_nodes(self, node_1: GenericNode, node_2: GenericNode) -> dict[str, Any]:
+    def connect_nodes(
+        self, node_1: GenericNode, node_2: GenericNode
+    ) -> dict[str, Any] | None:
         """
         Connects two GNS3 nodes from the same GNS3 project together.
         :param node_1: Node to connect to ``node_2``.
         :param node_2: Node to connect to ``node_1``.
-        :return: Returns the newly generated GNS3 link information.
+        :return: Returns the newly generated GNS3 link information. ``None`` is returned, when the IS_DRY_RUN option is set.
         :raises ValueError: Is thrown when no adapter can be associated with the given interface.
         This may happen because the names are not the same.
         :raises RuntimeError: Is thrown when both nodes have no connection in the graph to each other.
@@ -201,6 +237,18 @@ class GNS3Connection(APIHandler):
             raise RuntimeError(
                 f"Node {node_1.name} has no internal connection to {node_2.name}"
             )
+        # --------------------------------------------------------------------------------------------------------------
+        if Settings.IS_DRY_RUN:
+            Verbosity.volumatic_print(
+                Verbosity.NORMAL,
+                f"Would connect {node_1.name}[{intf_1.name}] to {node_2.name}[{intf_2.name}]",
+            )
+            return None
+        Verbosity.volumatic_print(
+            Verbosity.NORMAL,
+            f"Connects {node_1.name}[{intf_1.name}] to {node_2.name}[{intf_2.name}]",
+        )
+        # --------------------------------------------------------------------------------------------------------------
 
         gns3_info_1 = node_1.gns3_node_info
         gns3_info_2 = node_2.gns3_node_info

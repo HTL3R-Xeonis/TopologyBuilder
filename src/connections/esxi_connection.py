@@ -8,14 +8,16 @@ from pyVim.connect import SmartConnect, Disconnect
 from pyVmomi import vim
 from typing import TYPE_CHECKING
 
+
+from .api_handler import APIHandler
+from .generic_connection import GenericConnection
+
 if TYPE_CHECKING:
     from src.graph import Graph
-    from src.graph.blocks import VirtualLan
+    from src.graph.blocks import VirtualLan, GenericNode
 
-from src.connections.api_handler import APIHandler
-from src.connections.generic_connection import GenericConnection
 from src.logger_adapter import get_logger
-from src.settings import Settings
+from src.settings import Settings, Verbosity
 
 logger = get_logger()
 T = TypeVar("T")
@@ -28,14 +30,15 @@ class ESXiConnection(GenericConnection):
     Object which manages the communication between APIs regarding ESXi.
     """
 
-    def __init__(self, ip: str, username: str, password: str | None):
+    def __init__(self, ip: str, port: int, username: str, password: str | None):
         """
         :param ip: IP address of the ESXi host.
+        :param port: Port number of the ESXi host, where the API requests are expected.
         :param username: ESXi username.
         :param password: ESXi password. Set to ``None`` if no password is set.
         :raises RuntimeError: Is thrown when no ViewManager is available on this ServiceInstance.
         """
-        super().__init__(ip, 443, username, password)
+        super().__init__(ip, port, username, password)
 
         self.content: vim.ServiceInstanceContent = self.connection.RetrieveContent()
 
@@ -57,7 +60,7 @@ class ESXiConnection(GenericConnection):
             host=self.ip,
             user=self.username,
             pwd=self.password,
-            port=443,
+            port=self.port,
             sslContext=ssl_context,
         )
 
@@ -127,11 +130,11 @@ class ESXiConnection(GenericConnection):
         vswitch = getattr(config.network, "vswitch", [])
 
         for vswitch in vswitch:
-            if vswitch.name == Settings._Esxi.VIRTUAL_SWITCH:
+            if vswitch.name == Settings.ESXI.VIRTUAL_SWITCH:
                 return vswitch
 
         raise logger.alert(
-            ValueError, f"virtual switch {Settings._Esxi.VIRTUAL_SWITCH} not found."
+            ValueError, f"virtual switch {Settings.ESXI.VIRTUAL_SWITCH} not found."
         )
 
     def _add_port_group(self, vlan: VirtualLan) -> None:
@@ -144,7 +147,7 @@ class ESXiConnection(GenericConnection):
         """
         spec = vim.host.PortGroup.Specification()
         spec.name = vlan.name
-        spec.vswitchName = Settings._Esxi.VIRTUAL_SWITCH
+        spec.vswitchName = Settings.ESXI.VIRTUAL_SWITCH
         spec.vlanId = vlan.id
         spec.policy = vim.host.NetworkPolicy()
 
@@ -193,7 +196,7 @@ class ESXiConnection(GenericConnection):
         """
         port_groups = self._get_port_groups()
         for pg in port_groups:
-            if pg.spec.name in Settings._Esxi.IGNORE_PORT_GROUPS | {"PG_GNS3_TRUNK"}:
+            if pg.spec.name in Settings.ESXI.IGNORE_PORT_GROUPS | {"PG_GNS3_TRUNK"}:
                 continue
             self._remove_port_group(pg.spec.name)
 
@@ -217,23 +220,52 @@ class ESXiConnection(GenericConnection):
                     continue
                 self._add_port_group(vlan)
 
-    def deploy_virtual_machine(
-        self, vm_name: str, datastore: str, ova_filename: str, mapped_network: dict
-    ) -> None:
+    @staticmethod
+    def _create_mapped_network(node: GenericNode) -> dict[str, str]:
+        """
+        Creates a network mapping for ESXi, so that the interfaces of the VM will connect to the correct port groups on the virtual switch.
+        :param node: Node to create this mapping for.
+        :return: Returns a dictionary with the interface name, mapped to its vlan name.
+        :raises RuntimeError: Is thrown when a vlan, which should exist, does not exist on the corresponding interface.
+        """
+        mapped_network = {}
+        for interface in node.interfaces.values():
+            vlan = interface.vlan
+            if vlan is None:
+                raise logger.alert(
+                    RuntimeError,
+                    f"Something went wrong with the graph initialization. Needed VLAN does not exist on {node.name}.{interface.name}",
+                )
+            mapped_network[interface.name] = vlan.name
+        return mapped_network
+
+    def deploy_virtual_machine(self, node: GenericNode, datastore: str) -> None:
         """
         Deploys the virtual machine on the ESXi host.
-        :param vm_name: Name of the virtual machine.
+        :param node: Node which represents the virtual machine to be deployed.
         :param datastore: Name of the datastore, to store the virtual machine on.
-        :param ova_filename: OVA-Filename to use for this deployment.
-        :param mapped_network: Network mapping of interface names to port group names.
         :return:
         """
+        # --------------------------------------------------------------------------------------------------------------
+        if Settings.IS_DRY_RUN:
+            Verbosity.volumatic_print(
+                Verbosity.NORMAL, f"Would deploy {node.name} on ESXi: {node.image}"
+            )
+            return
+        Verbosity.volumatic_print(
+            Verbosity.NORMAL, f"Deploys {node.name} on ESXi: {node.image}"
+        )
+        # --------------------------------------------------------------------------------------------------------------
+
+        ova_filename = (APIHandler.get_ova(node.image),)
+        mapped_network = self._create_mapped_network(node)
+
         APIHandler.post(
             url="http://10.20.20.172:8003/deploy/ova",
             json={
                 "ip": self.ip,
                 "port": self.port,
-                "vm_name": vm_name,
+                "vm_name": node.name,
                 "ova_filename": ova_filename,
                 "datastore": datastore,
                 "network": mapped_network,
