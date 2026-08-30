@@ -9,10 +9,8 @@ __status__ = "In development"
 
 import allure
 import pytest
-from src import logger_adapter
 from src.topology_file_validation import TopologyFileValidation
 
-logger_adapter.LoggerAdapter.is_test_run = True
 TEST_FILE_FOLDER = "./tests/files/"
 
 
