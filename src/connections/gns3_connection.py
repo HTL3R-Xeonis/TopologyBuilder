@@ -1,18 +1,18 @@
 from typing import Any
 from typing import TYPE_CHECKING
 
+import requests
+
 from ..settings import Verbosity, Settings
 
 if TYPE_CHECKING:
     from src.graph.blocks import GenericNode, Interface
 
 from .api_handler import APIHandler
-
-from src.logger_adapter import get_logger
-
-logger = get_logger()
+from loguru import logger
 
 
+# @TODO shortform and longform / better name dedection
 class GNS3Connection(APIHandler):
     """
     Object which provides methods regarding the GNS3 API
@@ -23,20 +23,32 @@ class GNS3Connection(APIHandler):
         :param ip: GNS3 IP address
         :param port: GNS3 API port
         :param project_name: Name of the GNS3 project to work on
+        :raises ValueError: Is thrown when the IPv4 address is not a public, private or loopback address.
+        :raises TypeError: Is thrown when the parameters are of the wrong types.
         """
+
         super().__init__(ip, port)
         self.url = f"http://{ip}:{port}"
 
         self.project_name = project_name
         self.project = self._init_project(project_name)
 
-    def _init_project(self, name: str) -> dict[str, Any]:
+    def _init_project(self, name: str) -> dict[str, Any] | None:
         """
         Create a new GNS3 project. If project already exists, it is deleted first.
         :param name: Name of the GNS3 project.
-        :return: Returns the newly generated GNS3 project information.
+        :return: Returns the newly generated GNS3 project information. Returns ``None`` if the ``Settings.ONLY_ON_ESXI`` is ``True``.
+        :raises TimeoutError: Is thrown when it takes too long to receive a response.
+        :raises RuntimeError: Is thrown when the creation or deletion of an existing project fails. May also be thrown if it fails to collect project information.
         """
-        projects = self.get(f"{self.url}/v2/projects").json()
+        if Settings.ONLY_ON_ESXI:
+            return None
+        try:
+            projects = self.get(f"{self.url}/v2/projects")
+        except requests.exceptions.HTTPError as exc:
+            logger.error(msg := "Failed to collect GNS3 project information.")
+            raise RuntimeError(msg) from exc
+
         project = next((p for p in projects if p["name"] == name), None)
 
         if project is None:
@@ -50,17 +62,40 @@ class GNS3Connection(APIHandler):
         Removes the gns3 project from the GNS3 instance.
         :param project_id: Name of the GNS3 project.
         :return:
+        :raises TimeoutError: Is thrown when it takes too long to receive a response.
+        :raises RuntimeError: Is thrown when the project does not exist on the GNS3 instance.
         """
-        self.delete(f"{self.url}/v2/projects/{project_id}")
+        try:
+            self.delete(f"{self.url}/v2/projects/{project_id}")
+        except requests.exceptions.HTTPError as exc:
+            if getattr(exc.response, "status_code", None) == 404:
+                logger.error(
+                    msg := f"GNS3 project {project_id} does not exist on {self.ip}"
+                )
+                raise RuntimeError(msg) from exc
+            raise RuntimeError(
+                f"Something went wrong with the deletion of a GNS3 project on {self.ip}"
+            ) from exc
 
     def _create_new_project(self, name) -> dict[str, Any]:
         """
         Creates a new GNS3 project on the GNS3 instance.
         :param name: Name of the GNS3 project.
         :return: Returns the newly generated GNS3 project information.
+        :raises RuntimeError: Is thrown when the project already exists on the GNS3 instance.
+        May also be thrown if some other HTTPError occurs.
+        :raises TimeoutError: Is thrown when it takes too long to receive a response.
         """
-        response = self.post(f"{self.url}/v2/projects", json={"name": name}).json()
-        return response
+        try:
+            response = self.post(f"{self.url}/v2/projects", json={"name": name})
+            return response
+        except requests.exceptions.HTTPError as exc:
+            if getattr(exc.response, "status_code", None) == 409:
+                logger.error(msg := f"GNS3 project {name} already exists on {self.ip}")
+                raise RuntimeError(msg) from exc
+            raise RuntimeError(
+                f"Something went wrong with the creation of the GNS3 project {name} on {self.ip}"
+            ) from exc
 
     @staticmethod
     def _create_ports_mapping(node: GenericNode) -> list[dict[str, str]]:
@@ -68,16 +103,17 @@ class GNS3Connection(APIHandler):
         Creates a ports mapping for GNS3 to specify the ports for the Cloud node.
         :param node: Node to create this mapping for.
         :return: Returns a list of dictionaries where each dictionary represents an interface on the Cloud.
-        :raises RuntimeError: Is thrown when a vlan, which should exist, does not exist on the corresponding interface.
+        :raises RuntimeError: Is thrown when a vlan, which should exist, does not exist on the corresponding interface in the graph.
         """
         ports_mapping = []
         for port_number, interface in enumerate(node.interfaces.values()):
             vlan = interface.vlan
             if vlan is None:
-                raise logger.alert(
-                    RuntimeError,
-                    f"Something went wrong with the graph initialization. Needed VLAN does not exist on {node.name}.{interface.name}",
+                logger.error(
+                    msg
+                    := f"Something went wrong with the graph initialization. Needed VLAN does not exist on {node.name}.{interface.name}"
                 )
+                raise RuntimeError(msg)
 
             ports_mapping.append(
                 {
@@ -93,19 +129,21 @@ class GNS3Connection(APIHandler):
         """
         Creates a new GNS3 node on the GNS3 project.
         :param node: Node to be generated.
-        :return: Returns the newly generated GNS3 node information. ``None`` is returned, when the IS_DRY_RUN option is set.
+        :return: Returns the newly generated GNS3 node information. ``None`` is returned, if the ``Settings.IS_DRY_RUN`` or ``Settings.ONLY_ON_ESXI`` options are True.
         :raises ValueError: Is thrown when the image of the node does not exist on the GNS3 instance.
+        :raises TimeoutError: Is thrown when it takes too long to receive a response.
+        :raises RuntimeError: Is thrown when it fails to collect GNS3 template information. May also be thrown when it fails to create the node.
         """
         from src.graph import Environment
+
+        if Settings.ONLY_ON_ESXI:
+            return None
 
         if node.env == Environment.ON_ESXI:
             ports_mapping = self._create_ports_mapping(node)
             return self._create_builtin_nodes(node, "Cloud", ports_mapping)
 
         template = self._get_template(node.image)
-
-        if template["builtin"]:
-            return self._create_builtin_nodes(node, template)
 
         # --------------------------------------------------------------------------------------------------------------
         if Settings.IS_DRY_RUN:
@@ -117,12 +155,23 @@ class GNS3Connection(APIHandler):
             Verbosity.NORMAL, f"Deploys {node.name} on GNS3: {node.image}"
         )
         # --------------------------------------------------------------------------------------------------------------
+        # If the template is a builtin (e.g.: VPC, Cloud or NAT) it requires special treatment
+        if template["builtin"]:
+            return self._create_builtin_nodes(node, template)
 
         payload = {"name": node.name, "x": 100, "y": 100}
-        response = self.post(
-            f"{self.url}/v2/projects/{self.project['project_id']}/templates/{template['template_id']}",
-            json=payload,
-        ).json()
+        try:
+            response = self.post(
+                f"{self.url}/v2/projects/{self.project['project_id']}/templates/{template['template_id']}",
+                json=payload,
+            )
+        except requests.exceptions.HTTPError as exc:
+            if getattr(exc.response, "status_code", None) == 400:
+                logger.error(msg := "Invalid GET request was made.")
+                raise RuntimeError(msg) from exc
+            raise RuntimeError(
+                "Something went wrong with the creation of the node request."
+            ) from exc
 
         node.gns3_node_info = response
         return response
@@ -141,9 +190,11 @@ class GNS3Connection(APIHandler):
         since this will alter the interface selection of the node. May not work with all node templates.
         :return: Returns the newly generated GNS3 node information. ``None`` is returned, when the IS_DRY_RUN option is set.
         :raises ValueError: Is thrown when the image of the node does not exist on the GNS3 instance.
+        :raises TimeoutError: Is thrown when it takes too long to receive a response.
+        :raises RuntimeError: Is thrown when it fails to collect GNS3 template information. May also be thrown when it fails to create the node.
         """
         if isinstance(template, str):
-            # --------------------------------------------------------------------------------------------------------------
+            # ----------------------------------------------------------------------------------------------------------
             if Settings.IS_DRY_RUN:
                 Verbosity.volumatic_print(
                     Verbosity.NORMAL, f"Would deploy {node.name} on GNS3. {template}"
@@ -152,19 +203,8 @@ class GNS3Connection(APIHandler):
             Verbosity.volumatic_print(
                 Verbosity.NORMAL, f"Deploys {node.name} on GNS3: {template}"
             )
-            # --------------------------------------------------------------------------------------------------------------
+            # ----------------------------------------------------------------------------------------------------------
             template = self._get_template(template)
-        # --------------------------------------------------------------------------------------------------------------
-        else:
-            if Settings.IS_DRY_RUN:
-                Verbosity.volumatic_print(
-                    Verbosity.NORMAL, f"Would deploy {node.name} on GNS3. {node.image}"
-                )
-                return None
-            Verbosity.volumatic_print(
-                Verbosity.NORMAL, f"Deploys {node.name} on GNS3: {node.image}"
-            )
-        # --------------------------------------------------------------------------------------------------------------
 
         payload = {
             "name": node.name,
@@ -177,9 +217,18 @@ class GNS3Connection(APIHandler):
         if ports_mapping is not None:
             payload["properties"] = {"ports_mapping": ports_mapping}
 
-        response = self.post(
-            f"{self.url}/v2/projects/{self.project['project_id']}/nodes", json=payload
-        ).json()
+        try:
+            response = self.post(
+                f"{self.url}/v2/projects/{self.project['project_id']}/nodes",
+                json=payload,
+            )
+        except requests.exceptions.HTTPError as exc:
+            if getattr(exc.response, "status_code", None) == 400:
+                logger.error(msg := "Invalid GET request was made.")
+                raise RuntimeError(msg) from exc
+            raise RuntimeError(
+                "Something went wrong with the creation of the node request."
+            ) from exc
 
         node.gns3_node_info = response
         return response
@@ -190,8 +239,17 @@ class GNS3Connection(APIHandler):
         :param template_name: Name of the GNS3 template to get the information.
         :return: Returns the information of the template.
         :raises ValueError: Is thrown when the template does not exist on the GNS3 instance.
+        :raises TimeoutError: Is thrown when it takes too long to receive a response.
+        :raises RuntimeError: Is thrown when it fails to collect GNS3 template information.
         """
-        response = self.get(f"{self.url}/v2/templates").json()
+        try:
+            response = self.get(f"{self.url}/v2/templates")
+        except requests.exceptions.HTTPError as exc:
+            logger.error(
+                msg := f"Could not collect GNS3 template information on host {self.ip}"
+            )
+            raise RuntimeError(msg) from exc
+
         template = next((t for t in response if t["name"] == template_name), None)
 
         if template is None:
@@ -224,12 +282,14 @@ class GNS3Connection(APIHandler):
         Connects two GNS3 nodes from the same GNS3 project together.
         :param node_1: Node to connect to ``node_2``.
         :param node_2: Node to connect to ``node_1``.
-        :return: Returns the newly generated GNS3 link information. ``None`` is returned, when the IS_DRY_RUN option is set.
+        :return: Returns the newly generated GNS3 link information. `None`` is returned, if the ``Settings.IS_DRY_RUN`` or ``Settings.ONLY_ON_ESXI`` options are True.
         :raises ValueError: Is thrown when no adapter can be associated with the given interface.
         This may happen because the names are not the same.
         :raises RuntimeError: Is thrown when both nodes have no connection in the graph to each other.
         May also be thrown when one of the nodes does not exist in GNS3.
         """
+        if Settings.ONLY_ON_ESXI:
+            return None
         intf_1 = node_1.get_interface(node_2)
         intf_2 = node_2.get_interface(node_1)
 
@@ -275,7 +335,15 @@ class GNS3Connection(APIHandler):
                 },
             ]
         }
-
-        return self.post(
-            f"{self.url}/v2/projects/{self.project['project_id']}/links", json=payload
-        ).json()
+        try:
+            return self.post(
+                f"{self.url}/v2/projects/{self.project['project_id']}/links",
+                json=payload,
+            )
+        except requests.exceptions.HTTPError as exc:
+            if getattr(exc.response, "status_code", None) == 400:
+                logger.error(msg := "Invalid GET request was made.")
+                raise RuntimeError(msg) from exc
+            raise RuntimeError(
+                f"Something went wrong while linking two nodes on {self.ip}"
+            )

@@ -1,3 +1,6 @@
+from loguru import logger
+
+
 class VirtualLan:
     """
     Object with a unique id starting from 2 and ending at 4093.
@@ -11,18 +14,16 @@ class VirtualLan:
         :param node_name: Name of the node to which the given interface_name belongs to.
         :param interface_name: Name of the interface to which this VirtualLan will belong to.
 
-        :raise TypeError: Is thrown when the parameters are of the wrong types.
         :raise ValueError: Is thrown when the vlan_id exceeds the limit of 4093. The vlan_id is automatically incremented with the creation of this object.
         """
-        if not isinstance(node_name, str) or not isinstance(interface_name, str):
-            raise TypeError
-
         self._name: str = f"{node_name}_{interface_name.replace('/', '-')}"
 
         if VirtualLan._vlan_id >= 4094:
-            raise ValueError(
-                "VLANs on ESXi exceed the limit of 4094. Reduce the number of interfaces on VMs which will be located on ESXi."
+            logger.error(
+                msg
+                := "VLANs on ESXi exceed the limit of 4094. Reduce the number of interfaces on VMs which will be located on ESXi."
             )
+            raise ValueError(msg)
 
         self._vlan_id: int = VirtualLan._vlan_id
         VirtualLan._vlan_id += 1

@@ -10,9 +10,8 @@ __status__ = "In development"
 
 import ipaddress
 from abc import ABC, abstractmethod
-from src.logger_adapter import get_logger
 
-logger = get_logger()
+from loguru import logger
 
 
 class GenericConnection(ABC):
@@ -26,9 +25,20 @@ class GenericConnection(ABC):
         :param port: Port number to connect to
         :param username: Hosts username
         :param password: corresponding password for user
+        :raises ValueError: Is thrown when the IPv4 address is not a public, private or loopback address.
+        :raises TypeError: Is thrown when the parameters are of the wrong types.
         """
+        if (
+            not isinstance(ip, str)
+            or not isinstance(port, int)
+            or not isinstance(username, str)
+            or not (isinstance(password, str) or password is None)
+        ):
+            raise TypeError
+
         if not self.is_valid_ipv4_address(ip):
-            raise ValueError(f"Invalid IP address: {ip}")
+            logger.error(msg := f"Invalid IPv4 address: {ip}")
+            raise ValueError(msg)
 
         self._ip_address = ip
         self._port = port

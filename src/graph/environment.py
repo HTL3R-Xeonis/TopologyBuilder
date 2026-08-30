@@ -30,8 +30,7 @@ class Environment(Enum):
         image: str,
     ) -> Literal[Environment.ON_GNS3, Environment.ON_ESXI, Environment.ON_NOTHING]:
         """
-        Returns the environment based on the image
-        #@TODO add description and tests
+        Returns the environment based on the image.
         :param image: image to judge the environment on
         :return: Either returns ON_ESXI or ON_GNS3. When the template-name isn't on either then it returns ON_NOTHING
         """

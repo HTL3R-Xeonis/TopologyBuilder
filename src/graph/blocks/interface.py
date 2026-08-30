@@ -15,6 +15,9 @@ __license__ = "GNU GPLv3"
 __status__ = "In development"
 
 
+# @TODO ExceptionHandling
+# @TODO Logging
+# @TODO Complete and recursive Exception Documentation.
 class Interface:
     """
     Object which represents an interface of a Node,
@@ -26,13 +29,8 @@ class Interface:
         :param if_name: name of the interface
         :param node: Node which owns this interface
 
-        :raise TypeError: Is thrown when the parameters are of the wrong types.
+        :raises ValueError: Is thrown when too many interfaces are created, which have a vlan object. i <= 4093
         """
-        from .generic_node import GenericNode
-
-        if not isinstance(if_name, str) or not isinstance(node, GenericNode):
-            raise TypeError
-
         self._name: str = if_name
         self._parent: GenericNode = node
         self._neighbour: GenericNode | None = None
@@ -83,10 +81,6 @@ class Interface:
         :param new_neighbour: Node to which this interface will be connected to.
         :return:
         """
-        from .generic_node import GenericNode
-
-        if not isinstance(new_neighbour, GenericNode):
-            raise TypeError
         self._neighbour = new_neighbour
 
     def __str__(self) -> str:

@@ -7,21 +7,25 @@ from src.graph import Graph
 from src.topology_file_validation import TopologyFileValidation
 from src.vm_orchestrator.vm_orchestrator import VMOrchestrator
 
+
 app = typer.Typer(
     name="TopologyBuilder",
     help="Build and deploy network topologies to GNS3/ESXi from a YAML config file.",
     add_completion=False,
-    invoke_without_command=True,
 )
 connection_app = typer.Typer()
 
-app.add_typer(connection_app, name="connect")
+app.add_typer(
+    connection_app,
+    name="connect",
+    help="Connects to the ESXi server for further options and commands.",
+)
 
 
 @app.callback()
 def main(
     verbosity: Verbosity = typer.Option(
-        Verbosity.NORMAL,
+        None,
         "--verbosity",
         "-v",
         help="Sets the consol verbosity level. Modes: q=Quiet, n=Normal, v=Verbos, d=Debug",
@@ -33,7 +37,7 @@ def main(
         help="Path to a YAML file containing program settings. If not set, default settings will be used.",
     ),
     topology: Path = typer.Option(
-        "./topology_example.yaml",
+        None,
         "--topology",
         "-t",
         help="Path to a YAML file containing topology. If not set, example topology will be used.",
@@ -47,24 +51,29 @@ def main(
 ) -> None:
     if settings is not None:
         Settings.initialise_settings(str(settings))
-    Settings.VERBOSITY_LEVEL = verbosity
-    Settings.TOPOLOGY_FILE = str(topology)
-    Settings.API.LITERAL_API_VALUES = literal_api_values
+    if verbosity is not None:
+        Settings.VERBOSITY_LEVEL = verbosity
+    if topology is not None:
+        Settings.TOPOLOGY_FILE = str(topology)
+    if literal_api_values:
+        Settings.API.LITERAL_API_VALUES = literal_api_values
 
 
 @app.command()
 def validate() -> None:
+    """Validate the topology file."""
     validator = TopologyFileValidation(Settings.TOPOLOGY_FILE)
     validator.validate_file()
     typer.secho("Valid.", fg=typer.colors.GREEN)
 
 
 @app.command()
-def build(
+def visualize(
     detailed: bool = typer.Option(
         False, "--detail", "-d", help="Prints the details of the network graph."
     ),
-):
+) -> None:
+    """Construct the graph and print it."""
     validator = TopologyFileValidation(Settings.TOPOLOGY_FILE)
     validator.validate_file()
 
@@ -74,7 +83,7 @@ def build(
         print(repr(graph))
         return
 
-    graph.visulize()
+    graph.visualize()
 
 
 @connection_app.callback()
@@ -89,7 +98,7 @@ def connection_main(
         None, "--esxi_password", "-p", help="The password for the ESXi user."
     ),
     gns3_vm_name: str = typer.Option(
-        "GNS3",
+        None,
         "--gns3_vm_name",
         "-n",
         help="The name of the GNS3 VM on the ESXi server.",
@@ -101,8 +110,8 @@ def connection_main(
         Settings.ESXI.USERNAME = esxi_username
     if esxi_password is not None:
         Settings.ESXI.PASSWORD = esxi_password
-
-    Settings.ESXI.GNS3_VM_NAME = gns3_vm_name
+    if gns3_vm_name is not None:
+        Settings.ESXI.GNS3_VM_NAME = gns3_vm_name
 
 
 @connection_app.command()
@@ -130,10 +139,11 @@ def deploy(
         "Still creates Cloud-nodes on GNS3 to ensure possible connections between the ESXi-VMs.",
     ),
 ):
+    """Deploys the nodes from the topology on ESXi and GNS3."""
     if only_on_gns3:
-        Settings.ONLY_ON_GNS3 = True
+        Settings.ONLY_ON_GNS3 = only_on_gns3
     if only_on_esxi:
-        Settings.ONLY_ON_ESXI = True
+        Settings.ONLY_ON_ESXI = only_on_esxi
     if only_on_gns3 and only_on_esxi:
         raise ValueError(
             "Only deploying in both environments does not make sense, if there are only these two environments."
@@ -143,14 +153,15 @@ def deploy(
         Settings.GNS3.USERNAME = gns3_username
     if gns3_password is not None:
         Settings.GNS3.PASSWORD = gns3_password
-    Settings.IS_DRY_RUN = is_dry_run
+    if is_dry_run:
+        Settings.IS_DRY_RUN = is_dry_run
 
     validator = TopologyFileValidation(Settings.TOPOLOGY_FILE)
     validator.validate_file()
 
     graph = Graph(validator.nodes, validator.edges)
 
-    o = VMOrchestrator(
+    orchestrator = VMOrchestrator(
         esxi_host=Settings.ESXI.IP,
         esxi_port=Settings.ESXI.PORT,
         esxi_username=Settings.ESXI.USERNAME,
@@ -158,7 +169,7 @@ def deploy(
         gns3_vm_name=Settings.ESXI.GNS3_VM_NAME,
     )
 
-    o.deploy_graph(
+    orchestrator.deploy_graph(
         graph=graph,
         gns3_username=Settings.GNS3.USERNAME,
         gns3_password=Settings.GNS3.PASSWORD,

@@ -5,6 +5,7 @@ from typing import Any
 from src.graph import Environment
 from .interface import Interface
 from .formatter import nested_formatter
+from loguru import logger
 
 __autor__ = "Leon Eiböck"
 __date__ = "17/07/2026"
@@ -23,6 +24,7 @@ class GenericNode:
         :param image: which image to use for this node
         :param role: what does this node represent in the graph
         :param name: which name to use for this node
+        :raises ValueError: Is thrown when the image is not found on ESXi or GNS3.
         """
         self._image: str = image
         self._role: str = role
@@ -33,7 +35,8 @@ class GenericNode:
         self._env: Environment = Environment.get_environment(image)
 
         if self._env == Environment.ON_NOTHING:
-            raise ValueError(f"Image {image} not found on ESXi or GNS3.")
+            logger.error(msg := f"The image {image} is not found on ESXi or GNS3.")
+            raise ValueError(msg)
 
     @property
     def image(self) -> str:
@@ -107,9 +110,10 @@ class GenericNode:
         if isinstance(interface, str):
             intf_obj = self.interfaces.get(interface, None)
             if intf_obj is None:
-                raise ValueError(
-                    f"Interface {interface} does not exist on node {self.name}"
+                logger.error(
+                    msg := f"Interface {interface} does not exist on node {self.name}"
                 )
+                raise ValueError(msg)
             return intf_obj.neighbour
 
         if isinstance(interface, Interface):
@@ -143,14 +147,14 @@ class GenericNode:
         :param if_name: Name of the new interface
         :return: Returns the newly added interface.
 
-        :raise TypeError: Is thrown when the parameters are of the wrong types.
-        :raise ValueError: Is thrown when an interface already exists with the given name on the node.
+        :raise ValueError: Is thrown when an interface already exists with the given name on the node
+            or too many interfaces with a vlan were created.
         """
-        if not isinstance(if_name, str):
-            raise TypeError
-
         if if_name in self.interfaces:
-            raise ValueError(f"Interface {if_name} already exists on node {self.name}")
+            logger.error(
+                msg := f"Interface {if_name} already exists on node {self.name}"
+            )
+            raise ValueError(msg)
 
         intf = Interface(if_name, self)
         self.interfaces[if_name] = intf

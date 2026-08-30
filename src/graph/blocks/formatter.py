@@ -2,6 +2,12 @@ from typing import Any
 
 
 def nested_formatter(header: str, obj: str | None | list[Any] | Any) -> str:
+    """
+    Formats the object to a nested format.
+    :param header: Header to get the margin right.
+    :param obj: object to be formatted.
+    :return: formatted string.
+    """
     if obj is None:
         return "None"
     if isinstance(obj, str):

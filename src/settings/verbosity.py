@@ -2,6 +2,10 @@ from enum import Enum
 
 
 class Verbosity(str, Enum):
+    """
+    Verbosity enum.
+    """
+
     QUIET = "q"
     NORMAL = "n"
     VERBOSE = "v"
@@ -9,6 +13,10 @@ class Verbosity(str, Enum):
 
     @property
     def level(self) -> int:
+        """
+        Get verbosity level of current verbosity.
+        :return:
+        """
         return {
             Verbosity.QUIET.value: 0,
             Verbosity.NORMAL.value: 1,
@@ -18,6 +26,12 @@ class Verbosity(str, Enum):
 
     @staticmethod
     def volumatic_print(verbosity: Verbosity, msg: str) -> None:
+        """
+        Print message if verbosity level is higher or equal to verbosity level.
+        :param verbosity: Minimal verbosity level where the message is printed.
+        :param msg: Message to be printed.
+        :return:
+        """
         from .settings import Settings
 
         if Settings.VERBOSITY_LEVEL.level >= verbosity.level:

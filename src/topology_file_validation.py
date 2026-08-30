@@ -9,10 +9,8 @@ __status__ = "In development"
 
 from pathlib import Path
 import yaml
-from src.logger_adapter import get_logger
 from src.connections.api_handler import APIHandler
-
-logger = get_logger()
+from loguru import logger
 
 
 class TopologyFileValidation:
@@ -26,26 +24,37 @@ class TopologyFileValidation:
         """
         Initializes the ConfigFileHandler class
         :param path: Path to the YAML config-file
+
+        :raises FileNotFoundError: Is thrown when the path does not exist.
+        :raises TypeError: Is thrown when the path is not a string.
+        :raises ValueError: Is thrown when the file is not a YAML file.
+            May also be thrown when there is a template on GNS3 which has the same name as a template on ESXi and vice versa.
+        :raises TimeoutError: Is thrown when a timeout occurs.
         """
         if not isinstance(path, str):
-            raise logger.alert(
-                TypeError, f"Path must be a string. Current type: {type(path)}"
-            )
+            logger.error(msg := f"Path must be a string. Current type: {type(path)}")
+            raise TypeError(msg)
         if not Path(path).exists():
-            raise logger.alert(
-                FileNotFoundError, f"File does not exists. Current path: {path}"
-            )
+            logger.error(msg := f"File does not exists. Current path: {path}")
+            raise FileNotFoundError(msg)
         if not Path(path).is_file() and not (
             path.endswith(".yml") or path.endswith(".yaml")
         ):
-            raise logger.alert(
-                ValueError,
-                f"Path does not link to *.yaml or *.yml file. Current path: {path}",
+            logger.error(
+                msg
+                := f"Path does not link to *.yaml or *.yml file. Current path: {path}"
             )
-        self.path = Path(path)
-        self.__NODE_NAMES = set()
+            raise ValueError(msg)
+
+        self.nodes: list[dict[str, str]] = []
+        self.edges: list[list[str]] = []
+
+        self._path = Path(path)
+        self.__node_names = set()
+        """Variable to ensure node names are unique."""
         self.__node_map = {}
-        self.available_templates = self.get_available_templates()
+        """Variable to ensure interfaces are not used twice per node."""
+        self._available_templates = self.get_available_templates()
 
     @staticmethod
     def get_available_templates() -> set[str]:
@@ -53,52 +62,62 @@ class TopologyFileValidation:
         Returns a set of all available templates which can be used as node images.
         Templates with same name on GNS3 and ESXi are not allowed, hence an ValueError will be raised.
         :return: Set of all available templates names.
+        :raises TimeoutError: Is thrown when a timeout occurs.
+        :raises ValueError: Is thrown when there is a template on GNS3 which has the same name as a template on ESXi and vice versa.
         """
         esxi_templates = APIHandler.get_esxi_template_names()
         gns3_templates = APIHandler.get_gns3_template_names()
         if esxi_templates & gns3_templates:
-            raise logger.alert(
-                ValueError,
-                f"Templates with the same name in GNS3 and ESXi are not allowed: {esxi_templates & gns3_templates}",
+            logger.error(
+                msg
+                := f"Templates with the same name in GNS3 and ESXi are not allowed: {esxi_templates & gns3_templates}"
             )
+            raise ValueError(msg)
+
         return esxi_templates | gns3_templates
 
     def read_file(self) -> dict:
         """
         Reads the contents of the YAML-file
         :return: The contents of the YAML-file as a dictionary
+        :raises RuntimeError: Is thrown when an error occurs while trying to read the YAML-file.
         """
         try:
-            with open(self.path, "r") as file:
+            with open(self._path, "r") as file:
                 return yaml.safe_load(file)
         except Exception as e:
-            raise logger.alert(e, f"Error reading file: {self.path}")
+            logger.error(msg := f"Error reading file: {self._path}")
+            raise RuntimeError(msg) from e
 
     def validate_file(self) -> None:
         """
         Validates the contents of the YAML-file as defined and makes nodes and edges available.
         :return:
+        :raises KeyError: Is thrown when necessary keys are missing in the YAML-file.
+        :raises TypeError: Is thrown when values are of the wrong type in the YAML-file.
+        :raises ValueError: Is thrown when a value is not a valid option in the YAML-file or the format is incorrect.
         """
         content = self.read_file()
         if not {"edges", "nodes"} <= content.keys():
-            raise logger.alert(
-                KeyError,
-                f"Key 'edges' or 'nodes' not found in configuration file. Current keys: {list(content.keys())}",
+            logger.error(
+                msg
+                := f"Key 'edges' or 'nodes' not found in configuration file. Current keys: {list(content.keys())}"
             )
+            raise KeyError(msg)
 
         self.nodes = content["nodes"]
         self.edges = content["edges"]
 
         if not isinstance(self.nodes, list):
-            raise logger.alert(
-                TypeError,
-                f"'nodes' must be of type list. Current type: {type(self.nodes)}",
+            logger.error(
+                msg := f"'nodes' must be of type list. Current type: {type(self.nodes)}"
             )
+            raise TypeError(msg)
         if not isinstance(self.edges, list):
-            raise logger.alert(
-                TypeError,
-                f"'edges' must be of type list. Current type: {type(self.edges)}",
+            logger.error(
+                msg := f"'edges' must be of type list. Current type: {type(self.edges)}"
             )
+            raise TypeError(msg)
 
         for node_group in self.nodes:
             self.__validate_node_group(node_group)
@@ -110,95 +129,108 @@ class TopologyFileValidation:
         Helper-methode for validate_file. Validates the nodegroup of given node.
         :param node_group: Dictionary entry of nodes. Contains the image, role and names.
         :return:
+        :raises KeyError: Is thrown when necessary keys are missing in the YAML-file.
+        :raises TypeError: Is thrown when values are of the wrong type in the YAML-file.
+        :raises ValueError: Is thrown when a value is not a valid option in the YAML-file or the format is incorrect.
         """
         if not isinstance(node_group, dict):
-            raise logger.alert(
-                TypeError,
-                f"Node group must be of type dict. Current type: {type(node_group)}",
+            logger.error(
+                msg
+                := f"Node group must be of type dict. Current type: {type(node_group)}"
             )
+            raise TypeError(msg)
         if not {"image", "role", "names"} <= node_group.keys():
-            raise logger.alert(
-                KeyError,
-                f"Key 'image', 'role' or 'names' not found in configuration file under 'nodes'. Current keys: {node_group.keys()}",
+            logger.error(
+                msg
+                := f"Key 'image', 'role' or 'names' not found in configuration file under 'nodes'. Current keys: {node_group.keys()}"
             )
-
+            raise KeyError(msg)
         if not isinstance(node_group["image"], str):
-            raise logger.alert(
-                TypeError,
-                f"Image must be of type string. Current type: {type(node_group['image'])}",
+            logger.error(
+                msg
+                := f"Image must be of type string. Current type: {type(node_group['image'])}"
             )
-        if self.available_templates is not None:
-            if node_group["image"] not in self.available_templates:
-                raise logger.alert(
-                    ValueError, f"Image {node_group['image']} not found on ESXi or GNS3"
+            raise TypeError(msg)
+        if self._available_templates is not None:
+            if node_group["image"] not in self._available_templates:
+                logger.error(
+                    msg := f"Image {node_group['image']} not found on ESXi or GNS3"
                 )
+                raise ValueError(msg)
 
         if not isinstance(node_group["role"], str):
-            raise logger.alert(
-                TypeError,
-                f"Role must be of type string. Current type: {type(node_group['role'])}",
+            logger.error(
+                msg
+                := f"Role must be of type string. Current type: {type(node_group['role'])}"
             )
+            raise TypeError(msg)
         if node_group["role"] not in self.__VALID_ROLES:
-            raise logger.alert(
-                ValueError,
-                f"{node_group['role']} is not a valid role. Valid roles: {self.__VALID_ROLES}",
+            logger.error(
+                msg
+                := f"{node_group['role']} is not a valid role. Valid roles: {self.__VALID_ROLES}"
             )
+            raise ValueError(msg)
 
         names = node_group["names"]
         if names is None:
             return
         if not isinstance(names, list):
-            raise logger.alert(
-                TypeError,
-                f"Names must be of type list or None. Current type: {type(names)}",
+            logger.error(
+                msg
+                := f"Names must be of type list or None. Current type: {type(names)}"
             )
+            raise TypeError(msg)
         for name in names:
             if not isinstance(name, str):
-                raise logger.alert(
-                    TypeError,
-                    f"Entries of 'names' must be of type str. Current type: {type(name)}",
+                logger.error(
+                    msg
+                    := f"Entries of 'names' must be of type str. Current type: {type(name)}"
                 )
+                raise TypeError(msg)
         if not len(names) == len(set(names)):
-            raise logger.alert(
-                ValueError,
-                f"Node names must be distinct. Not unique names: {set([n for n in names if names.count(n) > 1])}",
+            logger.error(
+                msg
+                := f"Node names must be distinct. Not unique names: {set([n for n in names if names.count(n) > 1])}"
             )
-        if set(names) & self.__NODE_NAMES:
-            raise logger.alert(
-                ValueError,
-                f"Node names must be distinct. Not unique names: {set(names) & self.__NODE_NAMES}",
+            raise ValueError(msg)
+        if set(names) & self.__node_names:
+            logger.error(
+                msg
+                := f"Node names must be distinct. Not unique names: {set(names) & self.__node_names}"
             )
-        self.__NODE_NAMES.update(names)
+            raise ValueError(msg)
+        self.__node_names.update(names)
 
     def __validate_edges(self, edge: list) -> None:
         """
         Helper-methode for validate_file. Validates the entries of given edge.
         :param edge: List entry of edges. Contains the connections between the nodes.
         :return:
+        :raises ValueError: Is thrown when a value is not a valid option in the YAML-file or the format is incorrect.
         """
         if len(edge) != 4:
-            raise logger.alert(ValueError, "List of 'edges' must be of length 4")
+            logger.error(msg := "List of 'edges' must be of length 4")
+            raise ValueError(msg)
         if not all(isinstance(v, str) for v in edge):
-            raise logger.alert(
-                ValueError, f"Contents of 'edge' must be of type str: {edge}"
-            )
-        if not {edge[0], edge[2]} <= self.__NODE_NAMES:
-            raise logger.alert(
-                ValueError, f"Name not defined in 'nodes': {edge[0]}, {edge[2]}"
-            )
+            logger.error(msg := f"Contents of 'edge' must be of type str: {edge}")
+            raise ValueError(msg)
+        if not {edge[0], edge[2]} <= self.__node_names:
+            logger.error(msg := f"Name not defined in 'nodes': {edge[0]}, {edge[2]}")
+            raise ValueError(msg)
 
         intf_list_1 = self.__node_map.get(edge[0], [])
         intf_list_2 = self.__node_map.get(edge[2], [])
         if edge[1] in intf_list_1:
-            raise logger.alert(
-                ValueError,
-                f"Interface {edge[1]} is used twice in edges of {edge[0]} node",
+            logger.error(
+                msg := f"Interface {edge[1]} is used twice in edges of {edge[0]} node"
             )
+            raise ValueError(msg)
         if edge[3] in intf_list_2:
-            raise logger.alert(
-                ValueError,
-                f"Interface {edge[3]} is used twice in edges of {edge[2]} node",
+            logger.error(
+                msg := f"Interface {edge[3]} is used twice in edges of {edge[2]} node"
             )
+            raise ValueError(msg)
+
         intf_list_1.append(edge[1])
         intf_list_2.append(edge[3])
         self.__node_map[edge[0]] = intf_list_1

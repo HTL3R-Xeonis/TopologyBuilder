@@ -1,5 +1,8 @@
 import os
 from .verbosity import Verbosity
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 class Settings:
@@ -29,7 +32,7 @@ class Settings:
     class ESXI:
         """Settings related to ESXi."""
 
-        IP: str = "10.20.20.201"
+        IP: str = "10.20.20.200"
         """IPv4 address of the ESXi client."""
         PORT: int = 443
         """Port of the ESXi client, where the API requests are expected."""
@@ -41,9 +44,9 @@ class Settings:
         """Specifies the virtual switch to use on the ESXi client."""
         IGNORE_PORT_GROUPS: set[str] = {"PG_GNS3_TRUNK"}
         """Specifies which port groups not to delete on the virtual switch."""
-        DATASTORE: str = "datastore1"
+        DATASTORE: str = "datastore1 (2)"
         """Specifies the name of the datastore to use on the ESXi client."""
-        GNS3_VM_NAME = "GNS3"
+        GNS3_VM_NAME = "GNS3 (1)"
         """Name of the GNS3 VM to work on."""
 
     class GNS3:

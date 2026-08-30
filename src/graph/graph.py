@@ -5,7 +5,7 @@ __status__ = "In development"
 
 from src.graph.blocks import GenericNode
 from src.graph.blocks.formatter import nested_formatter
-
+from loguru import logger
 import networkx as nx
 from phart import ASCIIRenderer, LayoutOptions, NodeStyle
 
@@ -19,9 +19,8 @@ class Graph:
         """
         :param nodes: dict of nodes from the config file
         :param edges: list of edges from the config file
+        :raises ValueError: Is thrown when the image is not found on ESXi or GNS3. May also be thrown when an interface already exists with the given name on the node or too many interfaces with a vlan were created.
         """
-        if not isinstance(nodes, list) or not isinstance(edges, list):
-            raise TypeError
 
         self._nodes: dict[str, GenericNode] = {}
         self._build_nodes(nodes)
@@ -40,6 +39,7 @@ class Graph:
         Creates all the specified nodes in the graph.
         :param node_config: dict of nodes from the config file
         :return:
+        :raises ValueError: Is thrown when the image is not found on ESXi or GNS3
         """
 
         for node_group in node_config:
@@ -56,13 +56,16 @@ class Graph:
         Creates all the needed interfaces for each edge and connects both nodes with each other.
         :param edges_config: list of edges from the config file
         :return:
-        :raise ValueError: Is thrown when a node which should have existed in the graph doesn't exist.
+        :raise RuntimeError: Is thrown when a node which should have existed in the graph doesn't exist.
+        :raises ValueError: Is thrown when an interface already exists with the given name on the node or too many interfaces with a vlan were created.
         """
         for edge in edges_config:
             if edge[0] not in self.nodes:
-                raise ValueError(f"Node {edge[0]} not found in graph")
+                logger.error(msg := f"Node {edge[0]} not found in graph")
+                raise RuntimeError(msg)
             if edge[2] not in self.nodes:
-                raise ValueError(f"Node {edge[2]} not found in graph")
+                logger.error(msg := f"Node {edge[2]} not found in graph")
+                raise RuntimeError(msg)
 
             node_1 = self.nodes[edge[0]]
             node_2 = self.nodes[edge[2]]
@@ -72,7 +75,11 @@ class Graph:
             if_1.connect_to(node_2)
             if_2.connect_to(node_1)
 
-    def visulize(self):
+    def visualize(self) -> None:
+        """
+        Visualizes the graph in the terminal.
+        :return:
+        """
         G = nx.Graph()
 
         for node_name in self.nodes:
