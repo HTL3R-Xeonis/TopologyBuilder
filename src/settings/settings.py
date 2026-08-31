@@ -78,8 +78,7 @@ class Settings:
         ESXI_TEMPLATE_SERVER_URL = "http://10.20.20.171:8000"
         """URL to the ESXi template API server."""
 
-        # @TODO Remove always True. Is currently set for convenience
-        LITERAL_API_VALUES: bool = True or (
+        LITERAL_API_VALUES: bool = (
             os.getenv("LITERAL_API_VALUES", "false").lower() == "true"
         )
         """Specifies whether to use literal API values instead of using API calls to get the existing templates."""
