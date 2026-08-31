@@ -20,20 +20,42 @@ class GNS3Connection(APIHandler):
     Object which provides methods regarding the GNS3 API
     """
 
-    def __init__(self, ip: str, port: int, project_name: str) -> None:
+    def __init__(
+        self, ip: str, port: int, project_name: str, incremental: bool = False
+    ) -> None:
         """
         :param ip: GNS3 IP address
         :param port: GNS3 API port
         :param project_name: Name of the GNS3 project to work on
+        :param incremental: if True, an existing project is reused as-is
+            instead of being deleted and recreated, and create_node/
+            connect_nodes skip anything that already exists by name/
+            endpoint instead of creating a duplicate. Never removes a node
+            dropped from the graph - use a full (non-incremental) deploy or
+            destroy for that.
         :raises ValueError: Is thrown when the IPv4 address is not a public, private or loopback address.
         :raises TypeError: Is thrown when the parameters are of the wrong types.
         """
 
         super().__init__(ip, port)
         self.url = f"http://{ip}:{port}"
+        self.incremental = incremental
 
         self.project_name = project_name
         self.project = self._init_project(project_name)
+
+        self._existing_nodes_by_name: dict[str, dict[str, Any]] = {}
+        self._existing_links: list[dict[str, Any]] = []
+        if incremental and self.project is not None and not Settings.IS_DRY_RUN:
+            self._existing_nodes_by_name = {
+                node["name"]: node
+                for node in GNS3Connection.list_project_nodes(
+                    ip, port, self.project["project_id"]
+                )
+            }
+            self._existing_links = GNS3Connection.list_project_links(
+                ip, port, self.project["project_id"]
+            )
 
     @staticmethod
     def get_version(ip: str, port: int) -> dict[str, Any]:
@@ -73,12 +95,27 @@ class GNS3Connection(APIHandler):
         """
         return GNS3Connection.get(f"http://{ip}:{port}/v2/projects/{project_id}/nodes")
 
+    @staticmethod
+    def list_project_links(ip: str, port: int, project_id: str) -> list[dict[str, Any]]:
+        """
+        Lists every link currently in the given project. Purely read-only.
+        :param ip: GNS3 IP address
+        :param port: GNS3 API port
+        :param project_id: the project to list links for
+        :return: list of link dicts, each with a 'nodes' list of
+            {'node_id', 'adapter_number', 'port_number'} for both endpoints
+        :raises TimeoutError: Is thrown when it takes too long to receive a response.
+        """
+        return GNS3Connection.get(f"http://{ip}:{port}/v2/projects/{project_id}/links")
+
     def _init_project(self, name: str) -> dict[str, Any] | None:
         """
-        Create a new GNS3 project. If project already exists, it is deleted first.
-        Under ``Settings.IS_DRY_RUN``, neither deletes nor creates anything -
-        returns the existing project's info read-only (or None if it doesn't
-        exist yet), so dry-run stays genuinely side-effect-free.
+        Create a new GNS3 project. If project already exists, it is deleted
+        first - unless ``self.incremental`` is set, in which case an
+        existing project is reused as-is instead. Under
+        ``Settings.IS_DRY_RUN``, neither deletes nor creates anything -
+        returns the existing project's info read-only (or None if it
+        doesn't exist yet), so dry-run stays genuinely side-effect-free.
         :param name: Name of the GNS3 project.
         :return: Returns the newly generated GNS3 project information. Returns ``None`` if the ``Settings.ONLY_ON_ESXI`` is ``True``.
         :raises TimeoutError: Is thrown when it takes too long to receive a response.
@@ -107,6 +144,18 @@ class GNS3Connection(APIHandler):
                 )
             return project
         # ----------------------------------------------------------------------------------------------------------
+
+        if self.incremental:
+            if project is None:
+                return self._create_new_project(name)
+            Verbosity.volumatic_print(
+                Verbosity.NORMAL, f"GNS3 project {name} already exists, reusing it"
+            )
+            if project.get("status") != "opened":
+                project = self.post(
+                    f"{self.url}/v2/projects/{project['project_id']}/open"
+                )
+            return project
 
         if project is None:
             return self._create_new_project(name)
@@ -195,6 +244,16 @@ class GNS3Connection(APIHandler):
 
         if Settings.ONLY_ON_ESXI:
             return None
+
+        if self.incremental:
+            existing = self._existing_nodes_by_name.get(node.name)
+            if existing is not None:
+                Verbosity.volumatic_print(
+                    Verbosity.NORMAL,
+                    f"Node {node.name} already exists on GNS3, reusing it (incremental)",
+                )
+                node.gns3_node_info = existing
+                return existing
 
         if node.env == Environment.ON_ESXI:
             ports_mapping = self._create_ports_mapping(node)
@@ -332,6 +391,21 @@ class GNS3Connection(APIHandler):
             f"Interface {intf.name} on {intf.parent.name} cannot be associated to any adapter of the {gns3_node_info['name']} template."
         )
 
+    def _link_exists(self, node_id_a: str, node_id_b: str) -> bool:
+        """
+        Checks whether a link already exists between the two given nodes,
+        based on the links collected at construction time (incremental
+        mode only).
+        :param node_id_a: GNS3 node_id of one endpoint
+        :param node_id_b: GNS3 node_id of the other endpoint
+        :return: True if a link between exactly these two nodes already exists
+        """
+        wanted = {node_id_a, node_id_b}
+        return any(
+            {endpoint["node_id"] for endpoint in link["nodes"]} == wanted
+            for link in self._existing_links
+        )
+
     def connect_nodes(
         self, node_1: GenericNode, node_2: GenericNode
     ) -> dict[str, Any] | None:
@@ -354,6 +428,20 @@ class GNS3Connection(APIHandler):
             raise RuntimeError(
                 f"Node {node_1.name} has no internal connection to {node_2.name}"
             )
+
+        gns3_info_1 = node_1.gns3_node_info
+        gns3_info_2 = node_2.gns3_node_info
+
+        if gns3_info_1 is None:
+            raise RuntimeError(f"Node {node_1.name} does not exist on GNS3.")
+        if gns3_info_2 is None:
+            raise RuntimeError(f"Node {node_2.name} does not exist on GNS3.")
+
+        if self.incremental and self._link_exists(
+            gns3_info_1["node_id"], gns3_info_2["node_id"]
+        ):
+            return None
+
         # --------------------------------------------------------------------------------------------------------------
         if Settings.IS_DRY_RUN:
             Verbosity.volumatic_print(
@@ -366,14 +454,6 @@ class GNS3Connection(APIHandler):
             f"Connects {node_1.name}[{intf_1.name}] to {node_2.name}[{intf_2.name}]",
         )
         # --------------------------------------------------------------------------------------------------------------
-
-        gns3_info_1 = node_1.gns3_node_info
-        gns3_info_2 = node_2.gns3_node_info
-
-        if gns3_info_1 is None:
-            raise RuntimeError(f"Node {node_1.name} does not exist on GNS3.")
-        if gns3_info_2 is None:
-            raise RuntimeError(f"Node {node_2.name} does not exist on GNS3.")
 
         adapter_1 = self._get_adapter(gns3_info_1, intf_1)
         adapter_2 = self._get_adapter(gns3_info_2, intf_2)

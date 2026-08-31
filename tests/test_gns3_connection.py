@@ -4,7 +4,7 @@ Tests to validate functionality of src/connections/gns3_connection.py
 
 __license__ = "GNU GPLv3"
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import allure
 
@@ -216,3 +216,129 @@ def gns3_connection_007() -> None:
 
     mock_get.assert_called_once_with("http://10.20.20.231:80/v2/projects/p1/nodes")
     assert result == nodes
+
+
+@allure.title("list_project_links listet die Links eines Projekts")
+@allure.description(
+    "Überprüft, dass list_project_links einen reinen Read-Only-GET an "
+    "/v2/projects/{id}/links sendet"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_008() -> None:
+    links = [{"nodes": [{"node_id": "n1"}, {"node_id": "n2"}]}]
+    with patch.object(GNS3Connection, "get", return_value=links) as mock_get:
+        result = GNS3Connection.list_project_links("10.20.20.231", 80, "p1")
+
+    mock_get.assert_called_once_with("http://10.20.20.231:80/v2/projects/p1/links")
+    assert result == links
+
+
+def _make_incremental_connection(
+    existing_project, existing_nodes, existing_links
+) -> GNS3Connection:
+    """
+    Constructs a real GNS3Connection in incremental mode, with 'get' mocked
+    to serve the given existing project/nodes/links.
+    """
+
+    def fake_get(url: str, *args, **kwargs):
+        if url.endswith("/v2/projects"):
+            return [existing_project] if existing_project else []
+        if url.endswith("/nodes"):
+            return existing_nodes
+        if url.endswith("/links"):
+            return existing_links
+        raise AssertionError(f"unexpected GET {url}")
+
+    with patch.object(GNS3Connection, "get", side_effect=fake_get):
+        return GNS3Connection("10.20.20.231", 80, "lab", incremental=True)
+
+
+@allure.title(
+    "Incremental GNS3Connection reused ein bestehendes Projekt ohne es zu löschen"
+)
+@allure.description(
+    "Überprüft, dass ein im incremental-Modus konstruiertes GNS3Connection "
+    "ein bestehendes, bereits geöffnetes Projekt unverändert übernimmt, "
+    "ohne delete oder post aufzurufen"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_009() -> None:
+    existing_project = {"project_id": "p1", "name": "lab", "status": "opened"}
+    with (
+        patch.object(GNS3Connection, "delete") as mock_delete,
+        patch.object(GNS3Connection, "post") as mock_post,
+    ):
+        conn = _make_incremental_connection(existing_project, [], [])
+
+    mock_delete.assert_not_called()
+    mock_post.assert_not_called()
+    assert conn.project == existing_project
+
+
+@allure.title(
+    "create_node reused einen bereits existierenden GNS3-Node im incremental-Modus"
+)
+@allure.description(
+    "Überprüft, dass create_node im incremental-Modus einen bereits "
+    "existierenden Node (gleicher Name) unverändert zurückgibt, statt "
+    "einen zweiten, doppelten Node anzulegen"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_010() -> None:
+    existing_project = {"project_id": "p1", "name": "lab", "status": "opened"}
+    existing_node = {"node_id": "n1", "name": "R1", "status": "started"}
+    with (
+        patch.object(GNS3Connection, "delete"),
+        patch.object(GNS3Connection, "post") as mock_post,
+    ):
+        conn = _make_incremental_connection(existing_project, [existing_node], [])
+
+    node = MagicMock()
+    node.name = "R1"
+
+    result = conn.create_node(node)
+
+    mock_post.assert_not_called()
+    assert result == existing_node
+    assert node.gns3_node_info == existing_node
+
+
+@allure.title(
+    "connect_nodes überspringt einen bereits bestehenden Link im incremental-Modus"
+)
+@allure.description(
+    "Überprüft, dass connect_nodes im incremental-Modus keinen neuen Link "
+    "anlegt, wenn zwischen den beiden Node-IDs bereits ein Link existiert"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_011() -> None:
+    existing_project = {"project_id": "p1", "name": "lab", "status": "opened"}
+    existing_link = {"nodes": [{"node_id": "n1"}, {"node_id": "n2"}]}
+    with (
+        patch.object(GNS3Connection, "delete"),
+        patch.object(GNS3Connection, "post") as mock_post,
+    ):
+        conn = _make_incremental_connection(existing_project, [], [existing_link])
+
+    node_1 = MagicMock()
+    node_1.name = "R1"
+    node_1.gns3_node_info = {"node_id": "n1"}
+    node_2 = MagicMock()
+    node_2.name = "R2"
+    node_2.gns3_node_info = {"node_id": "n2"}
+    node_1.get_interface.return_value = MagicMock(name="gi0/0")
+    node_2.get_interface.return_value = MagicMock(name="gi0/0")
+
+    result = conn.connect_nodes(node_1, node_2)
+
+    mock_post.assert_not_called()
+    assert result is None

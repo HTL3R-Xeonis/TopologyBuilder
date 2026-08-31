@@ -521,3 +521,85 @@ def esxi_connection_019() -> None:
         {"name": "PG-MGMT", "vlan_id": 0, "vswitch": Settings.ESXI.VIRTUAL_SWITCH},
         {"name": "VM1_ens160", "vlan_id": 2, "vswitch": Settings.ESXI.VIRTUAL_SWITCH},
     ]
+
+
+@allure.title("_add_port_group ist ein No-Op, wenn die Port-Group bereits existiert")
+@allure.description(
+    "Überprüft, dass _add_port_group AddPortGroup nicht aufruft, wenn "
+    "bereits eine Port-Group mit dem VLAN-Namen existiert - Voraussetzung "
+    "dafür, dass ein incremental-Deploy auf denselben Port-Groups erneut "
+    "laufen kann, ohne einen Fehler zu werfen"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_020() -> None:
+    from src.graph.blocks.vlan import VirtualLan
+
+    _reset_settings()
+    conn = _make_esxi_connection()
+
+    existing = MagicMock()
+    existing.spec.name = "VM1_ens160"
+    host_system = MagicMock()
+    host_system.configManager.networkSystem.networkInfo.portgroup = [existing]
+    conn._get_object_by_name = MagicMock(return_value=host_system)
+
+    vlan = VirtualLan("VM1", "ens160")
+    conn._add_port_group(vlan)
+
+    host_system.configManager.networkSystem.AddPortGroup.assert_not_called()
+
+
+@allure.title("_add_port_group erstellt eine fehlende Port-Group")
+@allure.description(
+    "Überprüft, dass _add_port_group AddPortGroup aufruft, wenn noch keine "
+    "Port-Group mit dem VLAN-Namen existiert"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_021() -> None:
+    from src.graph.blocks.vlan import VirtualLan
+
+    _reset_settings()
+    conn = _make_esxi_connection()
+
+    host_system = MagicMock()
+    host_system.configManager.networkSystem.networkInfo.portgroup = []
+    conn._get_object_by_name = MagicMock(return_value=host_system)
+
+    vlan = VirtualLan("VM1", "ens160")
+    conn._add_port_group(vlan)
+
+    host_system.configManager.networkSystem.AddPortGroup.assert_called_once()
+
+
+@allure.title(
+    "deploy_virtual_machine überspringt eine bereits existierende VM im incremental-Modus"
+)
+@allure.description(
+    "Überprüft, dass deploy_virtual_machine im incremental-Modus weder die "
+    "OVA herunterlädt noch importiert, wenn bereits eine VM mit dem "
+    "Node-Namen existiert"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_022() -> None:
+    from src.graph.blocks.generic_node import GenericNode
+
+    _reset_settings()
+    Settings.API.LITERAL_API_VALUES = True
+    conn = _make_esxi_connection()
+    conn.find_vms_matching = MagicMock(return_value=[MagicMock()])
+
+    node = GenericNode("Ubuntu-Server", "VM", "VM1")
+    node.add_interface("ens160")
+
+    with patch(
+        "src.connections.esxi_connection.APIHandler.download_ova"
+    ) as mock_download:
+        conn.deploy_virtual_machine(node, "datastore1", incremental=True)
+
+    mock_download.assert_not_called()

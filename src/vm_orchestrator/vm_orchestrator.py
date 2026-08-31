@@ -67,7 +67,11 @@ class VMOrchestrator:
         self.gns3_vm_ip = gns3_vm_ip
 
     def deploy_graph(
-        self, graph: Graph, gns3_username: str, gns3_password: str | None = None
+        self,
+        graph: Graph,
+        gns3_username: str,
+        gns3_password: str | None = None,
+        incremental: bool = False,
     ) -> None:
         """
         Deploys the graph on the ESXi host and GNS3 VM. The connection between the nodes runs solely between GNS3.
@@ -77,6 +81,18 @@ class VMOrchestrator:
         :param graph: Graph to deploy
         :param gns3_username: Username for the GNS3 VM
         :param gns3_password: Password for the GNS3 VM. Set to  None if no password is set.
+        :param incremental: if True, skips resetting the ESXi vSwitch and
+            reuses an existing GNS3 project instead of deleting and
+            recreating it - only ESXi VMs/GNS3 nodes/links that don't
+            already exist by name/endpoint get created, everything already
+            present is left running untouched. Never removes anything
+            dropped from the graph - use a full (non-incremental) deploy or
+            destroy for that. Note: the GNS3 VM's VLAN subinterfaces are
+            still fully torn down and recreated even in incremental mode,
+            since that script always does a full delete+recreate pass - this
+            briefly interrupts traffic on already-running Cloud-node
+            bridges, unlike the ESXi/GNS3-node-level skipping incremental
+            otherwise provides.
         :return:
 
         :raises TimeoutError: Is thrown when it took too long to receive a response.
@@ -92,17 +108,23 @@ class VMOrchestrator:
             May also be thrown when a portgroup already exists on the ESXi host. May also be thrown when no host-system or network-system was found on the ESXi host.
         """
         self._configure_gns3_interfaces(graph, gns3_username, gns3_password)
-        self.esxi_connection.reset_virtual_switch()
+        if not incremental:
+            self.esxi_connection.reset_virtual_switch()
         self.esxi_connection.initialize_virtual_switch(graph)
 
         gns3_conn = GNS3Connection(
-            self.gns3_vm_ip, Settings.GNS3.PORT, Settings.GNS3.PROJECT_NAME
+            self.gns3_vm_ip,
+            Settings.GNS3.PORT,
+            Settings.GNS3.PROJECT_NAME,
+            incremental=incremental,
         )
 
         for node in graph.nodes.values():
             if node.env == Environment.ON_ESXI:
                 self.esxi_connection.deploy_virtual_machine(
-                    node=node, datastore=Settings.ESXI.DATASTORE
+                    node=node,
+                    datastore=Settings.ESXI.DATASTORE,
+                    incremental=incremental,
                 )
                 gns3_conn.create_node(node)
 

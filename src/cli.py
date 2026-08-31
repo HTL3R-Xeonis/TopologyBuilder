@@ -158,6 +158,17 @@ def deploy(
         help="Only deploys nodes which are in the ESXi environment."
         "Still creates Cloud-nodes on GNS3 to ensure possible connections between the ESXi-VMs.",
     ),
+    incremental: bool = typer.Option(
+        False,
+        "--incremental",
+        "-i",
+        help="Skip resetting the ESXi vSwitch and recreating the GNS3 "
+        "project - only create what's missing by name/endpoint, leaving "
+        "already-running VMs/nodes/links untouched. Never removes nodes "
+        "dropped from the topology file, and won't pick up an existing "
+        "node's image changing while its name stays the same - use a full "
+        "(non-incremental) deploy or destroy for either of those.",
+    ),
 ) -> None:
     """Deploys the nodes from the topology on ESXi and GNS3."""
     _apply_esxi_options(address, esxi_username, esxi_password, gns3_vm_name)
@@ -189,6 +200,7 @@ def deploy(
         graph=graph,
         gns3_username=Settings.GNS3.USERNAME,
         gns3_password=Settings.GNS3.PASSWORD,
+        incremental=incremental,
     )
 
 

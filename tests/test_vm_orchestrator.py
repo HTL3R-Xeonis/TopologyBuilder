@@ -80,3 +80,71 @@ def vm_orchestrator_001() -> None:
     gns3_connection_cls.assert_called_once_with(
         orchestrator.gns3_vm_ip, Settings.GNS3.PORT, "lab"
     )
+
+
+@allure.title("deploy_graph überspringt reset_virtual_switch im incremental-Modus")
+@allure.description(
+    "Überprüft, dass deploy_graph im incremental-Modus "
+    "esxi_connection.reset_virtual_switch nicht aufruft, initialize_virtual_switch "
+    "aber weiterhin, und GNS3Connection sowie deploy_virtual_machine mit "
+    "incremental=True aufgerufen werden"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_002() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+
+    graph = MagicMock()
+    graph.nodes = {}
+
+    with (
+        patch("src.vm_orchestrator.vm_orchestrator.SSHConnection"),
+        patch("src.vm_orchestrator.vm_orchestrator.GNS3VMInterfaceSetup"),
+        patch(
+            "src.vm_orchestrator.vm_orchestrator.GNS3Connection"
+        ) as gns3_connection_cls,
+    ):
+        orchestrator.deploy_graph(graph, "gns3", "gns3pw", incremental=True)
+
+    esxi_connection.reset_virtual_switch.assert_not_called()
+    esxi_connection.initialize_virtual_switch.assert_called_once_with(graph)
+    gns3_connection_cls.assert_called_once_with(
+        orchestrator.gns3_vm_ip,
+        Settings.GNS3.PORT,
+        Settings.GNS3.PROJECT_NAME,
+        incremental=True,
+    )
+
+
+@allure.title("deploy_graph reset das vSwitch im Normalbetrieb")
+@allure.description(
+    "Überprüft, dass deploy_graph ohne incremental "
+    "esxi_connection.reset_virtual_switch aufruft und GNS3Connection mit "
+    "incremental=False konstruiert"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.NORMAL)
+def vm_orchestrator_003() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+
+    graph = MagicMock()
+    graph.nodes = {}
+
+    with (
+        patch("src.vm_orchestrator.vm_orchestrator.SSHConnection"),
+        patch("src.vm_orchestrator.vm_orchestrator.GNS3VMInterfaceSetup"),
+        patch(
+            "src.vm_orchestrator.vm_orchestrator.GNS3Connection"
+        ) as gns3_connection_cls,
+    ):
+        orchestrator.deploy_graph(graph, "gns3", "gns3pw")
+
+    esxi_connection.reset_virtual_switch.assert_called_once()
+    gns3_connection_cls.assert_called_once_with(
+        orchestrator.gns3_vm_ip,
+        Settings.GNS3.PORT,
+        Settings.GNS3.PROJECT_NAME,
+        incremental=False,
+    )

@@ -219,12 +219,16 @@ class ESXiConnection(GenericConnection):
 
     def _add_port_group(self, vlan: VirtualLan) -> None:
         """
-        Creates a port groups on the virtual switch based on the given ``vlan``.
+        Ensures a port group for the given ``vlan`` exists on the virtual
+        switch, creating it if it's missing. A no-op if a port group with
+        that name already exists - AddPortGroup itself has no "create if
+        missing" mode, so the existing-names check happens here instead,
+        which is what lets a redeployed/incremental topology reuse port
+        groups from an earlier deploy instead of erroring out.
         The policies are inherited from the virtual Switch on ESXi.
         :param vlan: VLAN Object of the ``graph.blocks.Interface`` to create the port group
         :return:
-        :raises RuntimeError: Is thrown when a portgroup already exists  on the ESXi host.
-        May also be thrown when no host-system or network-system was found on the ESXi host.
+        :raises RuntimeError: Is thrown when no host-system or network-system was found on the ESXi host.
         """
         if Settings.ONLY_ON_GNS3:
             return
@@ -234,14 +238,7 @@ class ESXiConnection(GenericConnection):
                 Verbosity.NORMAL, f"Would add portgroup {vlan.name}"
             )
             return
-        Verbosity.volumatic_print(Verbosity.NORMAL, f"Adds portgroup {vlan.name}")
         # ----------------------------------------------------------------------------------------------------------
-
-        spec = vim.host.PortGroup.Specification()
-        spec.name = vlan.name
-        spec.vswitchName = Settings.ESXI.VIRTUAL_SWITCH
-        spec.vlanId = vlan.id
-        spec.policy = vim.host.NetworkPolicy()
 
         host_system = self._get_object_by_name(vim.HostSystem)
         if host_system is None:
@@ -251,11 +248,22 @@ class ESXiConnection(GenericConnection):
         if network_system is None:
             logger.error(msg := "No network system found on ESXi.")
             raise RuntimeError(msg)
+
+        existing_names = {
+            portgroup.spec.name for portgroup in network_system.networkInfo.portgroup
+        }
+        if vlan.name in existing_names:
+            return
+
+        Verbosity.volumatic_print(Verbosity.NORMAL, f"Adds portgroup {vlan.name}")
+        spec = vim.host.PortGroup.Specification()
+        spec.name = vlan.name
+        spec.vswitchName = Settings.ESXI.VIRTUAL_SWITCH
+        spec.vlanId = vlan.id
+        spec.policy = vim.host.NetworkPolicy()
+
         try:
             network_system.AddPortGroup(spec)
-        except vim.fault.AlreadyExists as exc:
-            logger.error(msg := f"Port group {vlan.name} already exists on ESXi.")
-            raise RuntimeError(msg) from exc
         except Exception as exc:
             logger.error(
                 msg := f"Something went wrong while adding port group {vlan.name}."
@@ -442,7 +450,9 @@ class ESXiConnection(GenericConnection):
 
         network_system.UpdatePortGroup(pgName=port_group_name, portgrp=spec)
 
-    def deploy_virtual_machine(self, node: GenericNode, datastore: str) -> None:
+    def deploy_virtual_machine(
+        self, node: GenericNode, datastore: str, incremental: bool = False
+    ) -> None:
         """
         Deploys the virtual machine on the ESXi host: downloads the OVA
         matching the node's image from the NFS template API and imports it
@@ -451,12 +461,21 @@ class ESXiConnection(GenericConnection):
         initialize_virtual_switch already set up, then powers it on.
         :param node: Node which represents the virtual machine to be deployed.
         :param datastore: Name of the datastore, to store the virtual machine on.
+        :param incremental: if True, skips (re-)deploying a node whose VM
+            already exists (matched by name) instead of importing a second,
+            auto-renamed duplicate.
         :return:
         :raises TimeoutError: Is thrown when it took too long to receive a response.
         :raises RuntimeError: Is thrown when the OVA download or import fails.
         :raises ValueError: Is thrown when a vlan, which should exist, does not exist on a corresponding interface.
         """
         if Settings.ONLY_ON_GNS3:
+            return
+        if incremental and self.find_vms_matching(node.name):
+            Verbosity.volumatic_print(
+                Verbosity.NORMAL,
+                f"ESXi VM {node.name} already exists, skipping (incremental)",
+            )
             return
         # --------------------------------------------------------------------------------------------------------------
         if Settings.IS_DRY_RUN:

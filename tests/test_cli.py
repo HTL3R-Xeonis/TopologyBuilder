@@ -67,6 +67,45 @@ def cli_001() -> None:
         orchestrator_cls.return_value.deploy_graph.call_args.kwargs["graph"]
         is graph_cls.return_value
     )
+    assert (
+        orchestrator_cls.return_value.deploy_graph.call_args.kwargs["incremental"]
+        is False
+    )
+
+
+@allure.title("deploy-Befehl mit --incremental leitet incremental=True weiter")
+@allure.description(
+    "Überprüft, dass der deploy-Befehl mit --incremental die "
+    "deploy_graph-Methode mit incremental=True aufruft"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.CRITICAL)
+def cli_010() -> None:
+    with (
+        patch("src.cli.TopologyFileValidation"),
+        patch("src.cli.Graph"),
+        patch("src.cli.VMOrchestrator") as orchestrator_cls,
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "deploy",
+                "--address",
+                "10.20.20.202",
+                "--esxi_username",
+                "root",
+                "--esxi_password",
+                "pw",
+                "--incremental",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert (
+        orchestrator_cls.return_value.deploy_graph.call_args.kwargs["incremental"]
+        is True
+    )
 
 
 @allure.title(
