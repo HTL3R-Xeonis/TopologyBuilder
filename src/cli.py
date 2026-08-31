@@ -3,6 +3,7 @@ from pathlib import Path
 import typer
 
 from src.settings import Settings, Verbosity
+from src.connections.api_handler import APIHandler
 from src.connections.esxi_connection import ESXiConnection
 from src.connections.gns3_connection import GNS3Connection
 from src.graph import Graph
@@ -264,3 +265,66 @@ def status(
             f"  Project '{project['name']}' ({project.get('status', '?')}): "
             f"{len(nodes)} node(s), {started} started"
         )
+
+
+@app.command()
+def templates() -> None:
+    """
+    List available ESXi and GNS3 template names - valid values for a
+    node's 'image' field in the topology file.
+    """
+    esxi_templates = sorted(APIHandler.get_esxi_template_names())
+    gns3_templates = sorted(APIHandler.get_gns3_template_names())
+
+    typer.echo(f"ESXi templates ({len(esxi_templates)}):")
+    for name in esxi_templates:
+        typer.echo(f"  - {name}")
+
+    typer.echo(f"GNS3 templates ({len(gns3_templates)}):")
+    for name in gns3_templates:
+        typer.echo(f"  - {name}")
+
+
+@app.command()
+def portgroups(
+    address: str = ESXI_ADDRESS_OPTION,
+    esxi_username: str = ESXI_USERNAME_OPTION,
+    esxi_password: str = ESXI_PASSWORD_OPTION,
+) -> None:
+    """List the port groups configured on the ESXi host's vSwitch."""
+    _apply_esxi_options(address, esxi_username, esxi_password, None)
+
+    esxi_connection = ESXiConnection(
+        Settings.ESXI.IP,
+        Settings.ESXI.PORT,
+        Settings.ESXI.USERNAME,
+        Settings.ESXI.PASSWORD,
+    )
+    for portgroup in esxi_connection.list_port_groups():
+        typer.echo(
+            f"{portgroup['name']} (VLAN {portgroup['vlan_id']}) on {portgroup['vswitch']}"
+        )
+
+
+@app.command()
+def logs(
+    lines: int = typer.Option(
+        50,
+        "--lines",
+        "-n",
+        min=1,
+        help="Number of most recent log lines to show.",
+    ),
+) -> None:
+    """Show the most recent entries from the log file."""
+    log_file_path = Path(Settings.LOG_FILE_PATH)
+    if not log_file_path.exists():
+        typer.secho(
+            f"No log file found at {log_file_path}.", fg=typer.colors.RED, err=True
+        )
+        raise typer.Exit(code=1)
+
+    with open(log_file_path, "r") as file:
+        recent_lines = file.readlines()[-lines:]
+    for line in recent_lines:
+        typer.echo(line, nl=False)

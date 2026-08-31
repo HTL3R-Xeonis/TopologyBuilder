@@ -277,6 +277,21 @@ class ESXiConnection(GenericConnection):
             if port_group.key in virtual_switch.portgroup
         ]
 
+    def list_port_groups(self) -> list[dict[str, str | int]]:
+        """
+        Lists the port groups configured on the ESXi host's vSwitch.
+        :return: list of {"name", "vlan_id", "vswitch"} dicts
+        :raises ValueError: Is thrown when no virtual Switch was found.
+        """
+        return [
+            {
+                "name": port_group.spec.name,
+                "vlan_id": port_group.spec.vlanId,
+                "vswitch": Settings.ESXI.VIRTUAL_SWITCH,
+            }
+            for port_group in self._get_port_groups()
+        ]
+
     def _remove_port_group(self, port_group_name: str) -> None:
         """
         Removes the port group, on the virtual switch.

@@ -30,7 +30,9 @@ def main():
         "<level>{message}</level>"
     )
 
-    logger.add("./logs/app.log", format=file_format, level="WARNING", rotation="10MB")
+    logger.add(
+        Settings.LOG_FILE_PATH, format=file_format, level="WARNING", rotation="10MB"
+    )
     logger.add(sys.stdout, format=print_format)
 
     try:

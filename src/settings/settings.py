@@ -22,6 +22,8 @@ class Settings:
     """The verbosity level of the program."""
     TOPOLOGY_FILE: str = "./topology_example.yaml"
     """Path to the YAML file which represents the topology."""
+    LOG_FILE_PATH: str = "./logs/app.log"
+    """Path to the log file main() configures loguru to write to."""
     IS_DRY_RUN: bool = False
     """If True, only prints what would happen. May still execute API requests."""
     ONLY_ON_GNS3: bool = False

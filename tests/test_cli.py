@@ -211,3 +211,104 @@ def cli_005() -> None:
         )
 
     assert result.exit_code == 1
+
+
+@allure.title("templates-Befehl listet ESXi- und GNS3-Template-Namen")
+@allure.description(
+    "Überprüft, dass der templates-Befehl beide Template-Listen sortiert ausgibt"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.NORMAL)
+def cli_006() -> None:
+    with patch("src.cli.APIHandler") as api_handler_cls:
+        api_handler_cls.get_esxi_template_names.return_value = {"Ubuntu-Server"}
+        api_handler_cls.get_gns3_template_names.return_value = {"VPCS", "Cloud"}
+
+        result = runner.invoke(app, ["templates"])
+
+    assert result.exit_code == 0, result.output
+    assert "ESXi templates (1):" in result.output
+    assert "Ubuntu-Server" in result.output
+    assert "GNS3 templates (2):" in result.output
+    assert "Cloud" in result.output
+    assert "VPCS" in result.output
+
+
+@allure.title("portgroups-Befehl listet die Port-Groups des ESXi-Hosts")
+@allure.description(
+    "Überprüft, dass der portgroups-Befehl jede Port-Group mit Name, "
+    "VLAN-ID und vSwitch ausgibt"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.NORMAL)
+def cli_007() -> None:
+    with patch("src.cli.ESXiConnection") as esxi_cls:
+        esxi_cls.return_value.list_port_groups.return_value = [
+            {"name": "PG-MGMT", "vlan_id": 0, "vswitch": "internal_network"}
+        ]
+
+        result = runner.invoke(
+            app,
+            [
+                "portgroups",
+                "--address",
+                "10.20.20.202",
+                "--esxi_username",
+                "root",
+                "--esxi_password",
+                "pw",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "PG-MGMT (VLAN 0) on internal_network" in result.output
+
+
+@allure.title("logs-Befehl zeigt die letzten N Zeilen der Log-Datei")
+@allure.description(
+    "Überprüft, dass der logs-Befehl nur die letzten --lines Zeilen der "
+    "Log-Datei ausgibt"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.CRITICAL)
+def cli_008(tmp_path) -> None:
+    from src.settings import Settings
+
+    log_file = tmp_path / "app.log"
+    log_file.write_text("line1\nline2\nline3\n")
+
+    original_path = Settings.LOG_FILE_PATH
+    Settings.LOG_FILE_PATH = str(log_file)
+    try:
+        result = runner.invoke(app, ["logs", "--lines", "2"])
+    finally:
+        Settings.LOG_FILE_PATH = original_path
+
+    assert result.exit_code == 0, result.output
+    assert "line1" not in result.output
+    assert "line2" in result.output
+    assert "line3" in result.output
+
+
+@allure.title("logs-Befehl meldet Fehler, wenn keine Log-Datei existiert")
+@allure.description(
+    "Überprüft, dass der logs-Befehl mit Exit-Code 1 abbricht, wenn die "
+    "konfigurierte Log-Datei nicht existiert"
+)
+@allure.tag("negativ-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.NORMAL)
+def cli_009(tmp_path) -> None:
+    from src.settings import Settings
+
+    original_path = Settings.LOG_FILE_PATH
+    Settings.LOG_FILE_PATH = str(tmp_path / "does-not-exist.log")
+    try:
+        result = runner.invoke(app, ["logs"])
+    finally:
+        Settings.LOG_FILE_PATH = original_path
+
+    assert result.exit_code == 1

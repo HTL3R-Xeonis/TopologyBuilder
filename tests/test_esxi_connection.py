@@ -493,3 +493,31 @@ def esxi_connection_018() -> None:
     conn.delete_port_group("VM1_ens160")
 
     host_system.configManager.networkSystem.RemovePortGroup.assert_not_called()
+
+
+@allure.title("list_port_groups gibt Name, VLAN-ID und vSwitch jeder Port-Group zurück")
+@allure.description(
+    "Überprüft, dass list_port_groups für jede Port-Group auf dem "
+    "konfigurierten vSwitch ein {'name', 'vlan_id', 'vswitch'} Dict "
+    "zurückgibt"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def esxi_connection_019() -> None:
+    conn = _make_esxi_connection()
+
+    pg1 = MagicMock()
+    pg1.spec.name = "PG-MGMT"
+    pg1.spec.vlanId = 0
+    pg2 = MagicMock()
+    pg2.spec.name = "VM1_ens160"
+    pg2.spec.vlanId = 2
+    conn._get_port_groups = MagicMock(return_value=[pg1, pg2])
+
+    result = conn.list_port_groups()
+
+    assert result == [
+        {"name": "PG-MGMT", "vlan_id": 0, "vswitch": Settings.ESXI.VIRTUAL_SWITCH},
+        {"name": "VM1_ens160", "vlan_id": 2, "vswitch": Settings.ESXI.VIRTUAL_SWITCH},
+    ]
