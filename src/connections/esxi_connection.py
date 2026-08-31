@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import atexit
+import re
 import ssl
 import tempfile
 import time
@@ -161,6 +162,26 @@ class ESXiConnection(GenericConnection):
         :return: Returns Virtual Machine if found, else None.
         """
         return self._get_object_by_name(vim.VirtualMachine, vm_name)
+
+    def find_vms_matching(self, name: str) -> list[vim.ManagedEntity]:
+        """
+        Finds every VM whose name exactly matches ``name``, or looks like an
+        auto-renamed duplicate of it (ESXi appends e.g. '_1' or ' (1)' when
+        an import collides with an existing VM's name). Used to clean up
+        VMs left over from an earlier deploy of a topology node before
+        redeploying or destroying it, so redeploys don't accumulate
+        duplicates.
+        :param name: the node name to match against
+        :return: list of matching VMs
+        """
+        pattern = re.compile(rf"^{re.escape(name)}([ _]\(?\d+\)?)?$")
+        view = self.view_manager.CreateContainerView(
+            self.content.rootFolder, [vim.VirtualMachine], True
+        )
+        try:
+            return [vm for vm in view.view if pattern.match(vm.name)]
+        finally:
+            view.Destroy()
 
     def get_vm_ip_address(self, vm_name: str) -> Optional[str]:
         """
@@ -507,3 +528,59 @@ class ESXiConnection(GenericConnection):
         """
         if vm.runtime.powerState != vim.VirtualMachine.PowerState.poweredOn:
             self._wait_for_task(vm.PowerOnVM_Task())
+
+    def power_off_vm(self, vm: vim.VirtualMachine) -> None:
+        """
+        Powers off the given VM, if it isn't already.
+        :param vm: the VM to power off
+        :return:
+        """
+        if vm.runtime.powerState != vim.VirtualMachine.PowerState.poweredOff:
+            self._wait_for_task(vm.PowerOffVM_Task())
+
+    def delete_vm(self, vm: vim.VirtualMachine) -> None:
+        """
+        Powers off (if needed) and permanently deletes the given VM. Used
+        to clean up a VM left over from an earlier deploy, e.g. before
+        redeploying or destroying a topology.
+        :param vm: the VM to delete
+        :return:
+        """
+        if Settings.ONLY_ON_GNS3:
+            return
+        # --------------------------------------------------------------------------------------------------------------
+        if Settings.IS_DRY_RUN:
+            Verbosity.volumatic_print(Verbosity.NORMAL, f"Would delete VM {vm.name}")
+            return
+        Verbosity.volumatic_print(Verbosity.NORMAL, f"Deletes VM {vm.name}")
+        # --------------------------------------------------------------------------------------------------------------
+        self.power_off_vm(vm)
+        self._wait_for_task(vm.Destroy_Task())
+
+    def delete_port_group(self, name: str) -> None:
+        """
+        Deletes the named port group if it exists. Requires no VM to still
+        be using the port group.
+        :param name: name of the port group to delete
+        :return:
+        """
+        if Settings.ONLY_ON_GNS3:
+            return
+        # --------------------------------------------------------------------------------------------------------------
+        if Settings.IS_DRY_RUN:
+            Verbosity.volumatic_print(
+                Verbosity.NORMAL, f"Would delete portgroup {name}"
+            )
+            return
+        # --------------------------------------------------------------------------------------------------------------
+
+        host_system = self._get_object_by_name(vim.HostSystem)
+        network_system = host_system.configManager.networkSystem
+        existing_names = {
+            portgroup.spec.name for portgroup in network_system.networkInfo.portgroup
+        }
+        if name not in existing_names:
+            return
+
+        Verbosity.volumatic_print(Verbosity.NORMAL, f"Deletes portgroup {name}")
+        network_system.RemovePortGroup(pgName=name)

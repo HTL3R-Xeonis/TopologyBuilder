@@ -365,3 +365,131 @@ def esxi_connection_013() -> None:
         _reset_settings()
 
     mock_download.assert_not_called()
+
+
+@allure.title(
+    "find_vms_matching findet exakte Treffer und automatisch umbenannte Duplikate"
+)
+@allure.description(
+    "Überprüft, dass find_vms_matching sowohl die exakt benannte VM als "
+    "auch von ESXi bei Namenskollisionen automatisch umbenannte Duplikate "
+    "(z.B. 'PC4_1', 'PC4 (1)') findet, aber keine unverwandten VMs mit "
+    "ähnlichem Namen wie 'PC40' oder 'MyPC4'"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_014() -> None:
+    conn = _make_esxi_connection()
+    conn.content = MagicMock()
+
+    vms = []
+    for name in ["PC4", "PC4_1", "PC4 (1)", "PC40", "MyPC4", "PC5"]:
+        vm = MagicMock()
+        vm.name = name
+        vms.append(vm)
+
+    container_view = MagicMock()
+    container_view.view = vms
+    conn.view_manager.CreateContainerView.return_value = container_view
+
+    matches = {vm.name for vm in conn.find_vms_matching("PC4")}
+    assert matches == {"PC4", "PC4_1", "PC4 (1)"}
+
+
+@allure.title("delete_vm fährt eine laufende VM herunter und zerstört sie danach")
+@allure.description(
+    "Überprüft, dass delete_vm eine laufende VM zuerst über PowerOffVM_Task "
+    "herunterfährt und danach über Destroy_Task entfernt"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_015() -> None:
+    from pyVmomi import vim
+
+    _reset_settings()
+    conn = _make_esxi_connection()
+
+    vm = MagicMock()
+    vm.name = "PC4"
+    vm.runtime.powerState = vim.VirtualMachine.PowerState.poweredOn
+    task = MagicMock()
+    task.info.state = vim.TaskInfo.State.success
+    vm.PowerOffVM_Task.return_value = task
+    vm.Destroy_Task.return_value = task
+
+    conn.delete_vm(vm)
+
+    vm.PowerOffVM_Task.assert_called_once()
+    vm.Destroy_Task.assert_called_once()
+
+
+@allure.title("delete_vm überspringt alles im Dry-Run-Modus")
+@allure.description(
+    "Überprüft, dass delete_vm im Dry-Run-Modus weder PowerOffVM_Task noch "
+    "Destroy_Task aufruft"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def esxi_connection_016() -> None:
+    _reset_settings()
+    Settings.IS_DRY_RUN = True
+    conn = _make_esxi_connection()
+    vm = MagicMock()
+    vm.name = "PC4"
+
+    try:
+        conn.delete_vm(vm)
+    finally:
+        _reset_settings()
+
+    vm.PowerOffVM_Task.assert_not_called()
+    vm.Destroy_Task.assert_not_called()
+
+
+@allure.title("delete_port_group löscht eine vorhandene Port-Group")
+@allure.description(
+    "Überprüft, dass delete_port_group eine vorhandene Port-Group über "
+    "RemovePortGroup entfernt"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_017() -> None:
+    _reset_settings()
+    conn = _make_esxi_connection()
+
+    existing = MagicMock()
+    existing.spec.name = "VM1_ens160"
+    host_system = MagicMock()
+    host_system.configManager.networkSystem.networkInfo.portgroup = [existing]
+    conn._get_object_by_name = MagicMock(return_value=host_system)
+
+    conn.delete_port_group("VM1_ens160")
+
+    host_system.configManager.networkSystem.RemovePortGroup.assert_called_once_with(
+        pgName="VM1_ens160"
+    )
+
+
+@allure.title("delete_port_group ist ein No-Op, wenn die Port-Group nicht existiert")
+@allure.description(
+    "Überprüft, dass delete_port_group keine Löschanfrage sendet, wenn die "
+    "Port-Group nicht existiert"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def esxi_connection_018() -> None:
+    _reset_settings()
+    conn = _make_esxi_connection()
+
+    host_system = MagicMock()
+    host_system.configManager.networkSystem.networkInfo.portgroup = []
+    conn._get_object_by_name = MagicMock(return_value=host_system)
+
+    conn.delete_port_group("VM1_ens160")
+
+    host_system.configManager.networkSystem.RemovePortGroup.assert_not_called()

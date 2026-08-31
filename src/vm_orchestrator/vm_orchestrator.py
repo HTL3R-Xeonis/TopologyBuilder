@@ -113,6 +113,39 @@ class VMOrchestrator:
 
         gns3_conn.start_all_nodes()
 
+    def delete_stale_esxi_resources(self, graph: Graph) -> None:
+        """
+        Deletes VMs and port groups left over from an earlier deploy of the
+        graph's ESXi-hosted nodes, so redeploying doesn't accumulate
+        duplicate/renamed VMs or leave a port group behind under the same
+        name but a stale VLAN ID from a previous topology layout.
+        :param graph: Graph whose ESXi-hosted nodes' stale resources to delete
+        :return:
+        """
+        for node in graph.nodes.values():
+            if node.env != Environment.ON_ESXI:
+                continue
+
+            for vm in self.esxi_connection.find_vms_matching(node.name):
+                self.esxi_connection.delete_vm(vm)
+
+            for interface in node.interfaces.values():
+                if interface.vlan is not None:
+                    self.esxi_connection.delete_port_group(interface.vlan.name)
+
+    def destroy_graph(self, graph: Graph, project_name: str) -> None:
+        """
+        Tears down a previously deployed topology: deletes its ESXi-hosted
+        VMs/port groups, and its GNS3 project's nodes (GNS3Connection's own
+        constructor already deletes and recreates an existing project by
+        name, which is exactly what's needed here too).
+        :param graph: Graph whose deployed resources to tear down
+        :param project_name: name of the GNS3 project to clear
+        :return:
+        """
+        self.delete_stale_esxi_resources(graph)
+        GNS3Connection(self.gns3_vm_ip, Settings.GNS3.PORT, project_name)
+
     @staticmethod
     def _partially_link_gns3_nodes(gns3_connection: GNS3Connection, node) -> None:
         """

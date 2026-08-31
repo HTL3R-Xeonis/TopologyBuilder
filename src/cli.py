@@ -13,13 +13,54 @@ app = typer.Typer(
     help="Build and deploy network topologies to GNS3/ESXi from a YAML config file.",
     add_completion=False,
 )
-connection_app = typer.Typer()
 
-app.add_typer(
-    connection_app,
-    name="connect",
-    help="Connects to the ESXi server for further options and commands.",
+ESXI_ADDRESS_OPTION = typer.Option(
+    None, "--address", "-a", help="The IP address of the ESXi server."
 )
+ESXI_USERNAME_OPTION = typer.Option(
+    None, "--esxi_username", help="A username of the ESXi server."
+)
+ESXI_PASSWORD_OPTION = typer.Option(
+    None, "--esxi_password", help="The password for the ESXi user."
+)
+GNS3_VM_NAME_OPTION = typer.Option(
+    None, "--gns3_vm_name", "-n", help="The name of the GNS3 VM on the ESXi server."
+)
+
+
+def _apply_esxi_options(
+    address: str | None,
+    esxi_username: str | None,
+    esxi_password: str | None,
+    gns3_vm_name: str | None,
+) -> None:
+    """
+    Applies the given ESXi/GNS3-VM connection options to Settings, leaving
+    any not given at their current value.
+    :return:
+    """
+    if address is not None:
+        Settings.ESXI.IP = address
+    if esxi_username is not None:
+        Settings.ESXI.USERNAME = esxi_username
+    if esxi_password is not None:
+        Settings.ESXI.PASSWORD = esxi_password
+    if gns3_vm_name is not None:
+        Settings.ESXI.GNS3_VM_NAME = gns3_vm_name
+
+
+def _make_orchestrator() -> VMOrchestrator:
+    """
+    Builds a VMOrchestrator connected according to the current ESXi settings.
+    :return:
+    """
+    return VMOrchestrator(
+        esxi_host=Settings.ESXI.IP,
+        esxi_port=Settings.ESXI.PORT,
+        esxi_username=Settings.ESXI.USERNAME,
+        esxi_password=Settings.ESXI.PASSWORD,
+        gns3_vm_name=Settings.ESXI.GNS3_VM_NAME,
+    )
 
 
 @app.callback()
@@ -86,36 +127,12 @@ def visualize(
     graph.visualize()
 
 
-@connection_app.callback()
-def connection_main(
-    address: str = typer.Option(
-        None, "--address", "-a", help="The IP address of the ESXi server."
-    ),
-    esxi_username: str = typer.Option(
-        None, "--esxi_username", "-u", help="A username of the ESXi server."
-    ),
-    esxi_password: str = typer.Option(
-        None, "--esxi_password", "-p", help="The password for the ESXi user."
-    ),
-    gns3_vm_name: str = typer.Option(
-        None,
-        "--gns3_vm_name",
-        "-n",
-        help="The name of the GNS3 VM on the ESXi server.",
-    ),
-):
-    if address is not None:
-        Settings.ESXI.IP = address
-    if esxi_username is not None:
-        Settings.ESXI.USERNAME = esxi_username
-    if esxi_password is not None:
-        Settings.ESXI.PASSWORD = esxi_password
-    if gns3_vm_name is not None:
-        Settings.ESXI.GNS3_VM_NAME = gns3_vm_name
-
-
-@connection_app.command()
+@app.command()
 def deploy(
+    address: str = ESXI_ADDRESS_OPTION,
+    esxi_username: str = ESXI_USERNAME_OPTION,
+    esxi_password: str = ESXI_PASSWORD_OPTION,
+    gns3_vm_name: str = GNS3_VM_NAME_OPTION,
     gns3_username: str = typer.Option(
         None, "--gns3_username", "-u", help="A username of the GNS3 server."
     ),
@@ -138,8 +155,10 @@ def deploy(
         help="Only deploys nodes which are in the ESXi environment."
         "Still creates Cloud-nodes on GNS3 to ensure possible connections between the ESXi-VMs.",
     ),
-):
+) -> None:
     """Deploys the nodes from the topology on ESXi and GNS3."""
+    _apply_esxi_options(address, esxi_username, esxi_password, gns3_vm_name)
+
     if only_on_gns3:
         Settings.ONLY_ON_GNS3 = only_on_gns3
     if only_on_esxi:
@@ -161,16 +180,33 @@ def deploy(
 
     graph = Graph(validator.nodes, validator.edges)
 
-    orchestrator = VMOrchestrator(
-        esxi_host=Settings.ESXI.IP,
-        esxi_port=Settings.ESXI.PORT,
-        esxi_username=Settings.ESXI.USERNAME,
-        esxi_password=Settings.ESXI.PASSWORD,
-        gns3_vm_name=Settings.ESXI.GNS3_VM_NAME,
-    )
+    orchestrator = _make_orchestrator()
 
     orchestrator.deploy_graph(
         graph=graph,
         gns3_username=Settings.GNS3.USERNAME,
         gns3_password=Settings.GNS3.PASSWORD,
     )
+
+
+@app.command()
+def destroy(
+    address: str = ESXI_ADDRESS_OPTION,
+    esxi_username: str = ESXI_USERNAME_OPTION,
+    esxi_password: str = ESXI_PASSWORD_OPTION,
+    gns3_vm_name: str = GNS3_VM_NAME_OPTION,
+) -> None:
+    """
+    Tears down a previously deployed topology: deletes its GNS3 project's
+    nodes and its ESXi-hosted VMs/port groups.
+    """
+    _apply_esxi_options(address, esxi_username, esxi_password, gns3_vm_name)
+
+    validator = TopologyFileValidation(Settings.TOPOLOGY_FILE)
+    validator.validate_file()
+
+    graph = Graph(validator.nodes, validator.edges)
+
+    orchestrator = _make_orchestrator()
+    orchestrator.destroy_graph(graph, Settings.GNS3.PROJECT_NAME)
+    typer.secho("Destroy complete.", fg=typer.colors.GREEN)
