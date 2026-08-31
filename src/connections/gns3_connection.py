@@ -35,6 +35,44 @@ class GNS3Connection(APIHandler):
         self.project_name = project_name
         self.project = self._init_project(project_name)
 
+    @staticmethod
+    def get_version(ip: str, port: int) -> dict[str, Any]:
+        """
+        Returns the GNS3 server's own version/edition info. Purely
+        read-only, side-effect-free reachability check - unlike
+        constructing a GNS3Connection, this never touches a project.
+        :param ip: GNS3 IP address
+        :param port: GNS3 API port
+        :return: dict with at least a 'version' key
+        :raises TimeoutError: Is thrown when it takes too long to receive a response.
+        """
+        return GNS3Connection.get(f"http://{ip}:{port}/v2/version")
+
+    @staticmethod
+    def list_all_projects(ip: str, port: int) -> list[dict[str, Any]]:
+        """
+        Lists every project on the given GNS3 server, open or not. Purely
+        read-only - unlike constructing a GNS3Connection for one named
+        project, this never creates or deletes anything.
+        :param ip: GNS3 IP address
+        :param port: GNS3 API port
+        :return: list of project dicts, each with at least 'project_id' and 'name'
+        :raises TimeoutError: Is thrown when it takes too long to receive a response.
+        """
+        return GNS3Connection.get(f"http://{ip}:{port}/v2/projects")
+
+    @staticmethod
+    def list_project_nodes(ip: str, port: int, project_id: str) -> list[dict[str, Any]]:
+        """
+        Lists every node currently in the given project. Purely read-only.
+        :param ip: GNS3 IP address
+        :param port: GNS3 API port
+        :param project_id: the project to list nodes for
+        :return: list of node dicts, each with at least 'node_id', 'name', and 'status'
+        :raises TimeoutError: Is thrown when it takes too long to receive a response.
+        """
+        return GNS3Connection.get(f"http://{ip}:{port}/v2/projects/{project_id}/nodes")
+
     def _init_project(self, name: str) -> dict[str, Any] | None:
         """
         Create a new GNS3 project. If project already exists, it is deleted first.

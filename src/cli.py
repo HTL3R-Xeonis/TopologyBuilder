@@ -3,6 +3,8 @@ from pathlib import Path
 import typer
 
 from src.settings import Settings, Verbosity
+from src.connections.esxi_connection import ESXiConnection
+from src.connections.gns3_connection import GNS3Connection
 from src.graph import Graph
 from src.topology_file_validation import TopologyFileValidation
 from src.vm_orchestrator.vm_orchestrator import VMOrchestrator
@@ -210,3 +212,55 @@ def destroy(
     orchestrator = _make_orchestrator()
     orchestrator.destroy_graph(graph, Settings.GNS3.PROJECT_NAME)
     typer.secho("Destroy complete.", fg=typer.colors.GREEN)
+
+
+@app.command()
+def status(
+    address: str = ESXI_ADDRESS_OPTION,
+    esxi_username: str = ESXI_USERNAME_OPTION,
+    esxi_password: str = ESXI_PASSWORD_OPTION,
+    gns3_vm_name: str = GNS3_VM_NAME_OPTION,
+) -> None:
+    """
+    Checks connectivity to the ESXi host and GNS3 VM, and lists GNS3
+    projects with each one's node/started counts. No topology file needed.
+    """
+    _apply_esxi_options(address, esxi_username, esxi_password, gns3_vm_name)
+
+    esxi_connection = ESXiConnection(
+        Settings.ESXI.IP,
+        Settings.ESXI.PORT,
+        Settings.ESXI.USERNAME,
+        Settings.ESXI.PASSWORD,
+    )
+    typer.echo(f"ESXi host {Settings.ESXI.IP}: reachable")
+
+    gns3_vm_ip = esxi_connection.get_vm_ip_address(Settings.ESXI.GNS3_VM_NAME)
+    if gns3_vm_ip is None:
+        typer.secho(
+            f"GNS3 VM '{Settings.ESXI.GNS3_VM_NAME}': not found or no IP reported yet",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    version = GNS3Connection.get_version(gns3_vm_ip, Settings.GNS3.PORT)
+    typer.echo(
+        f"GNS3 VM '{Settings.ESXI.GNS3_VM_NAME}' at {gns3_vm_ip}: reachable "
+        f"(GNS3 {version.get('version', '?')})"
+    )
+
+    projects = GNS3Connection.list_all_projects(gns3_vm_ip, Settings.GNS3.PORT)
+    if not projects:
+        typer.echo("No GNS3 projects.")
+        return
+
+    for project in projects:
+        nodes = GNS3Connection.list_project_nodes(
+            gns3_vm_ip, Settings.GNS3.PORT, project["project_id"]
+        )
+        started = sum(1 for node in nodes if node.get("status") == "started")
+        typer.echo(
+            f"  Project '{project['name']}' ({project.get('status', '?')}): "
+            f"{len(nodes)} node(s), {started} started"
+        )

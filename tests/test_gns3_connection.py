@@ -163,3 +163,56 @@ def gns3_connection_004() -> None:
         _reset_settings()
 
     mock_get.assert_not_called()
+
+
+@allure.title("get_version fragt die Versions-Info ohne Projekt-Kontext ab")
+@allure.description(
+    "Überprüft, dass get_version einen reinen Read-Only-GET an /v2/version "
+    "sendet, ohne ein GNS3Connection-Objekt (und damit ohne dessen "
+    "Projekt-Init-Nebeneffekt) zu benötigen"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_005() -> None:
+    with patch.object(
+        GNS3Connection, "get", return_value={"version": "2.2.61"}
+    ) as mock_get:
+        version = GNS3Connection.get_version("10.20.20.231", 80)
+
+    mock_get.assert_called_once_with("http://10.20.20.231:80/v2/version")
+    assert version == {"version": "2.2.61"}
+
+
+@allure.title("list_all_projects listet alle Projekte ohne Projekt-Kontext")
+@allure.description(
+    "Überprüft, dass list_all_projects einen reinen Read-Only-GET an "
+    "/v2/projects sendet"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_006() -> None:
+    projects = [{"project_id": "p1", "name": "lab"}]
+    with patch.object(GNS3Connection, "get", return_value=projects) as mock_get:
+        result = GNS3Connection.list_all_projects("10.20.20.231", 80)
+
+    mock_get.assert_called_once_with("http://10.20.20.231:80/v2/projects")
+    assert result == projects
+
+
+@allure.title("list_project_nodes listet die Nodes eines Projekts")
+@allure.description(
+    "Überprüft, dass list_project_nodes einen reinen Read-Only-GET an "
+    "/v2/projects/{id}/nodes sendet"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_007() -> None:
+    nodes = [{"node_id": "n1", "name": "R1", "status": "started"}]
+    with patch.object(GNS3Connection, "get", return_value=nodes) as mock_get:
+        result = GNS3Connection.list_project_nodes("10.20.20.231", 80, "p1")
+
+    mock_get.assert_called_once_with("http://10.20.20.231:80/v2/projects/p1/nodes")
+    assert result == nodes
