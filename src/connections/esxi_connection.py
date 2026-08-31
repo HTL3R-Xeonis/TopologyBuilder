@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import atexit
 import ssl
+import tempfile
+import time
+from pathlib import Path
 from typing import Optional, List, TypeVar
 from typing import TYPE_CHECKING
 
@@ -12,6 +15,7 @@ from pyVmomi import vim, vmodl
 
 from .api_handler import APIHandler
 from .generic_connection import GenericConnection
+from .ova_importer import OVAImporter
 
 if TYPE_CHECKING:
     from src.graph import Graph
@@ -113,6 +117,42 @@ class ESXiConnection(GenericConnection):
             return None
         finally:
             view.Destroy()
+
+    def get_host_system(self) -> vim.HostSystem:
+        """
+        Returns the ESXi host system. Assumes a standalone host connection
+        (one datacenter, one compute resource, one host), which is what
+        SmartConnect gives us when connecting directly to an ESXi host
+        rather than through vCenter.
+        :return: the ESXi HostSystem
+        """
+        return self._get_object_by_name(vim.HostSystem)
+
+    def find_datastore(self, name: str) -> vim.Datastore:
+        """
+        Finds a datastore by name.
+        :param name: name of the datastore
+        :return: the matching Datastore
+        :raises ValueError: Is thrown when no datastore with the given name is found.
+        """
+        datastore = self._get_object_by_name(vim.Datastore, name)
+        if datastore is None:
+            logger.error(msg := f"Datastore '{name}' not found")
+            raise ValueError(msg)
+        return datastore
+
+    def find_network(self, name: str) -> vim.Network:
+        """
+        Finds a network (port group) by name.
+        :param name: name of the port group
+        :return: the matching Network
+        :raises ValueError: Is thrown when no network/port group with the given name is found.
+        """
+        network = self._get_object_by_name(vim.Network, name)
+        if network is None:
+            logger.error(msg := f"Network/port group '{name}' not found")
+            raise ValueError(msg)
+        return network
 
     def get_vm(self, vm_name: str) -> vim.ManagedEntity | None:
         """
@@ -366,33 +406,19 @@ class ESXiConnection(GenericConnection):
 
         network_system.UpdatePortGroup(pgName=port_group_name, portgrp=spec)
 
-    @staticmethod
-    def _create_mapped_network(node: GenericNode) -> dict[str, str]:
-        """
-        Creates a network mapping for ESXi, so that the interfaces of the VM will connect to the correct port groups on the virtual switch.
-        :param node: Node to create this mapping for.
-        :return: Returns a dictionary with the interface name, mapped to its vlan name.
-        :raises RuntimeError: Is thrown when a vlan, which should exist, does not exist on the corresponding interface.
-        """
-        mapped_network = {}
-        for interface in node.interfaces.values():
-            vlan = interface.vlan
-            if vlan is None:
-                logger.error(
-                    msg
-                    := f"Something went wrong with the graph initialization. Needed VLAN does not exist on {node.name}.{interface.name}"
-                )
-                raise RuntimeError(msg)
-            mapped_network[interface.name] = vlan.name
-        return mapped_network
-
     def deploy_virtual_machine(self, node: GenericNode, datastore: str) -> None:
         """
-        Deploys the virtual machine on the ESXi host.
+        Deploys the virtual machine on the ESXi host: downloads the OVA
+        matching the node's image from the NFS template API and imports it
+        directly via vSphere's HttpNfcLease flow (OVAImporter), with its
+        network adapters wired to the VLAN port groups
+        initialize_virtual_switch already set up, then powers it on.
         :param node: Node which represents the virtual machine to be deployed.
         :param datastore: Name of the datastore, to store the virtual machine on.
         :return:
         :raises TimeoutError: Is thrown when it took too long to receive a response.
+        :raises RuntimeError: Is thrown when the OVA download or import fails.
+        :raises ValueError: Is thrown when a vlan, which should exist, does not exist on a corresponding interface.
         """
         if Settings.ONLY_ON_GNS3:
             return
@@ -407,21 +433,77 @@ class ESXiConnection(GenericConnection):
         )
         # --------------------------------------------------------------------------------------------------------------
 
-        ova_filename = APIHandler.get_ova(node.image)
-        mapped_network = self._create_mapped_network(node)
+        network_names = []
+        for interface in node.interfaces.values():
+            if interface.vlan is None:
+                logger.error(
+                    msg
+                    := f"Something went wrong with the graph initialization. Needed VLAN does not exist on {node.name}.{interface.name}"
+                )
+                raise ValueError(msg)
+            network_names.append(interface.vlan.name)
 
-        # @TODO CONTROL IF RESOURCES ARE EVEN ON THE ESXI HOST. PROPABLY BEST TO CHECK ON THE DEPLOYMENT API.
-        json = {
-            "ip": self.ip,
-            "port": self.port,
-            "vm_name": node.name,
-            "ova_filename": ova_filename,
-            "datastore": datastore,
-            "network": mapped_network,
-        }
+        with tempfile.TemporaryDirectory(prefix="topologybuilder-ova-") as tmp_dir:
+            ova_path = str(Path(tmp_dir) / f"{node.name}.ova")
+            APIHandler.download_ova(node.image, ova_path)
 
-        Verbosity.volumatic_print(
-            Verbosity.DEBUG, ("VM_Deployment_JSON_Data: " + str(json))
-        )
+            importer = OVAImporter(self)
+            vm = importer.import_ova(ova_path, node.name, datastore, network_names)
 
-        APIHandler.post(url="http://10.20.20.172:8003/deploy/ova", json=json)
+        self.power_on_vm(vm)
+
+    @staticmethod
+    def _wait_for_task(task: vim.Task) -> None:
+        """
+        Blocks until the given vSphere task finishes, raising if it errors out.
+        :param task: the task to wait for
+        :return:
+        :raises RuntimeError: Is thrown when the task fails.
+        """
+        while task.info.state not in (
+            vim.TaskInfo.State.success,
+            vim.TaskInfo.State.error,
+        ):
+            time.sleep(0.5)
+        if task.info.state == vim.TaskInfo.State.error:
+            logger.error(msg := f"vSphere task failed: {task.info.error}")
+            raise RuntimeError(msg)
+
+    def add_vm_network_adapters(
+        self, vm: vim.VirtualMachine, network_names: list[str]
+    ) -> None:
+        """
+        Adds a new network adapter to the VM for each given port group, in
+        order. Used when an OVA declares fewer networks than the VM
+        ultimately needs.
+        :param vm: the VM to add adapters to
+        :param network_names: ESXi port group name for each adapter to add, in order
+        :return:
+        """
+        device_changes = []
+        for network_name in network_names:
+            device = vim.vm.device.VirtualVmxnet3()
+            device.backing = vim.vm.device.VirtualEthernetCard.NetworkBackingInfo(
+                network=self.find_network(network_name), deviceName=network_name
+            )
+            device.connectable = vim.vm.device.VirtualDevice.ConnectInfo(
+                startConnected=True, connected=True, allowGuestControl=True
+            )
+            device_changes.append(
+                vim.vm.device.VirtualDeviceSpec(
+                    operation=vim.vm.device.VirtualDeviceSpec.Operation.add,
+                    device=device,
+                )
+            )
+
+        config_spec = vim.vm.ConfigSpec(deviceChange=device_changes)
+        self._wait_for_task(vm.ReconfigVM_Task(spec=config_spec))
+
+    def power_on_vm(self, vm: vim.VirtualMachine) -> None:
+        """
+        Powers on the given VM, if it isn't already.
+        :param vm: the VM to power on
+        :return:
+        """
+        if vm.runtime.powerState != vim.VirtualMachine.PowerState.poweredOn:
+            self._wait_for_task(vm.PowerOnVM_Task())

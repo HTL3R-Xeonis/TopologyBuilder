@@ -1,4 +1,5 @@
 import json
+import tarfile
 from typing import Set
 
 import requests
@@ -6,6 +7,9 @@ from loguru import logger
 
 from src.settings import Settings
 from .generic_connection import GenericConnection
+
+_OVA_DOWNLOAD_CHUNK_SIZE = 8 * 1024 * 1024
+_OVA_DOWNLOAD_MAX_ATTEMPTS = 3
 
 
 class APIHandler:
@@ -136,17 +140,54 @@ class APIHandler:
         return {template["name"] for template in data["templates"]}
 
     @staticmethod
-    def get_ova(template_name: str) -> str:
+    def download_ova(template_name: str, dest_path: str) -> None:
         """
-        Returns the ova file name of the first matching template.
-        :param template_name: Name of the template.
-        :return: Returns the ova file name of the template.
-        :raises TimeoutError: Is thrown when it takes too long to receive a response.
+        Downloads the OVA file for the NFS-share template best matching
+        ``template_name`` to ``dest_path``, streamed in chunks since these
+        files run into multiple gigabytes.
+
+        The proxy's upstream connection to the NFS share has been observed
+        to drop mid-transfer without that surfacing as an HTTP-level error -
+        the response still looks like a normal 200 completion, just with a
+        truncated body. Every download is verified to be a structurally
+        complete tar archive before being accepted, with a few retries
+        since this has been observed to be intermittent.
+        :param template_name: template name to search for, e.g. a node's image
+        :param dest_path: local filesystem path to write the OVA to
+        :return:
+        :raises RuntimeError: Is thrown when no complete OVA could be downloaded after all attempts.
         """
-        data = APIHandler.get(
-            f"{Settings.API.ESXI_TEMPLATE_SERVER_URL}/api/search?name={template_name}"
+        last_error: Exception | None = None
+        for attempt in range(1, _OVA_DOWNLOAD_MAX_ATTEMPTS + 1):
+            response = requests.get(
+                f"{Settings.API.ESXI_TEMPLATE_SERVER_URL}/api/download",
+                params={"name": template_name},
+                stream=True,
+                timeout=30,
+            )
+            response.raise_for_status()
+            with open(dest_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=_OVA_DOWNLOAD_CHUNK_SIZE):
+                    f.write(chunk)
+
+            try:
+                with tarfile.open(dest_path) as archive:
+                    archive.getmembers()
+            except tarfile.TarError as error:
+                last_error = error
+                logger.warning(
+                    f"Downloaded OVA for '{template_name}' is incomplete or corrupt "
+                    f"({error}); retrying ({attempt}/{_OVA_DOWNLOAD_MAX_ATTEMPTS})"
+                )
+                continue
+
+            return
+
+        logger.error(
+            msg := f"Failed to download a complete OVA for '{template_name}' after "
+            f"{_OVA_DOWNLOAD_MAX_ATTEMPTS} attempts: {last_error}"
         )
-        return next((r for r in data["results"]))["template"]["file"]
+        raise RuntimeError(msg)
 
     @staticmethod
     def get_gns3_template_names() -> Set[str]:
