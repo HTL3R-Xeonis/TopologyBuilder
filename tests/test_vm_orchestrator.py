@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import allure
 
+from src.graph import Graph
 from src.graph.blocks.generic_node import GenericNode
 from src.graph.blocks.vlan import VirtualLan
 from src.settings import Settings
@@ -148,3 +149,139 @@ def vm_orchestrator_003() -> None:
         Settings.GNS3.PROJECT_NAME,
         incremental=False,
     )
+
+
+@allure.title("verify_graph meldet eine nicht gefundene ESXi-VM als fehlgeschlagen")
+@allure.description(
+    "Überprüft, dass verify_graph einen fehlgeschlagenen Check meldet, "
+    "wenn die erwartete ESXi-VM nicht gefunden wird"
+)
+@allure.tag("negativ-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_004() -> None:
+    Settings.API.LITERAL_API_VALUES = True
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.list_port_groups.return_value = []
+    esxi_connection.get_vm.return_value = None
+
+    graph = Graph([{"image": "Ubuntu-Server", "role": "VM", "names": ["VM1"]}], [])
+
+    with patch("src.vm_orchestrator.vm_orchestrator.GNS3Connection") as gns3_cls:
+        gns3_cls.list_all_projects.return_value = []
+        results = orchestrator.verify_graph(graph, "lab")
+
+    assert any(not ok and "VM1" in d and "not found" in d for ok, d in results)
+
+
+@allure.title(
+    "verify_graph erkennt eine fehlende Port-Group bei einem direkten ESXi-Link"
+)
+@allure.description(
+    "Überprüft, dass verify_graph einen fehlgeschlagenen Check meldet, "
+    "wenn die von beiden Seiten einer direkten ESXi-ESXi-Verbindung "
+    "geteilte Port-Group auf dem ESXi-Host nicht existiert. Main's "
+    "Graph._assign_vlans lässt beide Interfaces exakt dieselbe VirtualLan "
+    "teilen, es gibt also nur eine Port-Group zu prüfen, keine zwei "
+    "potenziell divergierenden."
+)
+@allure.tag("negativ-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_005() -> None:
+    Settings.API.LITERAL_API_VALUES = True
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.get_vm.return_value = MagicMock()
+    esxi_connection.is_vm_powered_on.return_value = True
+    esxi_connection.get_vm_ip_address.return_value = "10.0.0.1"
+    esxi_connection.list_port_groups.return_value = []
+
+    graph = Graph(
+        [
+            {"image": "Ubuntu-Server", "role": "VM", "names": ["VM1"]},
+            {"image": "Rocky 9.2", "role": "VM", "names": ["VM2"]},
+        ],
+        [["VM1", "ens160", "VM2", "ens160"]],
+    )
+    assert (
+        graph.nodes["VM1"].interfaces["ens160"].vlan
+        is graph.nodes["VM2"].interfaces["ens160"].vlan
+    )
+
+    with patch("src.vm_orchestrator.vm_orchestrator.GNS3Connection") as gns3_cls:
+        gns3_cls.list_all_projects.return_value = []
+        results = orchestrator.verify_graph(graph, "lab")
+
+    assert any(not ok and "port group" in d and "missing" in d for ok, d in results)
+
+
+@allure.title(
+    "verify_graph bestätigt eine ESXi<->GNS3-Bridge, wenn der gleichnamige Cloud-Node existiert"
+)
+@allure.description(
+    "Überprüft, dass verify_graph einen bestandenen Check meldet, wenn für "
+    "eine ESXi<->GNS3-Kante ein GNS3-Node mit dem Namen der ESXi-Node "
+    "existiert (main's create_node benennt den Cloud-Node genauso wie die "
+    "ESXi-Node, die er bridged)"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_006() -> None:
+    Settings.API.LITERAL_API_VALUES = True
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.list_port_groups.return_value = []
+    esxi_connection.get_vm.return_value = None
+
+    graph = Graph(
+        [
+            {"image": "VPCS", "role": "ROUTER", "names": ["R1"]},
+            {"image": "Ubuntu-Server", "role": "VM", "names": ["VM1"]},
+        ],
+        [["R1", "gi0/0", "VM1", "ens160"]],
+    )
+
+    with patch("src.vm_orchestrator.vm_orchestrator.GNS3Connection") as gns3_cls:
+        gns3_cls.list_all_projects.return_value = [{"project_id": "p1", "name": "lab"}]
+        gns3_cls.list_project_nodes.return_value = [
+            {"node_id": "n1", "name": "R1", "status": "started"},
+            {"node_id": "c1", "name": "VM1", "status": "started"},
+        ]
+        gns3_cls.list_project_links.return_value = []
+        results = orchestrator.verify_graph(graph, "lab")
+
+    assert any(ok and "bridged via Cloud node 'VM1'" in d for ok, d in results)
+
+
+@allure.title("verify_graph bestätigt einen bestehenden GNS3-internen Link")
+@allure.description(
+    "Überprüft, dass verify_graph einen bestandenen Check meldet, wenn "
+    "zwischen zwei rein GNS3-gehosteten Nodes tatsächlich ein Link mit den "
+    "erwarteten Node-IDs existiert"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_007() -> None:
+    Settings.API.LITERAL_API_VALUES = True
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.list_port_groups.return_value = []
+    esxi_connection.get_vm.return_value = None
+
+    graph = Graph(
+        [{"image": "VPCS", "role": "ROUTER", "names": ["R1", "R2"]}],
+        [["R1", "gi0/0", "R2", "gi0/0"]],
+    )
+
+    with patch("src.vm_orchestrator.vm_orchestrator.GNS3Connection") as gns3_cls:
+        gns3_cls.list_all_projects.return_value = [{"project_id": "p1", "name": "lab"}]
+        gns3_cls.list_project_nodes.return_value = [
+            {"node_id": "n1", "name": "R1", "status": "started"},
+            {"node_id": "n2", "name": "R2", "status": "started"},
+        ]
+        gns3_cls.list_project_links.return_value = [
+            {"nodes": [{"node_id": "n1"}, {"node_id": "n2"}]}
+        ]
+        results = orchestrator.verify_graph(graph, "lab")
+
+    assert any(ok and "R1:gi0/0 <-> R2:gi0/0: linked" in d for ok, d in results)

@@ -603,3 +603,63 @@ def esxi_connection_022() -> None:
         conn.deploy_virtual_machine(node, "datastore1", incremental=True)
 
     mock_download.assert_not_called()
+
+
+@allure.title("is_vm_powered_on erkennt eine eingeschaltete VM")
+@allure.description(
+    "Überprüft, dass is_vm_powered_on True zurückgibt, wenn "
+    "vm.runtime.powerState 'poweredOn' ist"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def esxi_connection_023() -> None:
+    from pyVmomi import vim
+
+    conn = _make_esxi_connection()
+    vm = MagicMock()
+    vm.runtime.powerState = vim.VirtualMachine.PowerState.poweredOn
+
+    assert conn.is_vm_powered_on(vm) is True
+
+
+@allure.title("is_vm_powered_on erkennt eine ausgeschaltete VM")
+@allure.description(
+    "Überprüft, dass is_vm_powered_on False zurückgibt, wenn "
+    "vm.runtime.powerState nicht 'poweredOn' ist"
+)
+@allure.tag("negativ-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def esxi_connection_024() -> None:
+    from pyVmomi import vim
+
+    conn = _make_esxi_connection()
+    vm = MagicMock()
+    vm.runtime.powerState = vim.VirtualMachine.PowerState.poweredOff
+
+    assert conn.is_vm_powered_on(vm) is False
+
+
+@allure.title("get_vm_network_names liefert die Port-Group jedes Ethernet-Adapters")
+@allure.description(
+    "Überprüft, dass get_vm_network_names für jedes "
+    "VirtualEthernetCard-Gerät den Namen der verbundenen Port-Group "
+    "zurückgibt und andere Gerätetypen überspringt"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def esxi_connection_025() -> None:
+    from pyVmomi import vim
+
+    conn = _make_esxi_connection()
+    disk = MagicMock()
+    disk.__class__ = vim.vm.device.VirtualDisk
+    nic = MagicMock()
+    nic.__class__ = vim.vm.device.VirtualEthernetCard
+    nic.backing.deviceName = "PG-GNS3-TRUNK"
+    vm = MagicMock()
+    vm.config.hardware.device = [disk, nic]
+
+    assert conn.get_vm_network_names(vm) == ["PG-GNS3-TRUNK"]

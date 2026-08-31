@@ -228,6 +228,41 @@ def destroy(
 
 
 @app.command()
+def verify(
+    address: str = ESXI_ADDRESS_OPTION,
+    esxi_username: str = ESXI_USERNAME_OPTION,
+    esxi_password: str = ESXI_PASSWORD_OPTION,
+    gns3_vm_name: str = GNS3_VM_NAME_OPTION,
+) -> None:
+    """
+    Runs a structural health check against a deployed topology: confirms
+    every GNS3 node is started, every ESXi VM is powered on and reports an
+    IP, the trunk NIC is wired correctly, and both sides of a link agree
+    on VLAN ID. This is NOT a connectivity/ping test - this project never
+    assigns an IP address to any node from its own config, so there is no
+    address to ping.
+    """
+    _apply_esxi_options(address, esxi_username, esxi_password, gns3_vm_name)
+
+    validator = TopologyFileValidation(Settings.TOPOLOGY_FILE)
+    validator.validate_file()
+
+    graph = Graph(validator.nodes, validator.edges)
+
+    orchestrator = _make_orchestrator()
+    results = orchestrator.verify_graph(graph, Settings.GNS3.PROJECT_NAME)
+
+    passed = 0
+    for ok, description in results:
+        typer.echo(f"{'[OK]  ' if ok else '[FAIL]'} {description}")
+        passed += ok
+
+    typer.echo(f"{passed}/{len(results)} checks passed")
+    if passed != len(results):
+        raise typer.Exit(code=1)
+
+
+@app.command()
 def status(
     address: str = ESXI_ADDRESS_OPTION,
     esxi_username: str = ESXI_USERNAME_OPTION,

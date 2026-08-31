@@ -351,3 +351,78 @@ def cli_009(tmp_path) -> None:
         Settings.LOG_FILE_PATH = original_path
 
     assert result.exit_code == 1
+
+
+@allure.title("verify-Befehl meldet Erfolg, wenn alle Checks bestehen")
+@allure.description(
+    "Überprüft, dass der verify-Befehl bei durchweg bestandenen Checks "
+    "Exit-Code 0 und eine 'N/N checks passed'-Zusammenfassung liefert"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.CRITICAL)
+def cli_011() -> None:
+    with (
+        patch("src.cli.TopologyFileValidation"),
+        patch("src.cli.Graph"),
+        patch("src.cli.VMOrchestrator") as orchestrator_cls,
+    ):
+        orchestrator_cls.return_value.verify_graph.return_value = [
+            (True, "R1: started"),
+            (True, "VM1: powered on"),
+        ]
+
+        result = runner.invoke(
+            app,
+            [
+                "verify",
+                "--address",
+                "10.20.20.202",
+                "--esxi_username",
+                "root",
+                "--esxi_password",
+                "pw",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "[OK]" in result.output
+    assert "2/2 checks passed" in result.output
+
+
+@allure.title("verify-Befehl bricht mit Exit-Code 1 ab, wenn ein Check fehlschlägt")
+@allure.description(
+    "Überprüft, dass der verify-Befehl mit Exit-Code 1 abbricht und "
+    "fehlgeschlagene Checks als [FAIL] markiert, sobald mindestens ein "
+    "Check nicht bestanden wurde"
+)
+@allure.tag("negativ-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.CRITICAL)
+def cli_012() -> None:
+    with (
+        patch("src.cli.TopologyFileValidation"),
+        patch("src.cli.Graph"),
+        patch("src.cli.VMOrchestrator") as orchestrator_cls,
+    ):
+        orchestrator_cls.return_value.verify_graph.return_value = [
+            (True, "R1: started"),
+            (False, "VM1: not found"),
+        ]
+
+        result = runner.invoke(
+            app,
+            [
+                "verify",
+                "--address",
+                "10.20.20.202",
+                "--esxi_username",
+                "root",
+                "--esxi_password",
+                "pw",
+            ],
+        )
+
+    assert result.exit_code == 1
+    assert "[FAIL]" in result.output
+    assert "1/2 checks passed" in result.output

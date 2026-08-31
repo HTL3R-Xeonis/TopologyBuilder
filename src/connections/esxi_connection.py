@@ -197,6 +197,31 @@ class ESXiConnection(GenericConnection):
                     return address
         return None
 
+    def is_vm_powered_on(self, vm: vim.VirtualMachine) -> bool:
+        """
+        Checks whether the given VM is currently powered on.
+        :param vm: the VM to check
+        :return: True if powered on
+        """
+        return vm.runtime.powerState == vim.VirtualMachine.PowerState.poweredOn
+
+    def get_vm_network_names(self, vm: vim.VirtualMachine) -> list[str]:
+        """
+        Returns the ESXi port group name each of the VM's Ethernet network
+        adapters is currently connected to, in device order. Used to
+        verify a NIC is actually wired to an expected port group before
+        trusting traffic sent to it - ESXi gives no error or warning for a
+        NIC left connected to the wrong port group, it just silently
+        doesn't carry the traffic anyone expects it to.
+        :param vm: the VM to inspect
+        :return: list of port group names, one per Ethernet adapter
+        """
+        names = []
+        for device in vm.config.hardware.device:
+            if isinstance(device, vim.vm.device.VirtualEthernetCard):
+                names.append(getattr(device.backing, "deviceName", None))
+        return names
+
     def _get_virtual_switch(self) -> vim.host.VirtualSwitch:
         """
         Looks for a virtual Switch with the name, specified in ``Settings.Esxi.VIRTUAL_SWITCH``, on the ESXi Host.

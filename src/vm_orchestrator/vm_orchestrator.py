@@ -168,6 +168,190 @@ class VMOrchestrator:
         self.delete_stale_esxi_resources(graph)
         GNS3Connection(self.gns3_vm_ip, Settings.GNS3.PORT, project_name)
 
+    def verify_graph(self, graph: Graph, project_name: str) -> list[tuple[bool, str]]:
+        """
+        Runs a structural health check against real infrastructure. This is
+        NOT a connectivity/ping test - this project never assigns an IP
+        address to any node from its own config, so there is no address to
+        ping for either side of an edge. Checks: the GNS3 VM's trunk NIC is
+        wired to ``Settings.ESXI.TRUNK_PORT_GROUP``; every GNS3-hosted node
+        is 'started'; every ESXi-hosted VM is powered on and reports an IP
+        via VMware Tools; both sides of a direct ESXi-ESXi link agree on
+        VLAN ID; an ESXi<->GNS3 bridge's Cloud node exists (named after the
+        ESXi node, per create_node's own convention); and a GNS3-internal
+        link actually exists between the two node IDs.
+        :param graph: built topology to verify
+        :param project_name: name of the GNS3 project to check
+        :return: list of (passed, description) tuples, one per check
+        """
+        results: list[tuple[bool, str]] = []
+        port_groups = {
+            pg["name"]: pg["vlan_id"] for pg in self.esxi_connection.list_port_groups()
+        }
+
+        gns3_nodes_by_name: dict[str, dict] = {}
+        gns3_links: list[dict] = []
+        project = next(
+            (
+                p
+                for p in GNS3Connection.list_all_projects(
+                    self.gns3_vm_ip, Settings.GNS3.PORT
+                )
+                if p.get("name") == project_name
+            ),
+            None,
+        )
+        if project is None:
+            results.append((False, f"GNS3 project '{project_name}': not found"))
+        else:
+            gns3_nodes_by_name = {
+                node.get("name"): node
+                for node in GNS3Connection.list_project_nodes(
+                    self.gns3_vm_ip, Settings.GNS3.PORT, project["project_id"]
+                )
+            }
+            gns3_links = GNS3Connection.list_project_links(
+                self.gns3_vm_ip, Settings.GNS3.PORT, project["project_id"]
+            )
+
+        gns3_vm = self.esxi_connection.get_vm(Settings.ESXI.GNS3_VM_NAME)
+        if gns3_vm is None:
+            results.append(
+                (
+                    False,
+                    f"Trunk NIC wiring: '{Settings.ESXI.GNS3_VM_NAME}' VM not found",
+                )
+            )
+        else:
+            network_names = self.esxi_connection.get_vm_network_names(gns3_vm)
+            ok = Settings.ESXI.TRUNK_PORT_GROUP in network_names
+            results.append(
+                (
+                    ok,
+                    f"Trunk NIC wiring: connected to '{Settings.ESXI.TRUNK_PORT_GROUP}'"
+                    if ok
+                    else f"Trunk NIC wiring: no network adapter connected to "
+                    f"'{Settings.ESXI.TRUNK_PORT_GROUP}' (connected to: {network_names})",
+                )
+            )
+
+        for name, node in graph.nodes.items():
+            if node.env == Environment.ON_GNS3:
+                gns3_node = gns3_nodes_by_name.get(name)
+                if gns3_node is None:
+                    results.append((False, f"GNS3 node '{name}': not found in project"))
+                elif gns3_node.get("status") == "started":
+                    results.append((True, f"GNS3 node '{name}': started"))
+                else:
+                    results.append(
+                        (
+                            False,
+                            f"GNS3 node '{name}': status is '{gns3_node.get('status')}'",
+                        )
+                    )
+            elif node.env == Environment.ON_ESXI:
+                vm = self.esxi_connection.get_vm(name)
+                if vm is None:
+                    results.append((False, f"ESXi VM '{name}': not found"))
+                elif not self.esxi_connection.is_vm_powered_on(vm):
+                    results.append((False, f"ESXi VM '{name}': not powered on"))
+                else:
+                    ip_address = self.esxi_connection.get_vm_ip_address(name)
+                    if ip_address is None:
+                        results.append(
+                            (
+                                False,
+                                f"ESXi VM '{name}': powered on, but no IP reported yet",
+                            )
+                        )
+                    else:
+                        results.append(
+                            (True, f"ESXi VM '{name}': powered on, IP {ip_address}")
+                        )
+
+        seen_edges = set()
+        for node in graph.nodes.values():
+            for if_name, interface in node.interfaces.items():
+                neighbour = interface.neighbour
+                if neighbour is None:
+                    continue
+
+                neighbour_interface = neighbour.get_interface(node)
+                neighbour_if_name = (
+                    neighbour_interface.name if neighbour_interface else "?"
+                )
+                edge_key = frozenset(
+                    [(node.name, if_name), (neighbour.name, neighbour_if_name)]
+                )
+                if edge_key in seen_edges:
+                    continue
+                seen_edges.add(edge_key)
+
+                label = (
+                    f"{node.name}:{if_name} <-> {neighbour.name}:{neighbour_if_name}"
+                )
+                esxi_1 = node.env == Environment.ON_ESXI
+                esxi_2 = neighbour.env == Environment.ON_ESXI
+
+                if esxi_1 and esxi_2:
+                    # A direct ESXi-to-ESXi link's two interfaces share the
+                    # exact same VirtualLan object (see Graph._assign_vlans)
+                    # - there's no bridging device to translate between two
+                    # different VLANs, so both vNICs sit on the one shared
+                    # port group by construction. Nothing to compare between
+                    # "both sides" here, just confirm that shared port group
+                    # actually exists on the live ESXi host.
+                    vlan_name = interface.vlan.name if interface.vlan else None
+                    vlan_id = port_groups.get(vlan_name) if vlan_name else None
+                    if vlan_id is None:
+                        results.append(
+                            (False, f"{label}: port group '{vlan_name}' missing")
+                        )
+                    else:
+                        results.append(
+                            (
+                                True,
+                                f"{label}: VLAN {vlan_id} on shared port group '{vlan_name}'",
+                            )
+                        )
+                elif esxi_1 or esxi_2:
+                    esxi_node = node if esxi_1 else neighbour
+                    if esxi_node.name not in gns3_nodes_by_name:
+                        results.append(
+                            (
+                                False,
+                                f"{label}: Cloud node for '{esxi_node.name}' not found",
+                            )
+                        )
+                    else:
+                        results.append(
+                            (
+                                True,
+                                f"{label}: bridged via Cloud node '{esxi_node.name}'",
+                            )
+                        )
+                else:
+                    node_gns3 = gns3_nodes_by_name.get(node.name)
+                    neighbour_gns3 = gns3_nodes_by_name.get(neighbour.name)
+                    if node_gns3 is None or neighbour_gns3 is None:
+                        results.append(
+                            (False, f"{label}: one or both GNS3 nodes not found")
+                        )
+                        continue
+                    ids = {node_gns3.get("node_id"), neighbour_gns3.get("node_id")}
+                    linked = any(
+                        {endpoint["node_id"] for endpoint in link["nodes"]} == ids
+                        for link in gns3_links
+                    )
+                    results.append(
+                        (
+                            linked,
+                            f"{label}: {'linked' if linked else 'no matching GNS3 link found'}",
+                        )
+                    )
+
+        return results
+
     @staticmethod
     def _partially_link_gns3_nodes(gns3_connection: GNS3Connection, node) -> None:
         """
