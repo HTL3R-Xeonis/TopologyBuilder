@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Any
 from typing import TYPE_CHECKING
 
@@ -36,6 +38,9 @@ class GNS3Connection(APIHandler):
     def _init_project(self, name: str) -> dict[str, Any] | None:
         """
         Create a new GNS3 project. If project already exists, it is deleted first.
+        Under ``Settings.IS_DRY_RUN``, neither deletes nor creates anything -
+        returns the existing project's info read-only (or None if it doesn't
+        exist yet), so dry-run stays genuinely side-effect-free.
         :param name: Name of the GNS3 project.
         :return: Returns the newly generated GNS3 project information. Returns ``None`` if the ``Settings.ONLY_ON_ESXI`` is ``True``.
         :raises TimeoutError: Is thrown when it takes too long to receive a response.
@@ -50,6 +55,20 @@ class GNS3Connection(APIHandler):
             raise RuntimeError(msg) from exc
 
         project = next((p for p in projects if p["name"] == name), None)
+
+        # ----------------------------------------------------------------------------------------------------------
+        if Settings.IS_DRY_RUN:
+            if project is None:
+                Verbosity.volumatic_print(
+                    Verbosity.NORMAL, f"Would create GNS3 project {name}"
+                )
+            else:
+                Verbosity.volumatic_print(
+                    Verbosity.NORMAL,
+                    f"Would delete and recreate existing GNS3 project {name}",
+                )
+            return project
+        # ----------------------------------------------------------------------------------------------------------
 
         if project is None:
             return self._create_new_project(name)
@@ -347,3 +366,41 @@ class GNS3Connection(APIHandler):
             raise RuntimeError(
                 f"Something went wrong while linking two nodes on {self.ip}"
             )
+
+    def start_all_nodes(self) -> None:
+        """
+        Starts every node currently in this GNS3 project. GNS3 does not
+        start a node automatically when it's created via the API - without
+        this, deploy_graph would create and link every node but leave the
+        whole topology powered off.
+        :return: Returns ``None`` if the ``Settings.ONLY_ON_ESXI``/``Settings.IS_DRY_RUN`` options are True.
+        :raises TimeoutError: Is thrown when it takes too long to receive a response.
+        :raises RuntimeError: Is thrown when it fails to collect the project's nodes, or when starting a node fails.
+        """
+        if Settings.ONLY_ON_ESXI:
+            return
+        # --------------------------------------------------------------------------------------------------------------
+        if Settings.IS_DRY_RUN:
+            Verbosity.volumatic_print(Verbosity.NORMAL, "Would start all GNS3 nodes")
+            return
+        # --------------------------------------------------------------------------------------------------------------
+
+        try:
+            nodes = self.get(
+                f"{self.url}/v2/projects/{self.project['project_id']}/nodes"
+            )
+        except requests.exceptions.HTTPError as exc:
+            logger.error(msg := "Failed to collect GNS3 node information.")
+            raise RuntimeError(msg) from exc
+
+        for node in nodes:
+            Verbosity.volumatic_print(
+                Verbosity.NORMAL, f"Starts GNS3 node {node['name']}"
+            )
+            try:
+                self.post(
+                    f"{self.url}/v2/projects/{self.project['project_id']}/nodes/{node['node_id']}/start"
+                )
+            except requests.exceptions.HTTPError as exc:
+                logger.error(msg := f"Failed to start GNS3 node {node['name']}")
+                raise RuntimeError(msg) from exc

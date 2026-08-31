@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import atexit
 import ssl
 from typing import Optional, List, TypeVar
@@ -278,7 +280,12 @@ class ESXiConnection(GenericConnection):
 
     def initialize_virtual_switch(self, graph: Graph) -> None:
         """
-        Creates the needed port groups on the virtual switch.
+        Creates the needed port groups on the virtual switch, then ensures
+        the trunk port group (``Settings.ESXI.TRUNK_PORT_GROUP``) accepts
+        promiscuous mode/MAC changes/forged transmits - required for GNS3's
+        Cloud nodes to bridge in topology devices' own MACs through it.
+        ESXi's default security policy silently drops that traffic
+        otherwise, with no error on either side.
         :param graph: Port groups are based of the VLANs on each ``Interface`` of each ``Node`` in given ``graph``.
         :return:
         :raises RuntimeError: Is thrown when a portgroup already exists  on the ESXi host.
@@ -290,6 +297,74 @@ class ESXiConnection(GenericConnection):
                 if vlan is None:
                     continue
                 self._add_port_group(vlan)
+
+        self.ensure_bridging_security_policy(Settings.ESXI.TRUNK_PORT_GROUP)
+
+    def ensure_bridging_security_policy(self, port_group_name: str) -> None:
+        """
+        Ensures an existing port group accepts promiscuous mode, MAC address
+        changes, and forged transmits - required for a port group whose VM
+        relays traffic for MAC addresses other than its own vNIC's, e.g. the
+        GNS3 VM's trunk NIC, which GNS3's Cloud nodes use to bridge in
+        arbitrary topology devices' own MACs. ESXi's default security policy
+        rejects promiscuous mode and forged transmits, which silently drops
+        all such relayed traffic without any visible error on either side.
+        :param port_group_name: name of an existing port group to update
+        :return:
+        :raises RuntimeError: Is thrown when the port group does not exist,
+            or when no host-system or network-system was found on the ESXi host.
+        """
+        if Settings.ONLY_ON_GNS3:
+            return
+        # ----------------------------------------------------------------------------------------------------------
+        if Settings.IS_DRY_RUN:
+            Verbosity.volumatic_print(
+                Verbosity.NORMAL,
+                f"Would ensure bridging security policy on {port_group_name}",
+            )
+            return
+        Verbosity.volumatic_print(
+            Verbosity.NORMAL, f"Ensures bridging security policy on {port_group_name}"
+        )
+        # ----------------------------------------------------------------------------------------------------------
+
+        host_system = self._get_object_by_name(vim.HostSystem)
+        if host_system is None:
+            logger.error(msg := "No host system found on ESXi.")
+            raise RuntimeError(msg)
+        network_system = host_system.configManager.networkSystem
+        if network_system is None:
+            logger.error(msg := "No network system found on ESXi.")
+            raise RuntimeError(msg)
+
+        port_group = next(
+            (
+                pg
+                for pg in network_system.networkInfo.portgroup
+                if pg.spec.name == port_group_name
+            ),
+            None,
+        )
+        if port_group is None:
+            logger.error(msg := f"Port group {port_group_name} not found on ESXi.")
+            raise RuntimeError(msg)
+
+        spec = port_group.spec
+        spec.policy = spec.policy or vim.host.NetworkPolicy()
+        security = spec.policy.security or vim.host.NetworkPolicy.SecurityPolicy()
+        if (
+            security.allowPromiscuous
+            and security.macChanges
+            and security.forgedTransmits
+        ):
+            return
+
+        security.allowPromiscuous = True
+        security.macChanges = True
+        security.forgedTransmits = True
+        spec.policy.security = security
+
+        network_system.UpdatePortGroup(pgName=port_group_name, portgrp=spec)
 
     @staticmethod
     def _create_mapped_network(node: GenericNode) -> dict[str, str]:

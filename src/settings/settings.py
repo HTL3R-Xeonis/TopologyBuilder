@@ -42,6 +42,11 @@ class Settings:
         """Password to use for the ESXi connections."""
         VIRTUAL_SWITCH: str = "internal_network"
         """Specifies the virtual switch to use on the ESXi client."""
+        TRUNK_PORT_GROUP: str = "PG_GNS3_TRUNK"
+        """Name of the port group carrying the GNS3 VM's VLAN trunk NIC. Must
+        accept promiscuous mode/MAC changes/forged transmits, which GNS3's
+        Cloud nodes need to bridge topology devices through it - ESXi's
+        default security policy silently drops that traffic otherwise."""
         IGNORE_PORT_GROUPS: set[str] = {"PG_GNS3_TRUNK"}
         """Specifies which port groups not to delete on the virtual switch."""
         DATASTORE: str = "datastore1 (2)"

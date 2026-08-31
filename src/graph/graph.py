@@ -5,6 +5,8 @@ __status__ = "In development"
 
 from src.graph.blocks import GenericNode
 from src.graph.blocks.formatter import nested_formatter
+from src.graph.blocks.vlan import VirtualLan
+from src.graph.environment import Environment
 from loguru import logger
 import networkx as nx
 from phart import ASCIIRenderer, LayoutOptions, NodeStyle
@@ -25,6 +27,7 @@ class Graph:
         self._nodes: dict[str, GenericNode] = {}
         self._build_nodes(nodes)
         self._build_edges(edges)
+        self._assign_vlans()
 
     @property
     def nodes(self) -> dict[str, GenericNode]:
@@ -74,6 +77,39 @@ class Graph:
 
             if_1.connect_to(node_2)
             if_2.connect_to(node_1)
+
+    def _assign_vlans(self) -> None:
+        """
+        Assigns a VirtualLan to every ESXi-hosted node's interface, now that
+        the full edge set is known. A direct ESXi-to-ESXi link (no GNS3
+        device between them) gets both sides assigned the SAME VirtualLan,
+        since there's no bridging device to translate between two different
+        VLANs - the two VMs only reach each other if their vNICs share a
+        VLAN. Every other ESXi interface (unconnected, or linked to a GNS3
+        node) gets its own unique VLAN. Resets the VLAN id counter first, so
+        a freshly built Graph doesn't inherit numbers from a previous one
+        built earlier in the same process.
+        :return:
+        :raises ValueError: Is thrown when the number of VLANs needed exceeds the limit of 4093.
+        """
+        VirtualLan.reset()
+        for node in self.nodes.values():
+            if node.env != Environment.ON_ESXI:
+                continue
+            for if_name, interface in node.interfaces.items():
+                if interface.vlan is not None:
+                    continue
+
+                neighbour = interface.neighbour
+                if neighbour is not None and neighbour.env == Environment.ON_ESXI:
+                    neighbour_interface = neighbour.get_interface(node)
+                    if neighbour_interface is not None and (
+                        neighbour_interface.vlan is not None
+                    ):
+                        interface.vlan = neighbour_interface.vlan
+                        continue
+
+                interface.vlan = VirtualLan(node.name, if_name)
 
     def visualize(self) -> None:
         """

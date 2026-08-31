@@ -72,6 +72,8 @@ class VMOrchestrator:
         """
         Deploys the graph on the ESXi host and GNS3 VM. The connection between the nodes runs solely between GNS3.
         This is established with multiple port groups with unique vlans on the vSwitch in ESXi.
+        Starts every created GNS3 node once linking is complete - GNS3 does
+        not start a node automatically when it's created via the API.
         :param graph: Graph to deploy
         :param gns3_username: Username for the GNS3 VM
         :param gns3_password: Password for the GNS3 VM. Set to  None if no password is set.
@@ -108,6 +110,8 @@ class VMOrchestrator:
                 gns3_conn.create_node(node)
 
             self._partially_link_gns3_nodes(gns3_conn, node)
+
+        gns3_conn.start_all_nodes()
 
     @staticmethod
     def _partially_link_gns3_nodes(gns3_connection: GNS3Connection, node) -> None:
