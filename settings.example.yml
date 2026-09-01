@@ -18,13 +18,16 @@ topology_file: ./topology_example.yaml
 esxi:
   ip: 10.20.20.202
   username: root
-  # Name of the vSwitch to create/remove port groups on.
+  # Name of the vSwitch to create/remove port groups on. Created
+  # automatically (as a plain internal-only vSwitch, no physical uplink)
+  # if it doesn't already exist.
   virtual_switch: vSwitch0
-  # Port group carrying the GNS3 VM's VLAN trunk NIC. Must accept
-  # promiscuous mode/MAC changes/forged transmits - ensure_bridging_
-  # security_policy sets this automatically on every deploy. This port
-  # group is always protected from deletion by reset_virtual_switch,
-  # regardless of ignore_port_groups below.
+  # Port group carrying the GNS3 VM's VLAN trunk NIC. Created
+  # automatically (VLAN 4095, pass-all-tags) if it doesn't already exist.
+  # Must accept promiscuous mode/MAC changes/forged transmits -
+  # ensure_bridging_security_policy sets this automatically on every
+  # deploy. This port group is always protected from deletion by
+  # reset_virtual_switch, regardless of ignore_port_groups below.
   trunk_port_group: PG-GNS3-TRUNK
   # Extra port groups (besides trunk_port_group and ESXi's own built-in
   # 'VM Network'/'Management Network', which are always protected) that
@@ -66,8 +69,12 @@ gns3:
   port: 80
   # Name of the GNS3 VM's own guest-OS interface for its VLAN trunk NIC
   # (not the ESXi port group above - this is the interface name inside the
-  # GNS3 VM's guest OS).
-  parent_interface: eth1
+  # GNS3 VM's guest OS). Omit this key to auto-detect it by MAC address
+  # instead (matches the vNIC wired to esxi.trunk_port_group above against
+  # the GNS3 VM's guest-OS interfaces) - safer than a fixed name, since
+  # this isn't guaranteed to match across different GNS3 VM builds. Set
+  # explicitly only if auto-detection doesn't work for some reason.
+  # parent_interface: eth1
 
 api:
   # Base URLs of the ESXi/NFS template-listing service and the GNS3
