@@ -130,8 +130,10 @@ class Settings:
         install, not created by this tool). Always protected from deletion
         regardless of IGNORE_PORT_GROUPS' contents - deleting 'Management
         Network' in particular can sever the host's own management access."""
-        DATASTORE: str = "datastore1 (2)"
-        """Specifies the name of the datastore to use on the ESXi client."""
+        DATASTORE: str | None = None
+        """Specifies the name of the datastore to use on the ESXi client.
+        None (default) auto-picks the datastore with the most free space
+        at deploy time (see ESXiConnection.find_biggest_datastore)."""
         GNS3_VM_NAME = "GNS3 (1)"
         """Name of the GNS3 VM to work on."""
         DELETE_UNUSED_VMS: bool = True

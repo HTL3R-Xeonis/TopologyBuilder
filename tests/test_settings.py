@@ -24,7 +24,7 @@ def _reset_esxi_gns3_defaults() -> None:
     Settings.ESXI.VIRTUAL_SWITCH = "internal_network"
     Settings.ESXI.TRUNK_PORT_GROUP = "PG_GNS3_TRUNK"
     Settings.ESXI.IGNORE_PORT_GROUPS = {"PG_GNS3_TRUNK"}
-    Settings.ESXI.DATASTORE = "datastore1 (2)"
+    Settings.ESXI.DATASTORE = None
     Settings.ESXI.GNS3_VM_NAME = "GNS3 (1)"
     Settings.ESXI.DELETE_UNUSED_VMS = True
     Settings.ESXI.OVA_STAGING_DIR = None
@@ -115,7 +115,7 @@ def settings_001(tmp_path) -> None:
 
         assert Settings.ESXI.IP == "10.20.20.202"
         assert Settings.ESXI.USERNAME == "root"
-        assert Settings.ESXI.DATASTORE == "datastore1 (2)"
+        assert Settings.ESXI.DATASTORE is None
     finally:
         _reset_esxi_gns3_defaults()
 

@@ -620,3 +620,110 @@ def vm_orchestrator_018() -> None:
         orchestrator.deploy_graph(graph, "gns3", "gns3pw", incremental=True)
 
     esxi_connection.ensure_virtual_switch_exists.assert_called_once()
+
+
+@allure.title(
+    "deploy_graph wählt das Datastore automatisch, wenn keins konfiguriert ist"
+)
+@allure.description(
+    "Überprüft, dass deploy_graph esxi_connection.find_biggest_datastore "
+    "aufruft und dessen Namen an deploy_virtual_machine übergibt, wenn "
+    "Settings.ESXI.DATASTORE None ist und der Graph einen ESXi-Node hat"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_019() -> None:
+    Settings.API.LITERAL_API_VALUES = True
+    Settings.ESXI.DATASTORE = None
+    orchestrator, esxi_connection = _make_orchestrator()
+
+    node = GenericNode("Ubuntu-Server", "VM", "VM1")
+    node.add_interface("ens160")
+    graph = MagicMock()
+    graph.nodes = {"VM1": node}
+
+    biggest = MagicMock()
+    biggest.name = "big-datastore"
+    biggest.summary.freeSpace = 500 * 1024**3
+    esxi_connection.find_biggest_datastore.return_value = biggest
+
+    try:
+        with (
+            patch("src.vm_orchestrator.vm_orchestrator.SSHConnection"),
+            patch("src.vm_orchestrator.vm_orchestrator.GNS3VMInterfaceSetup"),
+            patch("src.vm_orchestrator.vm_orchestrator.GNS3Connection"),
+        ):
+            orchestrator.deploy_graph(graph, "gns3", "gns3pw", incremental=True)
+    finally:
+        Settings.ESXI.DATASTORE = None
+
+    esxi_connection.find_biggest_datastore.assert_called_once()
+    esxi_connection.deploy_virtual_machine.assert_called_once_with(
+        node=node, datastore="big-datastore", incremental=True
+    )
+
+
+@allure.title("deploy_graph nutzt das konfigurierte Datastore ohne Auto-Pick")
+@allure.description(
+    "Überprüft, dass deploy_graph find_biggest_datastore NICHT aufruft, "
+    "wenn Settings.ESXI.DATASTORE bereits gesetzt ist"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.NORMAL)
+def vm_orchestrator_020() -> None:
+    Settings.API.LITERAL_API_VALUES = True
+    Settings.ESXI.DATASTORE = "configured-datastore"
+    orchestrator, esxi_connection = _make_orchestrator()
+
+    node = GenericNode("Ubuntu-Server", "VM", "VM1")
+    node.add_interface("ens160")
+    graph = MagicMock()
+    graph.nodes = {"VM1": node}
+
+    try:
+        with (
+            patch("src.vm_orchestrator.vm_orchestrator.SSHConnection"),
+            patch("src.vm_orchestrator.vm_orchestrator.GNS3VMInterfaceSetup"),
+            patch("src.vm_orchestrator.vm_orchestrator.GNS3Connection"),
+        ):
+            orchestrator.deploy_graph(graph, "gns3", "gns3pw", incremental=True)
+    finally:
+        Settings.ESXI.DATASTORE = None
+
+    esxi_connection.find_biggest_datastore.assert_not_called()
+    esxi_connection.deploy_virtual_machine.assert_called_once_with(
+        node=node, datastore="configured-datastore", incremental=True
+    )
+
+
+@allure.title(
+    "deploy_graph überspringt die Datastore-Auswahl für rein GNS3-gehostete Graphen"
+)
+@allure.description(
+    "Überprüft, dass deploy_graph find_biggest_datastore NICHT aufruft, "
+    "wenn der Graph gar keinen ESXi-Node hat, auch wenn Settings.ESXI."
+    "DATASTORE None ist"
+)
+@allure.tag("negativ-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.NORMAL)
+def vm_orchestrator_021() -> None:
+    Settings.API.LITERAL_API_VALUES = True
+    Settings.ESXI.DATASTORE = None
+    orchestrator, esxi_connection = _make_orchestrator()
+
+    node = GenericNode("VPCS", "ROUTER", "R1")
+    node.add_interface("gi0/0")
+    graph = MagicMock()
+    graph.nodes = {"R1": node}
+
+    with (
+        patch("src.vm_orchestrator.vm_orchestrator.SSHConnection"),
+        patch("src.vm_orchestrator.vm_orchestrator.GNS3VMInterfaceSetup"),
+        patch("src.vm_orchestrator.vm_orchestrator.GNS3Connection"),
+    ):
+        orchestrator.deploy_graph(graph, "gns3", "gns3pw", incremental=True)
+
+    esxi_connection.find_biggest_datastore.assert_not_called()

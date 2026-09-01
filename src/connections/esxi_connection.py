@@ -142,6 +142,32 @@ class ESXiConnection(GenericConnection):
             raise ValueError(msg)
         return datastore
 
+    def get_all_datastores(self) -> list[vim.Datastore]:
+        """
+        Returns every datastore registered on the host.
+        :return: list of all datastores
+        """
+        view = self.view_manager.CreateContainerView(
+            self.content.rootFolder, [vim.Datastore], True
+        )
+        try:
+            return list(view.view)
+        finally:
+            view.Destroy()
+
+    def find_biggest_datastore(self) -> vim.Datastore:
+        """
+        Finds the datastore with the most free space - used to auto-pick
+        a datastore when ``Settings.ESXI.DATASTORE`` is left unset.
+        :return: the datastore with the largest summary.freeSpace
+        :raises ValueError: Is thrown when no datastore exists on the host.
+        """
+        datastores = self.get_all_datastores()
+        if not datastores:
+            logger.error(msg := f"No datastore found on host: {self.ip}")
+            raise ValueError(msg)
+        return max(datastores, key=lambda datastore: datastore.summary.freeSpace)
+
     def find_network(self, name: str) -> vim.Network:
         """
         Finds a network (port group) by name.

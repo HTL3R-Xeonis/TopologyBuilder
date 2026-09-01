@@ -930,3 +930,42 @@ def esxi_connection_035() -> None:
         _reset_settings()
 
     conn._get_object_by_name.assert_not_called()
+
+
+@allure.title("find_biggest_datastore wählt das Datastore mit dem meisten freien Platz")
+@allure.description(
+    "Überprüft, dass find_biggest_datastore aus allen Datastores das mit "
+    "dem größten summary.freeSpace zurückgibt"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_036() -> None:
+    conn = _make_esxi_connection()
+
+    small = MagicMock()
+    small.summary.freeSpace = 100 * 1024**3
+    big = MagicMock()
+    big.summary.freeSpace = 3000 * 1024**3
+    conn.get_all_datastores = MagicMock(return_value=[small, big])
+
+    assert conn.find_biggest_datastore() is big
+
+
+@allure.title(
+    "find_biggest_datastore wirft einen Fehler, wenn kein Datastore existiert"
+)
+@allure.description(
+    "Überprüft, dass find_biggest_datastore einen ValueError wirft, wenn "
+    "der Host gar kein Datastore hat"
+)
+@allure.tag("negativ-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def esxi_connection_037() -> None:
+    conn = _make_esxi_connection()
+    conn._ip_address = "10.20.20.202"
+    conn.get_all_datastores = MagicMock(return_value=[])
+
+    with pytest.raises(ValueError, match="No datastore found"):
+        conn.find_biggest_datastore()

@@ -132,11 +132,23 @@ class VMOrchestrator:
         )
         gns3_conn.set_node_positions(graph)
 
+        datastore_name = Settings.ESXI.DATASTORE
+        if datastore_name is None and any(
+            node.env == Environment.ON_ESXI for node in graph.nodes.values()
+        ):
+            biggest = self.esxi_connection.find_biggest_datastore()
+            datastore_name = biggest.name
+            free_gb = biggest.summary.freeSpace / (1024**3)
+            logger.info(
+                f"No datastore configured, auto-selected '{datastore_name}' "
+                f"({free_gb:.1f} GB free)"
+            )
+
         for node in graph.nodes.values():
             if node.env == Environment.ON_ESXI:
                 self.esxi_connection.deploy_virtual_machine(
                     node=node,
-                    datastore=Settings.ESXI.DATASTORE,
+                    datastore=datastore_name,
                     incremental=incremental,
                 )
                 gns3_conn.create_node(node)

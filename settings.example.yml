@@ -32,7 +32,9 @@ esxi:
   # VM's own management NIC's port group on this deployment's ESXi host -
   # deleting it would cut off access to the GNS3 VM's web UI/API.
   ignore_port_groups: [PG-MGMT]
-  # Datastore to place newly imported topology VMs on.
+  # Datastore to place newly imported topology VMs on. Omit this key (or
+  # comment it out) to auto-pick the datastore with the most free space
+  # at deploy time instead.
   datastore: VNX-FC-Datastore-ESXi3
   # Name of the GNS3 VM as registered on the ESXi host.
   gns3_vm_name: GNS3-VM (1)
