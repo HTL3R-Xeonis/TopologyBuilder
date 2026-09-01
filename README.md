@@ -140,10 +140,13 @@ An ESXi-hosted node's vNICs are wired positionally to its topology
 interfaces, one port group per edge touching it. If the node's OVA template
 itself declares *more* built-in networks than the node has edges (e.g. a
 firewall appliance's OVA with a default WAN+LAN pair, deployed with only one
-edge wired up in the topology), the extra OVA-declared network(s) reuse the
-last edge's port group rather than failing the import - a warning is logged
-when this happens. If the OVA declares *fewer* networks than the node has
-edges, the remaining edges get added as new network adapters after import.
+edge wired up in the topology), the extra OVA-declared network(s) briefly
+reuse the last edge's port group just so the import itself succeeds, then
+the resulting extra NIC(s) are removed right after import - a warning is
+logged when this happens, and the VM ends up with exactly as many adapters
+as the topology defines. If the OVA declares *fewer* networks than the node
+has edges, the remaining edges get added as new network adapters after
+import.
 
 ## Usage
 

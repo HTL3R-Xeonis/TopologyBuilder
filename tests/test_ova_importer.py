@@ -96,14 +96,17 @@ def ova_importer_000() -> None:
 
 
 @allure.title(
-    "OVA mit mehr deklarierten Netzwerken als angegeben nutzt das letzte erneut"
+    "OVA mit mehr deklarierten Netzwerken als angegeben entfernt die Extra-NICs"
 )
 @allure.description(
     "Überprüft, dass import_ova bei einer OVF mit mehr deklarierten "
     "Netzwerken als übergebenen Port-Group-Namen (z.B. eine Appliance-OVA "
     "mit eingebauter zweiter WAN/LAN-NIC, die die Topologie nie verkabelt "
-    "hat) den letzten übergebenen Namen für die zusätzlichen "
-    "OVF-Netzwerke wiederverwendet, statt den Import abzubrechen"
+    "hat) den letzten übergebenen Namen nur nutzt, damit der Import selbst "
+    "gelingt, und danach die dadurch entstandenen Extra-NIC(s) wieder "
+    "entfernt - die VM soll am Ende genau so viele Adapter haben wie die "
+    "Topologie vorgibt, keine redundante NIC an einer bereits genutzten "
+    "Port-Group"
 )
 @allure.tag("positiv-test", "ova_importer")
 @allure.feature("ova_importer")
@@ -117,7 +120,9 @@ def ova_importer_001() -> None:
         return_value=tarfile.open(fileobj=io.BytesIO(ova_bytes), mode="r"),
     ):
         with patch.object(importer, "_upload_disks"):
-            importer.import_ova("/fake/path.ova", "GNS3-VM", "datastore1", ["PG-MGMT"])
+            vm = importer.import_ova(
+                "/fake/path.ova", "GNS3-VM", "datastore1", ["PG-MGMT"]
+            )
 
     create_spec_call = esxi_connection.content.ovfManager.CreateImportSpec.call_args
     mapping = create_spec_call.args[3].networkMapping
@@ -125,6 +130,7 @@ def ova_importer_001() -> None:
     assert mapping[0].name == "net1"
     assert mapping[1].name == "net2"
     esxi_connection.find_network.assert_any_call("PG-MGMT")
+    esxi_connection.remove_vm_network_adapters.assert_called_once_with(vm, 1)
 
 
 @allure.title("OVA mit deklarierten Netzwerken aber ganz ohne Interfaces wirft Fehler")

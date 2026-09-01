@@ -782,3 +782,43 @@ def esxi_connection_030() -> None:
     vm.ReconfigVM_Task.assert_called_once()
     spec = vm.ReconfigVM_Task.call_args.kwargs["spec"]
     assert spec.annotation == "topologybuilder-image:Ubuntu-Server"
+
+
+@allure.title("remove_vm_network_adapters entfernt die letzten N Ethernet-Adapter")
+@allure.description(
+    "Überprüft, dass remove_vm_network_adapters nur die letzten `count` "
+    "Ethernet-Geräte über ReconfigVM_Task entfernt, in Geräte-Reihenfolge, "
+    "und andere Gerätetypen (z.B. eine Disk) unangetastet lässt"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_031() -> None:
+    from pyVmomi import vim
+
+    conn = _make_esxi_connection()
+
+    disk = MagicMock()
+    disk.__class__ = vim.vm.device.VirtualDisk
+    nic_0 = MagicMock()
+    nic_0.__class__ = vim.vm.device.VirtualVmxnet3
+    nic_1 = MagicMock()
+    nic_1.__class__ = vim.vm.device.VirtualVmxnet3
+    nic_2 = MagicMock()
+    nic_2.__class__ = vim.vm.device.VirtualVmxnet3
+
+    vm = MagicMock()
+    vm.config.hardware.device = [disk, nic_0, nic_1, nic_2]
+    task = MagicMock()
+    task.info.state = vim.TaskInfo.State.success
+    vm.ReconfigVM_Task.return_value = task
+
+    conn.remove_vm_network_adapters(vm, 2)
+
+    vm.ReconfigVM_Task.assert_called_once()
+    device_changes = vm.ReconfigVM_Task.call_args.kwargs["spec"].deviceChange
+    assert [change.device for change in device_changes] == [nic_1, nic_2]
+    assert all(
+        change.operation == vim.vm.device.VirtualDeviceSpec.Operation.remove
+        for change in device_changes
+    )

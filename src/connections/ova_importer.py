@@ -75,15 +75,16 @@ class OVAImporter:
         :param datastore_name: datastore to place the VM's files on
         :param network_names: ESXi port group for each network adapter the
             new VM should end up with, in the same order the OVF declares
-            its networks. If the OVF declares more networks than the node's
-            topology interfaces cover (e.g. an appliance OVA with a
+            its networks. If the OVF declares more networks than the
+            node's topology interfaces cover (e.g. an appliance OVA with a
             second built-in WAN/LAN NIC the topology never wired up), the
-            last entry is reused for each extra OVF-declared network so
-            the import doesn't fail - if network_names is empty (a node
-            with no interfaces at all), this raises instead, since there
-            is nothing to reuse. Any entries beyond what the OVF declares
-            are added as new network adapters afterward (e.g. an OVA
-            declaring fewer networks than the node needs).
+            last entry is reused just to let the import itself succeed,
+            then the resulting extra NIC(s) are removed right after import
+            - if network_names is empty (a node with no interfaces at
+            all), this raises instead, since there is nothing to reuse.
+            Any entries beyond what the OVF declares are added as new
+            network adapters afterward (e.g. an OVA declaring fewer
+            networks than the node needs).
         :return: the created VM
         :raises ValueError: Is thrown when no network names are given but the OVF declares at least one network.
         :raises RuntimeError: Is thrown when the import spec creation fails.
@@ -108,17 +109,17 @@ class OVAImporter:
                     f"network was given - node has no interfaces to reuse"
                 )
                 raise ValueError(msg)
-            if len(parse_result.network) > len(network_names):
+            extra_nic_count = max(0, len(parse_result.network) - len(network_names))
+            if extra_nic_count:
                 logger.warning(
                     f"OVF declares {len(parse_result.network)} network(s) "
                     f"({[net.name for net in parse_result.network]}) but only "
                     f"{len(network_names)} ESXi network(s) were given: "
-                    f"{network_names} - reusing the last one for the extra "
-                    f"OVF-declared network(s)"
+                    f"{network_names} - importing with the last one reused "
+                    f"for the extra OVF-declared network(s), then removing "
+                    f"the resulting {extra_nic_count} extra NIC(s)"
                 )
-                network_names = network_names + [network_names[-1]] * (
-                    len(parse_result.network) - len(network_names)
-                )
+                network_names = network_names + [network_names[-1]] * extra_nic_count
             declared_network_names = network_names[: len(parse_result.network)]
             extra_network_names = network_names[len(parse_result.network) :]
 
@@ -161,6 +162,8 @@ class OVAImporter:
             self._upload_disks(ova, import_spec_result.fileItem, lease)
             lease.HttpNfcLeaseComplete()
 
+        if extra_nic_count:
+            self.esxi_connection.remove_vm_network_adapters(vm, extra_nic_count)
         if extra_network_names:
             self.esxi_connection.add_vm_network_adapters(vm, extra_network_names)
 

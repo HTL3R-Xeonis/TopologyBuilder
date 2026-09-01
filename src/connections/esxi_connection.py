@@ -639,6 +639,35 @@ class ESXiConnection(GenericConnection):
         config_spec = vim.vm.ConfigSpec(deviceChange=device_changes)
         self._wait_for_task(vm.ReconfigVM_Task(spec=config_spec))
 
+    def remove_vm_network_adapters(self, vm: vim.VirtualMachine, count: int) -> None:
+        """
+        Removes the last ``count`` Ethernet network adapters from the VM,
+        in device order. Used when an OVA declares more networks than the
+        node's topology interfaces cover - after import, the extra NIC(s)
+        (wired to a reused port group during import so the import itself
+        doesn't fail, see OVAImporter.import_ova) are removed so the VM
+        ends up with exactly as many adapters as the topology defines,
+        instead of a redundant extra NIC sharing another interface's
+        port group.
+        :param vm: the VM to remove adapters from
+        :param count: how many trailing Ethernet adapters to remove
+        :return:
+        """
+        ethernet_devices = [
+            device
+            for device in vm.config.hardware.device
+            if isinstance(device, vim.vm.device.VirtualEthernetCard)
+        ]
+        device_changes = [
+            vim.vm.device.VirtualDeviceSpec(
+                operation=vim.vm.device.VirtualDeviceSpec.Operation.remove,
+                device=device,
+            )
+            for device in ethernet_devices[-count:]
+        ]
+        config_spec = vim.vm.ConfigSpec(deviceChange=device_changes)
+        self._wait_for_task(vm.ReconfigVM_Task(spec=config_spec))
+
     def power_on_vm(self, vm: vim.VirtualMachine) -> None:
         """
         Powers on the given VM, if it isn't already.
