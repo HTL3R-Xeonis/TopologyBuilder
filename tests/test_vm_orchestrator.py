@@ -851,6 +851,68 @@ def vm_orchestrator_025() -> None:
 
 
 @allure.title(
+    "_resolve_gns3_parent_interface schließt VLAN-Subinterfaces aus der Suche aus"
+)
+@allure.description(
+    "Überprüft, dass die an SSH gesendete Suche '@'-suffixierte Namen "
+    "(VLAN-Subinterfaces, z.B. 'PC4_gi0-0@eth1') explizit ausschließt - "
+    "eine Subinterface erbt standardmäßig die MAC ihres Parent-"
+    "Interfaces, sodass eine leftover Subinterface von einem früheren "
+    "Deploy sonst fälschlich mitgematcht würde"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_026() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    Settings.GNS3.PARENT_INTERFACE = None
+    esxi_connection.get_vm.return_value = MagicMock()
+    esxi_connection.find_vm_nic_mac_by_port_group.return_value = "00:0c:29:5c:ed:bd"
+    gns3_ssh_connection = MagicMock()
+    gns3_ssh_connection.exec_command.return_value = _make_exec_command_result("eth1\n")
+
+    try:
+        result = orchestrator._resolve_gns3_parent_interface(gns3_ssh_connection)
+    finally:
+        Settings.GNS3.PARENT_INTERFACE = "eth1"
+
+    assert result == "eth1"
+    command = gns3_ssh_connection.exec_command.call_args.args[0]
+    assert "@" in command
+
+
+@allure.title(
+    "_resolve_gns3_parent_interface wirft einen Fehler bei mehreren MAC-Treffern"
+)
+@allure.description(
+    "Überprüft, dass _resolve_gns3_parent_interface einen klaren "
+    "RuntimeError wirft, statt eine mehrzeilige, kaputte 'Interface-"
+    "Name'-Zeichenkette zurückzugeben, falls die SSH-Ausgabe trotz des "
+    "'@'-Ausschlussfilters mehr als eine Zeile enthält - genau das hat "
+    "live das nachfolgende SSH-Skript mit einem Bash-Syntaxfehler zum "
+    "Absturz gebracht, bevor dieser Fix eingebaut wurde"
+)
+@allure.tag("negativ-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_027() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    Settings.GNS3.PARENT_INTERFACE = None
+    esxi_connection.get_vm.return_value = MagicMock()
+    esxi_connection.find_vm_nic_mac_by_port_group.return_value = "00:0c:29:5c:ed:bd"
+    gns3_ssh_connection = MagicMock()
+    gns3_ssh_connection.exec_command.return_value = _make_exec_command_result(
+        "eth1\neth2\n"
+    )
+
+    try:
+        with pytest.raises(RuntimeError, match="expected exactly one"):
+            orchestrator._resolve_gns3_parent_interface(gns3_ssh_connection)
+    finally:
+        Settings.GNS3.PARENT_INTERFACE = "eth1"
+
+
+@allure.title(
     "check_prerequisites meldet alle Checks als bestanden, wenn alles bereit ist"
 )
 @allure.description(
@@ -861,7 +923,7 @@ def vm_orchestrator_025() -> None:
 @allure.tag("positiv-test", "vm-orchestrator")
 @allure.feature("vm_orchestrator")
 @allure.severity(allure.severity_level.CRITICAL)
-def vm_orchestrator_026() -> None:
+def vm_orchestrator_028() -> None:
     Settings.API.LITERAL_API_VALUES = True
     Settings.ESXI.DATASTORE = "my-datastore"
     orchestrator, esxi_connection = _make_orchestrator()
@@ -896,7 +958,7 @@ def vm_orchestrator_026() -> None:
 @allure.tag("positiv-test", "vm-orchestrator")
 @allure.feature("vm_orchestrator")
 @allure.severity(allure.severity_level.CRITICAL)
-def vm_orchestrator_027() -> None:
+def vm_orchestrator_029() -> None:
     Settings.API.LITERAL_API_VALUES = True
     Settings.ESXI.DATASTORE = "my-datastore"
     orchestrator, esxi_connection = _make_orchestrator()
@@ -931,7 +993,7 @@ def vm_orchestrator_027() -> None:
 @allure.tag("negativ-test", "vm-orchestrator")
 @allure.feature("vm_orchestrator")
 @allure.severity(allure.severity_level.CRITICAL)
-def vm_orchestrator_028() -> None:
+def vm_orchestrator_030() -> None:
     Settings.API.LITERAL_API_VALUES = True
     Settings.ESXI.DATASTORE = "my-datastore"
     orchestrator, esxi_connection = _make_orchestrator()

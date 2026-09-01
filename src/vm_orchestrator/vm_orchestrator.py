@@ -630,17 +630,24 @@ class VMOrchestrator:
             )
 
         mac = mac_address.lower()
+        # Excludes '@'-suffixed names (e.g. 'PC4_gi0-0@eth1') - a VLAN
+        # subinterface inherits its parent's MAC address by default, so
+        # any leftover subinterface from an earlier deploy would
+        # otherwise also match and produce multiple candidates.
         _, stdout, _ = gns3_ssh_connection.exec_command(
-            f"ip -br link show | awk 'tolower($3) == \"{mac}\" {{print $1}}'"
+            f"ip -br link show | awk 'tolower($3) == \"{mac}\" && $1 !~ /@/ {{print $1}}'"
         )
-        interface_name = stdout.read().decode().strip()
-        if not interface_name:
+        output = stdout.read().decode().strip()
+        interface_names = [line for line in output.splitlines() if line]
+        if len(interface_names) != 1:
             raise RuntimeError(
-                f"Could not auto-detect the GNS3 VM's trunk interface: no "
-                f"guest-OS interface with MAC {mac_address} was found on "
-                f"'{self.gns3_vm_name}'. Set gns3.parent_interface "
+                f"Could not auto-detect the GNS3 VM's trunk interface: "
+                f"expected exactly one guest-OS interface with MAC "
+                f"{mac_address} on '{self.gns3_vm_name}', found "
+                f"{interface_names or 'none'}. Set gns3.parent_interface "
                 f"explicitly in settings.yml instead."
             )
+        interface_name = interface_names[0]
         logger.info(
             f"Auto-detected GNS3 VM trunk interface '{interface_name}' "
             f"(MAC {mac_address})"
