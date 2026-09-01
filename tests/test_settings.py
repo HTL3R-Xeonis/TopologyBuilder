@@ -31,7 +31,7 @@ def _reset_esxi_gns3_defaults() -> None:
     Settings.GNS3.USERNAME = "gns3"
     Settings.GNS3.PROJECT_NAME = "tb_gns3_project"
     Settings.GNS3.PORT = 80
-    Settings.GNS3.PARENT_INTERFACE = "eth1"
+    Settings.GNS3.PARENT_INTERFACE = None
     Settings.TOPOLOGY_FILE = "./topology_example.yaml"
 
 

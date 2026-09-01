@@ -70,6 +70,7 @@ class VMOrchestrator:
             )
             raise RuntimeError(msg)
         self.gns3_vm_ip = gns3_vm_ip
+        self.gns3_vm_name = gns3_vm_name
 
     def deploy_graph(
         self,
@@ -472,12 +473,60 @@ class VMOrchestrator:
         gns3_connection = SSHConnection(
             self.gns3_vm_ip, port, gns3_username, gns3_password
         )
-        gns3_interface_setup = GNS3VMInterfaceSetup(
-            gns3_connection, Settings.GNS3.PARENT_INTERFACE
-        )
+        parent_interface = self._resolve_gns3_parent_interface(gns3_connection)
+        gns3_interface_setup = GNS3VMInterfaceSetup(gns3_connection, parent_interface)
 
         gns3_interface_setup.initialize_commands(graph)
         gns3_interface_setup.execute_script()
+
+    def _resolve_gns3_parent_interface(self, gns3_ssh_connection: SSHConnection) -> str:
+        """
+        Resolves the guest-OS interface name on the GNS3 VM that carries
+        the VLAN trunk, for GNS3VMInterfaceSetup to create subinterfaces
+        on. If ``Settings.GNS3.PARENT_INTERFACE`` is set explicitly,
+        returns it unchanged - no detection attempted. Otherwise, detects
+        it by MAC address: looks up which of the GNS3 VM's own vNICs (on
+        the ESXi side) is wired to ``Settings.ESXI.TRUNK_PORT_GROUP``,
+        then SSHes into the GNS3 VM to find the guest-OS interface with
+        that same MAC - the interface *name* isn't guaranteed to match
+        any particular convention across different GNS3 VM builds (e.g.
+        'eth1' vs. 'ens192'), but the MAC does.
+        :param gns3_ssh_connection: SSH connection to the GNS3 VM
+        :return: the resolved interface name
+        :raises RuntimeError: Is thrown when no vNIC on the GNS3 VM is wired to the trunk port group, or when no guest-OS interface with that MAC can be found.
+        """
+        if Settings.GNS3.PARENT_INTERFACE is not None:
+            return Settings.GNS3.PARENT_INTERFACE
+
+        gns3_vm = self.esxi_connection.get_vm(self.gns3_vm_name)
+        mac_address = self.esxi_connection.find_vm_nic_mac_by_port_group(
+            gns3_vm, Settings.ESXI.TRUNK_PORT_GROUP
+        )
+        if mac_address is None:
+            raise RuntimeError(
+                f"Could not auto-detect the GNS3 VM's trunk interface: no "
+                f"NIC on '{self.gns3_vm_name}' is wired to trunk port group "
+                f"'{Settings.ESXI.TRUNK_PORT_GROUP}'. Set "
+                f"gns3.parent_interface explicitly in settings.yml instead."
+            )
+
+        mac = mac_address.lower()
+        _, stdout, _ = gns3_ssh_connection.exec_command(
+            f"ip -br link show | awk 'tolower($3) == \"{mac}\" {{print $1}}'"
+        )
+        interface_name = stdout.read().decode().strip()
+        if not interface_name:
+            raise RuntimeError(
+                f"Could not auto-detect the GNS3 VM's trunk interface: no "
+                f"guest-OS interface with MAC {mac_address} was found on "
+                f"'{self.gns3_vm_name}'. Set gns3.parent_interface "
+                f"explicitly in settings.yml instead."
+            )
+        logger.info(
+            f"Auto-detected GNS3 VM trunk interface '{interface_name}' "
+            f"(MAC {mac_address})"
+        )
+        return interface_name
 
     def _log_console_port_collision_diagnostics(
         self, gns3_username: str, gns3_password: str | None

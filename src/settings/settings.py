@@ -170,8 +170,16 @@ class Settings:
         """Name of the GNS3 project to work on. If this project already exists on the GNS3 server, it is going to be overwritten."""
         PORT: int = 80
         """Port of the GNS3 client, where the API requests are expected."""
-        PARENT_INTERFACE: str = "eth1"
-        """Name of the interface of the GNS3 VM to create and delete the subinterfaces."""
+        PARENT_INTERFACE: str | None = None
+        """Name of the interface of the GNS3 VM to create and delete the
+        subinterfaces. None (default) auto-detects it by MAC address: the
+        GNS3 VM's own vNIC wired to Settings.ESXI.TRUNK_PORT_GROUP is
+        looked up on the ESXi side, then matched against the GNS3 VM's
+        guest-OS interfaces by MAC (see VMOrchestrator.
+        _resolve_gns3_parent_interface) - this interface name isn't
+        guaranteed to match across different GNS3 VM builds (e.g. 'eth1'
+        vs. 'ens192'), but the MAC does. Set explicitly to skip detection
+        and force a specific name."""
 
     class API:
         """Settings related to API requests."""

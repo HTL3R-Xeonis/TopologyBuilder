@@ -1029,3 +1029,55 @@ def esxi_connection_039() -> None:
     conn.ensure_bridging_security_policy.assert_called_once_with(
         Settings.ESXI.TRUNK_PORT_GROUP
     )
+
+
+@allure.title("find_vm_nic_mac_by_port_group findet die MAC des richtigen Adapters")
+@allure.description(
+    "Überprüft, dass find_vm_nic_mac_by_port_group die MAC-Adresse des "
+    "Ethernet-Adapters zurückgibt, der mit der gesuchten Port-Group "
+    "verbunden ist, und andere Adapter/Gerätetypen ignoriert"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_040() -> None:
+    from pyVmomi import vim
+
+    conn = _make_esxi_connection()
+    disk = MagicMock()
+    disk.__class__ = vim.vm.device.VirtualDisk
+    other_nic = MagicMock()
+    other_nic.__class__ = vim.vm.device.VirtualEthernetCard
+    other_nic.backing.deviceName = "PG-MGMT"
+    other_nic.macAddress = "00:0c:29:00:00:01"
+    trunk_nic = MagicMock()
+    trunk_nic.__class__ = vim.vm.device.VirtualEthernetCard
+    trunk_nic.backing.deviceName = "PG-GNS3-TRUNK"
+    trunk_nic.macAddress = "00:0c:29:00:00:02"
+    vm = MagicMock()
+    vm.config.hardware.device = [disk, other_nic, trunk_nic]
+
+    assert (
+        conn.find_vm_nic_mac_by_port_group(vm, "PG-GNS3-TRUNK") == "00:0c:29:00:00:02"
+    )
+
+
+@allure.title("find_vm_nic_mac_by_port_group gibt None zurück, wenn kein Adapter passt")
+@allure.description(
+    "Überprüft, dass find_vm_nic_mac_by_port_group None zurückgibt, wenn "
+    "kein Ethernet-Adapter mit der gesuchten Port-Group verbunden ist"
+)
+@allure.tag("negativ-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def esxi_connection_041() -> None:
+    from pyVmomi import vim
+
+    conn = _make_esxi_connection()
+    nic = MagicMock()
+    nic.__class__ = vim.vm.device.VirtualEthernetCard
+    nic.backing.deviceName = "PG-MGMT"
+    vm = MagicMock()
+    vm.config.hardware.device = [nic]
+
+    assert conn.find_vm_nic_mac_by_port_group(vm, "PG-GNS3-TRUNK") is None

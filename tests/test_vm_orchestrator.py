@@ -17,6 +17,11 @@ from src.vm_orchestrator.vm_orchestrator import VMOrchestrator
 
 
 def _make_orchestrator() -> tuple[VMOrchestrator, MagicMock]:
+    # Set explicitly (rather than the real None default) so tests that
+    # don't care about it don't trip _resolve_gns3_parent_interface's
+    # MAC-detection path, which needs more specific SSH/vNIC mocking -
+    # see vm_orchestrator_022+ for that path's own dedicated tests.
+    Settings.GNS3.PARENT_INTERFACE = "eth1"
     with patch("src.vm_orchestrator.vm_orchestrator.ESXiConnection") as esxi_cls:
         esxi_connection = esxi_cls.return_value
         esxi_connection.get_vm_ip_address.return_value = "10.20.20.231"
@@ -727,3 +732,119 @@ def vm_orchestrator_021() -> None:
         orchestrator.deploy_graph(graph, "gns3", "gns3pw", incremental=True)
 
     esxi_connection.find_biggest_datastore.assert_not_called()
+
+
+def _make_exec_command_result(output: str) -> tuple:
+    stdout = MagicMock()
+    stdout.read.return_value = output.encode()
+    return (MagicMock(), stdout, MagicMock())
+
+
+@allure.title(
+    "_resolve_gns3_parent_interface gibt den konfigurierten Wert unverändert zurück"
+)
+@allure.description(
+    "Überprüft, dass _resolve_gns3_parent_interface den konfigurierten "
+    "Wert direkt zurückgibt, ohne eine Auto-Erkennung zu versuchen, wenn "
+    "Settings.GNS3.PARENT_INTERFACE explizit gesetzt ist"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_022() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    Settings.GNS3.PARENT_INTERFACE = "ens192"
+    gns3_ssh_connection = MagicMock()
+
+    try:
+        result = orchestrator._resolve_gns3_parent_interface(gns3_ssh_connection)
+    finally:
+        Settings.GNS3.PARENT_INTERFACE = "eth1"
+
+    assert result == "ens192"
+    esxi_connection.get_vm.assert_not_called()
+    gns3_ssh_connection.exec_command.assert_not_called()
+
+
+@allure.title("_resolve_gns3_parent_interface erkennt das Interface über die MAC")
+@allure.description(
+    "Überprüft, dass _resolve_gns3_parent_interface bei "
+    "Settings.GNS3.PARENT_INTERFACE = None die MAC der Trunk-NIC auf "
+    "ESXi-Seite nachschlägt und über SSH das passende Guest-OS-Interface "
+    "findet"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_023() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    Settings.GNS3.PARENT_INTERFACE = None
+    gns3_vm = MagicMock()
+    esxi_connection.get_vm.return_value = gns3_vm
+    esxi_connection.find_vm_nic_mac_by_port_group.return_value = "00:0c:29:00:00:02"
+    gns3_ssh_connection = MagicMock()
+    gns3_ssh_connection.exec_command.return_value = _make_exec_command_result("eth1\n")
+
+    try:
+        result = orchestrator._resolve_gns3_parent_interface(gns3_ssh_connection)
+    finally:
+        Settings.GNS3.PARENT_INTERFACE = "eth1"
+
+    assert result == "eth1"
+    esxi_connection.get_vm.assert_called_once_with(orchestrator.gns3_vm_name)
+    esxi_connection.find_vm_nic_mac_by_port_group.assert_called_once_with(
+        gns3_vm, Settings.ESXI.TRUNK_PORT_GROUP
+    )
+
+
+@allure.title(
+    "_resolve_gns3_parent_interface wirft einen Fehler ohne passende Trunk-NIC"
+)
+@allure.description(
+    "Überprüft, dass _resolve_gns3_parent_interface einen RuntimeError "
+    "wirft, wenn keine vNIC der GNS3-VM mit der Trunk-Port-Group "
+    "verbunden ist"
+)
+@allure.tag("negativ-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_024() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    Settings.GNS3.PARENT_INTERFACE = None
+    esxi_connection.get_vm.return_value = MagicMock()
+    esxi_connection.find_vm_nic_mac_by_port_group.return_value = None
+    gns3_ssh_connection = MagicMock()
+
+    try:
+        with pytest.raises(RuntimeError, match="Could not auto-detect"):
+            orchestrator._resolve_gns3_parent_interface(gns3_ssh_connection)
+    finally:
+        Settings.GNS3.PARENT_INTERFACE = "eth1"
+
+    gns3_ssh_connection.exec_command.assert_not_called()
+
+
+@allure.title(
+    "_resolve_gns3_parent_interface wirft einen Fehler ohne passendes Guest-Interface"
+)
+@allure.description(
+    "Überprüft, dass _resolve_gns3_parent_interface einen RuntimeError "
+    "wirft, wenn kein Guest-OS-Interface mit der gesuchten MAC gefunden "
+    "wird (leere SSH-Ausgabe)"
+)
+@allure.tag("negativ-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_025() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    Settings.GNS3.PARENT_INTERFACE = None
+    esxi_connection.get_vm.return_value = MagicMock()
+    esxi_connection.find_vm_nic_mac_by_port_group.return_value = "00:0c:29:00:00:02"
+    gns3_ssh_connection = MagicMock()
+    gns3_ssh_connection.exec_command.return_value = _make_exec_command_result("")
+
+    try:
+        with pytest.raises(RuntimeError, match="Could not auto-detect"):
+            orchestrator._resolve_gns3_parent_interface(gns3_ssh_connection)
+    finally:
+        Settings.GNS3.PARENT_INTERFACE = "eth1"

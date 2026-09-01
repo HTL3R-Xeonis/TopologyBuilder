@@ -295,6 +295,25 @@ class ESXiConnection(GenericConnection):
                 names.append(getattr(device.backing, "deviceName", None))
         return names
 
+    def find_vm_nic_mac_by_port_group(
+        self, vm: vim.VirtualMachine, port_group_name: str
+    ) -> str | None:
+        """
+        Finds the MAC address of the VM's Ethernet adapter connected to
+        the given port group. Used to correlate an ESXi-side port group
+        with a guest-OS network interface by MAC, since the guest-OS
+        interface name isn't guaranteed to match any particular
+        convention (see VMOrchestrator._resolve_gns3_parent_interface).
+        :param vm: the VM to inspect
+        :param port_group_name: name of the port group to look for
+        :return: the matching adapter's MAC address, or None if no adapter is connected to that port group
+        """
+        for device in vm.config.hardware.device:
+            if isinstance(device, vim.vm.device.VirtualEthernetCard):
+                if getattr(device.backing, "deviceName", None) == port_group_name:
+                    return device.macAddress
+        return None
+
     def _find_virtual_switch(self) -> vim.host.VirtualSwitch | None:
         """
         Looks for a virtual Switch with the name, specified in ``Settings.Esxi.VIRTUAL_SWITCH``, on the ESXi Host.
