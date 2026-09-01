@@ -862,3 +862,71 @@ def esxi_connection_032(tmp_path) -> None:
         Settings.ESXI.OVA_STAGING_DIR = None
 
     assert (tmp_path / "does-not-exist-yet").is_dir()
+
+
+@allure.title("ensure_virtual_switch_exists erstellt eine fehlende vSwitch intern")
+@allure.description(
+    "Überprüft, dass ensure_virtual_switch_exists AddVirtualSwitch mit "
+    "einer reinen internen Spec aufruft (kein physisches Uplink-NIC), "
+    "wenn die konfigurierte vSwitch noch nicht existiert"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_033() -> None:
+    _reset_settings()
+    conn = _make_esxi_connection()
+    conn._find_virtual_switch = MagicMock(return_value=None)
+
+    host_system = MagicMock()
+    conn._get_object_by_name = MagicMock(return_value=host_system)
+
+    conn.ensure_virtual_switch_exists()
+
+    network_system = host_system.configManager.networkSystem
+    network_system.AddVirtualSwitch.assert_called_once()
+    _, kwargs = network_system.AddVirtualSwitch.call_args
+    assert kwargs["vswitchName"] == Settings.ESXI.VIRTUAL_SWITCH
+    assert not hasattr(kwargs["spec"], "bridge") or kwargs["spec"].bridge is None
+
+
+@allure.title("ensure_virtual_switch_exists ist ein No-Op, wenn die vSwitch existiert")
+@allure.description(
+    "Überprüft, dass ensure_virtual_switch_exists AddVirtualSwitch nicht "
+    "aufruft, wenn die konfigurierte vSwitch bereits existiert"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def esxi_connection_034() -> None:
+    _reset_settings()
+    conn = _make_esxi_connection()
+    conn._find_virtual_switch = MagicMock(return_value=MagicMock())
+    conn._get_object_by_name = MagicMock()
+
+    conn.ensure_virtual_switch_exists()
+
+    conn._get_object_by_name.assert_not_called()
+
+
+@allure.title("ensure_virtual_switch_exists überspringt alles im Dry-Run-Modus")
+@allure.description(
+    "Überprüft, dass ensure_virtual_switch_exists im Dry-Run-Modus keine "
+    "ESXi-API aufruft, wenn die vSwitch fehlt"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def esxi_connection_035() -> None:
+    _reset_settings()
+    Settings.IS_DRY_RUN = True
+    conn = _make_esxi_connection()
+    conn._find_virtual_switch = MagicMock(return_value=None)
+    conn._get_object_by_name = MagicMock()
+
+    try:
+        conn.ensure_virtual_switch_exists()
+    finally:
+        _reset_settings()
+
+    conn._get_object_by_name.assert_not_called()

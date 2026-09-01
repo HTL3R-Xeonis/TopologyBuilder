@@ -594,3 +594,29 @@ def vm_orchestrator_017() -> None:
     VMOrchestrator._partially_link_gns3_nodes(gns3_connection, esxi_node)
 
     gns3_connection.connect_nodes.assert_called_once_with(esxi_node, gns3_node)
+
+
+@allure.title("deploy_graph stellt die vSwitch in beiden Modi sicher")
+@allure.description(
+    "Überprüft, dass deploy_graph esxi_connection.ensure_virtual_switch_exists "
+    "unconditional aufruft, sowohl im normalen als auch im incremental-Modus - "
+    "eine fehlende vSwitch muss vor reset_virtual_switch existieren, sonst "
+    "würde dessen eigener vSwitch-Lookup fehlschlagen bevor die "
+    "Auto-Erstellung je zum Zug kommt"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_018() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    graph = MagicMock()
+    graph.nodes = {}
+
+    with (
+        patch("src.vm_orchestrator.vm_orchestrator.SSHConnection"),
+        patch("src.vm_orchestrator.vm_orchestrator.GNS3VMInterfaceSetup"),
+        patch("src.vm_orchestrator.vm_orchestrator.GNS3Connection"),
+    ):
+        orchestrator.deploy_graph(graph, "gns3", "gns3pw", incremental=True)
+
+    esxi_connection.ensure_virtual_switch_exists.assert_called_once()

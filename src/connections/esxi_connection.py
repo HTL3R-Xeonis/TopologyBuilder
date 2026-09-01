@@ -269,25 +269,84 @@ class ESXiConnection(GenericConnection):
                 names.append(getattr(device.backing, "deviceName", None))
         return names
 
+    def _find_virtual_switch(self) -> vim.host.VirtualSwitch | None:
+        """
+        Looks for a virtual Switch with the name, specified in ``Settings.Esxi.VIRTUAL_SWITCH``, on the ESXi Host.
+        :return: the virtual Switch if found, else None.
+        """
+        host = self._get_object_by_name(vim.HostSystem)
+        config = getattr(host, "config", vim.host.ConfigInfo)
+        vswitches = getattr(config.network, "vswitch", [])
+
+        for vswitch in vswitches:
+            if vswitch.name == Settings.ESXI.VIRTUAL_SWITCH:
+                return vswitch
+        return None
+
     def _get_virtual_switch(self) -> vim.host.VirtualSwitch:
         """
         Looks for a virtual Switch with the name, specified in ``Settings.Esxi.VIRTUAL_SWITCH``, on the ESXi Host.
         :return: Returns the virtual Switch if found.
         :raises ValueError: Is thrown when no fitting virtual Switch was found.
         """
-        host = self._get_object_by_name(vim.HostSystem)
-        config = getattr(host, "config", vim.host.ConfigInfo)
-        vswitch = getattr(config.network, "vswitch", [])
+        vswitch = self._find_virtual_switch()
+        if vswitch is None:
+            logger.error(
+                msg
+                := f"virtual switch {Settings.ESXI.VIRTUAL_SWITCH} not found on host: {self.ip}"
+            )
+            raise ValueError(msg)
+        return vswitch
 
-        for vswitch in vswitch:
-            if vswitch.name == Settings.ESXI.VIRTUAL_SWITCH:
-                return vswitch
-
-        logger.error(
-            msg
-            := f"virtual switch {Settings.ESXI.VIRTUAL_SWITCH} not found on host: {self.ip}"
+    def ensure_virtual_switch_exists(self) -> None:
+        """
+        Creates ``Settings.ESXI.VIRTUAL_SWITCH`` if it doesn't already
+        exist, as a plain internal-only vSwitch (no physical uplink NIC
+        attached) - isolated topology traffic never needs to leave the
+        host, and guessing which physical NIC to bind as an uplink would
+        be unsafe on infra this tool doesn't otherwise know about. A
+        no-op if the vSwitch already exists.
+        :return:
+        :raises RuntimeError: Is thrown when no host-system or network-system was found on the ESXi host, or when creation fails.
+        """
+        if Settings.ONLY_ON_GNS3:
+            return
+        if self._find_virtual_switch() is not None:
+            return
+        # ----------------------------------------------------------------------------------------------------------
+        if Settings.IS_DRY_RUN:
+            Verbosity.volumatic_print(
+                Verbosity.NORMAL,
+                f"Would create vSwitch {Settings.ESXI.VIRTUAL_SWITCH}",
+            )
+            return
+        Verbosity.volumatic_print(
+            Verbosity.NORMAL, f"Creates vSwitch {Settings.ESXI.VIRTUAL_SWITCH}"
         )
-        raise ValueError(msg)
+        # ----------------------------------------------------------------------------------------------------------
+
+        host_system = self._get_object_by_name(vim.HostSystem)
+        if host_system is None:
+            logger.error(msg := "No host system found on ESXi.")
+            raise RuntimeError(msg)
+        network_system = host_system.configManager.networkSystem
+        if network_system is None:
+            logger.error(msg := "No network system found on ESXi.")
+            raise RuntimeError(msg)
+
+        spec = vim.host.VirtualSwitch.Specification()
+        spec.numPorts = 128
+        try:
+            network_system.AddVirtualSwitch(
+                vswitchName=Settings.ESXI.VIRTUAL_SWITCH, spec=spec
+            )
+        except Exception as exc:
+            logger.error(
+                msg
+                := f"Something went wrong while creating vSwitch {Settings.ESXI.VIRTUAL_SWITCH}."
+            )
+            raise RuntimeError(msg) from exc
+        logger.info(f"Created vSwitch '{Settings.ESXI.VIRTUAL_SWITCH}'")
 
     def _add_port_group(self, vlan: VirtualLan) -> None:
         """

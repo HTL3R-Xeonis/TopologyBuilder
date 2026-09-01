@@ -117,6 +117,7 @@ class VMOrchestrator:
             May also be thrown when a portgroup already exists on the ESXi host. May also be thrown when no host-system or network-system was found on the ESXi host.
         """
         self._configure_gns3_interfaces(graph, gns3_username, gns3_password)
+        self.esxi_connection.ensure_virtual_switch_exists()
         if not incremental:
             self.delete_unused_vms(graph)
             self.delete_stale_esxi_resources(graph)
