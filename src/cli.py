@@ -29,6 +29,24 @@ ESXI_PASSWORD_OPTION = typer.Option(
 GNS3_VM_NAME_OPTION = typer.Option(
     None, "--gns3_vm_name", "-n", help="The name of the GNS3 VM on the ESXi server."
 )
+ESXI_DATASTORE_OPTION = typer.Option(
+    None,
+    "--datastore",
+    help="Datastore to place newly imported topology VMs on. Auto-picks "
+    "the one with the most free space if not given.",
+)
+ESXI_VIRTUAL_SWITCH_OPTION = typer.Option(
+    None,
+    "--virtual_switch",
+    help="Name of the vSwitch to create/remove port groups on. Created "
+    "as an internal-only vSwitch if it doesn't already exist.",
+)
+ESXI_TRUNK_PORT_GROUP_OPTION = typer.Option(
+    None,
+    "--trunk_port_group",
+    help="Port group carrying the GNS3 VM's VLAN trunk NIC. Created if "
+    "it doesn't already exist.",
+)
 
 
 def _apply_esxi_options(
@@ -36,6 +54,9 @@ def _apply_esxi_options(
     esxi_username: str | None,
     esxi_password: str | None,
     gns3_vm_name: str | None,
+    datastore: str | None = None,
+    virtual_switch: str | None = None,
+    trunk_port_group: str | None = None,
 ) -> None:
     """
     Applies the given ESXi/GNS3-VM connection options to Settings, leaving
@@ -50,6 +71,12 @@ def _apply_esxi_options(
         Settings.ESXI.PASSWORD = esxi_password
     if gns3_vm_name is not None:
         Settings.ESXI.GNS3_VM_NAME = gns3_vm_name
+    if datastore is not None:
+        Settings.ESXI.DATASTORE = datastore
+    if virtual_switch is not None:
+        Settings.ESXI.VIRTUAL_SWITCH = virtual_switch
+    if trunk_port_group is not None:
+        Settings.ESXI.TRUNK_PORT_GROUP = trunk_port_group
 
 
 def _make_orchestrator() -> VMOrchestrator:
@@ -136,6 +163,9 @@ def deploy(
     esxi_username: str = ESXI_USERNAME_OPTION,
     esxi_password: str = ESXI_PASSWORD_OPTION,
     gns3_vm_name: str = GNS3_VM_NAME_OPTION,
+    datastore: str = ESXI_DATASTORE_OPTION,
+    virtual_switch: str = ESXI_VIRTUAL_SWITCH_OPTION,
+    trunk_port_group: str = ESXI_TRUNK_PORT_GROUP_OPTION,
     gns3_username: str = typer.Option(
         None, "--gns3_username", "-u", help="A username of the GNS3 server."
     ),
@@ -171,7 +201,15 @@ def deploy(
     ),
 ) -> None:
     """Deploys the nodes from the topology on ESXi and GNS3."""
-    _apply_esxi_options(address, esxi_username, esxi_password, gns3_vm_name)
+    _apply_esxi_options(
+        address,
+        esxi_username,
+        esxi_password,
+        gns3_vm_name,
+        datastore,
+        virtual_switch,
+        trunk_port_group,
+    )
 
     if only_on_gns3:
         Settings.ONLY_ON_GNS3 = only_on_gns3
@@ -210,12 +248,23 @@ def destroy(
     esxi_username: str = ESXI_USERNAME_OPTION,
     esxi_password: str = ESXI_PASSWORD_OPTION,
     gns3_vm_name: str = GNS3_VM_NAME_OPTION,
+    datastore: str = ESXI_DATASTORE_OPTION,
+    virtual_switch: str = ESXI_VIRTUAL_SWITCH_OPTION,
+    trunk_port_group: str = ESXI_TRUNK_PORT_GROUP_OPTION,
 ) -> None:
     """
     Tears down a previously deployed topology: deletes its GNS3 project's
     nodes and its ESXi-hosted VMs/port groups.
     """
-    _apply_esxi_options(address, esxi_username, esxi_password, gns3_vm_name)
+    _apply_esxi_options(
+        address,
+        esxi_username,
+        esxi_password,
+        gns3_vm_name,
+        datastore,
+        virtual_switch,
+        trunk_port_group,
+    )
 
     validator = TopologyFileValidation(Settings.TOPOLOGY_FILE)
     validator.validate_file()
@@ -233,6 +282,9 @@ def verify(
     esxi_username: str = ESXI_USERNAME_OPTION,
     esxi_password: str = ESXI_PASSWORD_OPTION,
     gns3_vm_name: str = GNS3_VM_NAME_OPTION,
+    datastore: str = ESXI_DATASTORE_OPTION,
+    virtual_switch: str = ESXI_VIRTUAL_SWITCH_OPTION,
+    trunk_port_group: str = ESXI_TRUNK_PORT_GROUP_OPTION,
 ) -> None:
     """
     Runs a structural health check against a deployed topology: confirms
@@ -242,7 +294,15 @@ def verify(
     assigns an IP address to any node from its own config, so there is no
     address to ping.
     """
-    _apply_esxi_options(address, esxi_username, esxi_password, gns3_vm_name)
+    _apply_esxi_options(
+        address,
+        esxi_username,
+        esxi_password,
+        gns3_vm_name,
+        datastore,
+        virtual_switch,
+        trunk_port_group,
+    )
 
     validator = TopologyFileValidation(Settings.TOPOLOGY_FILE)
     validator.validate_file()
@@ -268,12 +328,23 @@ def status(
     esxi_username: str = ESXI_USERNAME_OPTION,
     esxi_password: str = ESXI_PASSWORD_OPTION,
     gns3_vm_name: str = GNS3_VM_NAME_OPTION,
+    datastore: str = ESXI_DATASTORE_OPTION,
+    virtual_switch: str = ESXI_VIRTUAL_SWITCH_OPTION,
+    trunk_port_group: str = ESXI_TRUNK_PORT_GROUP_OPTION,
 ) -> None:
     """
     Checks connectivity to the ESXi host and GNS3 VM, and lists GNS3
     projects with each one's node/started counts. No topology file needed.
     """
-    _apply_esxi_options(address, esxi_username, esxi_password, gns3_vm_name)
+    _apply_esxi_options(
+        address,
+        esxi_username,
+        esxi_password,
+        gns3_vm_name,
+        datastore,
+        virtual_switch,
+        trunk_port_group,
+    )
 
     esxi_connection = ESXiConnection(
         Settings.ESXI.IP,
@@ -337,9 +408,20 @@ def portgroups(
     address: str = ESXI_ADDRESS_OPTION,
     esxi_username: str = ESXI_USERNAME_OPTION,
     esxi_password: str = ESXI_PASSWORD_OPTION,
+    datastore: str = ESXI_DATASTORE_OPTION,
+    virtual_switch: str = ESXI_VIRTUAL_SWITCH_OPTION,
+    trunk_port_group: str = ESXI_TRUNK_PORT_GROUP_OPTION,
 ) -> None:
     """List the port groups configured on the ESXi host's vSwitch."""
-    _apply_esxi_options(address, esxi_username, esxi_password, None)
+    _apply_esxi_options(
+        address,
+        esxi_username,
+        esxi_password,
+        None,
+        datastore,
+        virtual_switch,
+        trunk_port_group,
+    )
 
     esxi_connection = ESXiConnection(
         Settings.ESXI.IP,

@@ -7,9 +7,11 @@ __license__ = "GNU GPLv3"
 from unittest.mock import patch
 
 import allure
+
 from typer.testing import CliRunner
 
 from src.cli import app
+from src.settings import Settings
 
 runner = CliRunner(env={"COLUMNS": "200", "NO_COLOR": "1", "TERM": "dumb"})
 
@@ -426,3 +428,56 @@ def cli_012() -> None:
     assert result.exit_code == 1
     assert "[FAIL]" in result.output
     assert "1/2 checks passed" in result.output
+
+
+@allure.title(
+    "deploy-Befehl leitet --datastore/--virtual_switch/--trunk_port_group weiter"
+)
+@allure.description(
+    "Überprüft, dass der deploy-Befehl die neuen --datastore/"
+    "--virtual_switch/--trunk_port_group Flags auf die passenden "
+    "Settings.ESXI-Felder anwendet"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.CRITICAL)
+def cli_013() -> None:
+    with (
+        patch("src.cli.TopologyFileValidation") as validator_cls,
+        patch("src.cli.Graph"),
+        patch("src.cli.VMOrchestrator"),
+    ):
+        validator_cls.return_value.nodes = []
+        validator_cls.return_value.edges = []
+
+        try:
+            result = runner.invoke(
+                app,
+                [
+                    "deploy",
+                    "--address",
+                    "10.20.20.202",
+                    "--esxi_username",
+                    "root",
+                    "--esxi_password",
+                    "pw",
+                    "--datastore",
+                    "my-datastore",
+                    "--virtual_switch",
+                    "vSwitch1",
+                    "--trunk_port_group",
+                    "PG-TRUNK",
+                ],
+            )
+            datastore = Settings.ESXI.DATASTORE
+            virtual_switch = Settings.ESXI.VIRTUAL_SWITCH
+            trunk_port_group = Settings.ESXI.TRUNK_PORT_GROUP
+        finally:
+            Settings.ESXI.DATASTORE = None
+            Settings.ESXI.VIRTUAL_SWITCH = "internal_network"
+            Settings.ESXI.TRUNK_PORT_GROUP = "PG_GNS3_TRUNK"
+
+    assert result.exit_code == 0, result.output
+    assert datastore == "my-datastore"
+    assert virtual_switch == "vSwitch1"
+    assert trunk_port_group == "PG-TRUNK"
