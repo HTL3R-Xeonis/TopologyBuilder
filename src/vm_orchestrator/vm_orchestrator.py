@@ -84,9 +84,11 @@ class VMOrchestrator:
         :param gns3_username: Username for the GNS3 VM
         :param gns3_password: Password for the GNS3 VM. Set to  None if no password is set.
         :param incremental: if True, skips resetting the ESXi vSwitch,
-            deleting unused VMs (see delete_unused_vms - also skipped in
-            incremental mode, same reasoning), and reuses an existing GNS3
-            project instead of deleting and recreating it - only ESXi
+            deleting unused VMs (see delete_unused_vms) and stale
+            same-topology VMs (see delete_stale_esxi_resources - both also
+            skipped in incremental mode, same reasoning), and reuses an
+            existing GNS3 project instead of deleting and recreating it -
+            only ESXi
             VMs/GNS3 nodes/links that don't already exist by name/endpoint
             get created, everything already present is left running
             untouched. Never removes anything dropped from the graph - use
@@ -114,6 +116,7 @@ class VMOrchestrator:
         self._configure_gns3_interfaces(graph, gns3_username, gns3_password)
         if not incremental:
             self.delete_unused_vms(graph)
+            self.delete_stale_esxi_resources(graph)
             self.esxi_connection.reset_virtual_switch()
         self.esxi_connection.initialize_virtual_switch(graph)
 

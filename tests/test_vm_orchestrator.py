@@ -407,3 +407,61 @@ def vm_orchestrator_011() -> None:
         orchestrator.deploy_graph(graph, "gns3", "gns3pw", incremental=True)
 
     mock_delete_unused.assert_not_called()
+
+
+@allure.title(
+    "deploy_graph räumt VMs von einer früheren Deploy derselben Topologie auf"
+)
+@allure.description(
+    "Überprüft, dass deploy_graph im Normalbetrieb delete_stale_esxi_"
+    "resources mit dem Graph aufruft, bevor es fortfährt - ohne das würde "
+    "eine zweite non-incremental Deploy derselben Topologie an der "
+    "Port-Group der ersten Deploy scheitern, da deren VM-NIC noch daran "
+    "hängt (delete_unused_vms allein greift hier nicht, da diese VM "
+    "namentlich zur aktuellen Topologie gehört)"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_012() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    graph = MagicMock()
+    graph.nodes = {}
+
+    with (
+        patch("src.vm_orchestrator.vm_orchestrator.SSHConnection"),
+        patch("src.vm_orchestrator.vm_orchestrator.GNS3VMInterfaceSetup"),
+        patch("src.vm_orchestrator.vm_orchestrator.GNS3Connection"),
+        patch.object(orchestrator, "delete_unused_vms"),
+        patch.object(orchestrator, "delete_stale_esxi_resources") as mock_delete_stale,
+    ):
+        orchestrator.deploy_graph(graph, "gns3", "gns3pw")
+
+    mock_delete_stale.assert_called_once_with(graph)
+
+
+@allure.title(
+    "deploy_graph überspringt delete_stale_esxi_resources im incremental-Modus"
+)
+@allure.description(
+    "Überprüft, dass deploy_graph im incremental-Modus delete_stale_esxi_"
+    "resources nicht aufruft, aus demselben Grund wie reset_virtual_switch"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.NORMAL)
+def vm_orchestrator_013() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    graph = MagicMock()
+    graph.nodes = {}
+
+    with (
+        patch("src.vm_orchestrator.vm_orchestrator.SSHConnection"),
+        patch("src.vm_orchestrator.vm_orchestrator.GNS3VMInterfaceSetup"),
+        patch("src.vm_orchestrator.vm_orchestrator.GNS3Connection"),
+        patch.object(orchestrator, "delete_unused_vms"),
+        patch.object(orchestrator, "delete_stale_esxi_resources") as mock_delete_stale,
+    ):
+        orchestrator.deploy_graph(graph, "gns3", "gns3pw", incremental=True)
+
+    mock_delete_stale.assert_not_called()
