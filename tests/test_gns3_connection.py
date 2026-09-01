@@ -345,28 +345,46 @@ def gns3_connection_011() -> None:
     assert result is None
 
 
-@allure.title("_next_position gibt für jeden Node eine andere Grid-Position zurück")
+@allure.title("set_node_positions gibt jedem Node im Graph eine eigene Position")
 @allure.description(
-    "Überprüft, dass _next_position bei aufeinanderfolgenden Aufrufen "
-    "unterschiedliche (x, y)-Koordinaten liefert, statt für jeden Node "
-    "dieselbe feste Position - sonst würden alle Nodes im GNS3 Web UI "
-    "übereinander gestapelt landen"
+    "Überprüft, dass set_node_positions für jeden Node im Graph eine "
+    "eigene (x, y)-Position berechnet (über das Force-Directed-Layout aus "
+    "src.graph.layout), statt dass alle Nodes im GNS3 Web UI übereinander "
+    "landen, und dass _position_for diese Positionen danach zurückgibt"
 )
 @allure.tag("positiv-test", "gns3-connection")
 @allure.feature("gns3_connection")
 @allure.severity(allure.severity_level.CRITICAL)
 def gns3_connection_012() -> None:
-    conn = GNS3Connection.__new__(GNS3Connection)
-    conn._next_node_index = 0
+    from src.graph import Graph
 
-    positions = [conn._next_position() for _ in range(7)]
-
-    assert len(set(positions)) == len(positions)
-    assert positions[0] == (0, 0)
-    assert positions[GNS3Connection._POSITION_COLUMNS] == (
-        0,
-        GNS3Connection._POSITION_Y_SPACING,
+    Settings.API.LITERAL_API_VALUES = True
+    graph = Graph(
+        [{"image": "VPCS", "role": "ROUTER", "names": ["R1", "R2", "R3"]}],
+        [["R1", "gi0/0", "R2", "gi0/0"], ["R2", "gi0/1", "R3", "gi0/0"]],
     )
+
+    conn = GNS3Connection.__new__(GNS3Connection)
+    conn.set_node_positions(graph)
+
+    positions = [conn._position_for(name) for name in ("R1", "R2", "R3")]
+    assert len(set(positions)) == 3
+
+
+@allure.title(
+    "_position_for fällt auf (0, 0) zurück, wenn keine Position berechnet wurde"
+)
+@allure.description(
+    "Überprüft, dass _position_for (0, 0) zurückgibt, wenn "
+    "set_node_positions nie aufgerufen wurde oder der Node nicht im "
+    "verwendeten Graph war"
+)
+@allure.tag("negativ-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_connection_013() -> None:
+    conn = GNS3Connection.__new__(GNS3Connection)
+    assert conn._position_for("R1") == (0, 0)
 
 
 def _make_node_info(name: str, port_names: list[str]) -> dict:
@@ -391,7 +409,7 @@ def _make_interface(name: str, parent_name: str = "R1") -> MagicMock:
 @allure.tag("positiv-test", "gns3-connection")
 @allure.feature("gns3_connection")
 @allure.severity(allure.severity_level.CRITICAL)
-def gns3_connection_013() -> None:
+def gns3_connection_014() -> None:
     node_info = _make_node_info("R1", ["Gi0/0", "Gi0/1"])
     adapter = GNS3Connection._get_adapter(node_info, _make_interface("gi0/1"))
     assert adapter["name"] == "Gi0/1"
@@ -406,7 +424,7 @@ def gns3_connection_013() -> None:
 @allure.tag("positiv-test", "gns3-connection")
 @allure.feature("gns3_connection")
 @allure.severity(allure.severity_level.CRITICAL)
-def gns3_connection_014() -> None:
+def gns3_connection_015() -> None:
     node_info = _make_node_info("PC1", ["Ethernet0"])
     adapter = GNS3Connection._get_adapter(node_info, _make_interface("gi0/0", "PC1"))
     assert adapter["name"] == "Ethernet0"
@@ -421,7 +439,7 @@ def gns3_connection_014() -> None:
 @allure.tag("positiv-test", "gns3-connection")
 @allure.feature("gns3_connection")
 @allure.severity(allure.severity_level.CRITICAL)
-def gns3_connection_015() -> None:
+def gns3_connection_016() -> None:
     node_info = _make_node_info("R1", ["Ethernet0", "Ethernet1", "Ethernet2"])
     adapter = GNS3Connection._get_adapter(node_info, _make_interface("gi0/2"))
     assert adapter["name"] == "Ethernet2"
@@ -435,7 +453,7 @@ def gns3_connection_015() -> None:
 @allure.tag("negativ-test", "gns3-connection")
 @allure.feature("gns3_connection")
 @allure.severity(allure.severity_level.CRITICAL)
-def gns3_connection_016() -> None:
+def gns3_connection_017() -> None:
     node_info = _make_node_info("R1", ["Ethernet0", "Ethernet1"])
     with pytest.raises(ValueError, match="gi0/5"):
         GNS3Connection._get_adapter(node_info, _make_interface("gi0/5"))

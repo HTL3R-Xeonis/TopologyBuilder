@@ -9,9 +9,11 @@ import requests
 from ..settings import Verbosity, Settings
 
 if TYPE_CHECKING:
+    from src.graph import Graph
     from src.graph.blocks import GenericNode, Interface
 
 from .api_handler import APIHandler
+from src.graph.layout import compute_node_positions
 from loguru import logger
 
 
@@ -21,22 +23,31 @@ class GNS3Connection(APIHandler):
     Object which provides methods regarding the GNS3 API
     """
 
-    _POSITION_COLUMNS = 5
-    _POSITION_X_SPACING = 200
-    _POSITION_Y_SPACING = 150
-
-    def _next_position(self) -> tuple[int, int]:
+    def set_node_positions(self, graph: Graph) -> None:
         """
-        Returns the next grid-cell canvas position for a newly created
-        node, advancing an internal counter each call - without this,
-        every node would land on the exact same hardcoded coordinate and
-        pile up on top of each other in the GNS3 Web UI.
+        Precomputes a force-directed canvas layout for every node in the
+        graph, so create_node/_create_builtin_nodes can place each node
+        sensibly relative to its neighbours instead of everything landing
+        on the same hardcoded coordinate and piling up in the GNS3 Web UI.
+        Call this once, right after construction, before creating any
+        nodes.
+        :param graph: the topology about to be deployed
+        :return:
+        """
+        self._positions = {
+            name: (int(x), int(y))
+            for name, (x, y) in compute_node_positions(graph.nodes).items()
+        }
+
+    def _position_for(self, node_name: str) -> tuple[int, int]:
+        """
+        Returns the precomputed canvas position for a node, or a fallback
+        if set_node_positions was never called (e.g. in tests) or the
+        node wasn't part of the graph it was computed from.
+        :param node_name: name of the node to position
         :return: (x, y) canvas coordinates
         """
-        index = self._next_node_index
-        self._next_node_index += 1
-        row, col = divmod(index, self._POSITION_COLUMNS)
-        return col * self._POSITION_X_SPACING, row * self._POSITION_Y_SPACING
+        return getattr(self, "_positions", {}).get(node_name, (0, 0))
 
     def __init__(
         self, ip: str, port: int, project_name: str, incremental: bool = False
@@ -58,7 +69,7 @@ class GNS3Connection(APIHandler):
         super().__init__(ip, port)
         self.url = f"http://{ip}:{port}"
         self.incremental = incremental
-        self._next_node_index = 0
+        self._positions: dict[str, tuple[int, int]] = {}
 
         self.project_name = project_name
         self.project = self._init_project(project_name)
@@ -294,7 +305,7 @@ class GNS3Connection(APIHandler):
         if template["builtin"]:
             return self._create_builtin_nodes(node, template)
 
-        x, y = self._next_position()
+        x, y = self._position_for(node.name)
         payload = {"name": node.name, "x": x, "y": y}
         try:
             response = self.post(
@@ -342,7 +353,7 @@ class GNS3Connection(APIHandler):
             # ----------------------------------------------------------------------------------------------------------
             template = self._get_template(template)
 
-        x, y = self._next_position()
+        x, y = self._position_for(node.name)
         payload = {
             "name": node.name,
             "node_type": template["template_type"],

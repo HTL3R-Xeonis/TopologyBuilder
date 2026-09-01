@@ -126,6 +126,7 @@ class VMOrchestrator:
             Settings.GNS3.PROJECT_NAME,
             incremental=incremental,
         )
+        gns3_conn.set_node_positions(graph)
 
         for node in graph.nodes.values():
             if node.env == Environment.ON_ESXI:
