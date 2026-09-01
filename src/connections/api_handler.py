@@ -136,74 +136,17 @@ class APIHandler:
         return {template["name"] for template in data["templates"]}
 
     @staticmethod
-    def find_esxi_template_file(image: str) -> str:
+    def get_ova(template_name: str) -> str:
         """
-        Resolves a node's ``image`` to the exact OVA filename on the
-        ESXi Template-API's NFS share, for use with the OVA-deploy API's
-        ``ova_filename`` field (which does a plain filename lookup on its
-        own mounted template directory, not a fuzzy name match).
-        :param image: image name to search for, e.g. a node's image
-        :return: the matched template's exact OVA filename.
-        :raises ValueError: Is thrown when no template matches ``image``.
+        Returns the ova file name of the first matching template.
+        :param template_name: Name of the template.
+        :return: Returns the ova file name of the template.
         :raises TimeoutError: Is thrown when it takes too long to receive a response.
         """
-        from src.graph.environment import normalize_template_name
-
-        data = APIHandler.get(f"{Settings.API.ESXI_TEMPLATE_SERVER_URL}/api/templates")
-        normalized = normalize_template_name(image)
-        for template in data["templates"]:
-            if normalize_template_name(template["name"]) == normalized:
-                return template["file"]
-
-        logger.error(msg := f"No ESXi template found matching image '{image}'")
-        raise ValueError(msg)
-
-    @staticmethod
-    def deploy_ova(
-        ip: str,
-        port: int,
-        vm_name: str,
-        ova_filename: str,
-        datastore: str,
-        network: dict[str, str],
-    ) -> None:
-        """
-        Deploys an OVA straight from the TopologyBuilderServices API's own
-        NFS mount to ESXi, entirely server-side - no local download/upload
-        hop on this project's side.
-        :param ip: IP address of the ESXi host.
-        :param port: Port of the ESXi host.
-        :param vm_name: Name to give the imported VM.
-        :param ova_filename: Exact OVA filename on the service's NFS mount.
-        :param datastore: Name of the datastore to import onto.
-        :param network: Mapping of the OVA's interface names to ESXi port group names.
-        :return:
-        :raises RuntimeError: Is thrown when the API call fails.
-        :raises TimeoutError: Is thrown when it takes too long to receive a response.
-        """
-        try:
-            response = requests.post(
-                f"{Settings.API.OVA_DEPLOY_URL}/deploy/ova",
-                json={
-                    "ip": ip,
-                    "port": port,
-                    "vm_name": vm_name,
-                    "ova_filename": ova_filename,
-                    "datastore": datastore,
-                    "network": network,
-                },
-                timeout=Settings.API.OVA_DEPLOY_TIMEOUT_SECONDS,
-            )
-            response.raise_for_status()
-        except requests.Timeout:
-            logger.error(msg := f"OVA deploy request timed out for VM '{vm_name}'")
-            raise TimeoutError(msg)
-        except requests.exceptions.RequestException as error:
-            logger.error(
-                msg := f"OVA deploy request failed for VM '{vm_name}': {error}. "
-                f"Response: {getattr(error.response, 'text', '')}"
-            )
-            raise RuntimeError(msg)
+        data = APIHandler.get(
+            f"{Settings.API.ESXI_TEMPLATE_SERVER_URL}/api/search?name={template_name}"
+        )
+        return next((r for r in data["results"]))["template"]["file"]
 
     @staticmethod
     def get_gns3_template_names() -> Set[str]:

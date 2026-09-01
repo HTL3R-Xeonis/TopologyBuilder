@@ -70,21 +70,13 @@ class GNS3VMInterfaceSetup:
     def _create_subinterface_creation_commands(self, graph: Graph) -> None:
         """
         Creates the commands for the creation of subinterfaces, on the ``self.parent_interface`` interface.
-        A direct ESXi-to-ESXi link's two interfaces share the exact same
-        VirtualLan object (see Graph._assign_vlans), so without deduping
-        here, the same subinterface name would be created twice - the
-        second ``ip link add`` fails since the name already exists, and
-        since the script runs with ``set -e``, that aborts every
-        remaining subinterface command in the whole script.
         :return:
         """
-        seen_vlan_ids: set[int] = set()
         for node in graph.nodes.values():
             for interface in node.interfaces.values():
                 vlan = interface.vlan
-                if vlan is None or vlan.id in seen_vlan_ids:
+                if vlan is None:
                     continue
-                seen_vlan_ids.add(vlan.id)
 
                 # ----------------------------------------------------------------------------------------------------------
                 if Settings.IS_DRY_RUN:

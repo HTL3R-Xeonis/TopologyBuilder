@@ -28,16 +28,6 @@ class VirtualLan:
         self._vlan_id: int = VirtualLan._vlan_id
         VirtualLan._vlan_id += 1
 
-    @classmethod
-    def reset(cls) -> None:
-        """
-        Resets the VLAN id counter back to its starting value (2), so a
-        freshly built Graph doesn't inherit VLAN numbers left over from a
-        previous Graph built earlier in the same process.
-        :return:
-        """
-        cls._vlan_id = 2
-
     @property
     def id(self) -> int:
         """

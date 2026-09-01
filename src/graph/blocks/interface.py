@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .generic_node import GenericNode
 
+from src.graph.environment import Environment
 from .vlan import VirtualLan
 from .formatter import nested_formatter
 
@@ -35,6 +36,9 @@ class Interface:
         self._neighbour: GenericNode | None = None
         self._vlan: VirtualLan | None = None
 
+        if node.env == Environment.ON_ESXI:
+            self._vlan = VirtualLan(node.name, if_name)
+
     @property
     def name(self) -> str:
         """
@@ -60,18 +64,6 @@ class Interface:
         :return: Returns this attribute
         """
         return self._vlan
-
-    @vlan.setter
-    def vlan(self, vlan: VirtualLan) -> None:
-        """
-        Sets the VirtualLan for this Interface. Assigned by Graph once the
-        full edge set is known, since which VLAN (if any) a direct
-        ESXi-to-ESXi link's two interfaces should share can't be decided at
-        Interface construction time - neighbours aren't connected yet.
-        :param vlan: the VirtualLan to assign
-        :return:
-        """
-        self._vlan = vlan
 
     @property
     def neighbour(self) -> GenericNode | None:
