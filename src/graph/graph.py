@@ -9,6 +9,8 @@ from src.graph.blocks.vlan import VirtualLan
 from src.graph.environment import Environment
 from src.graph.layout import render_graph
 from loguru import logger
+from rich.console import Console
+from rich.tree import Tree
 
 
 class Graph:
@@ -117,6 +119,44 @@ class Graph:
         :return:
         """
         print(render_graph(self.nodes))
+
+    def print_connection_tree(self) -> None:
+        """
+        Prints a colored tree listing each device and the devices it is
+        connected to, via its interfaces - an alternative to visualize()'s
+        ASCII diagram, better suited to reading off exact interface-to-
+        interface wiring rather than seeing the overall topology shape.
+        :return:
+        """
+        tree = Tree("[bold]Topology[/bold]")
+
+        for name, node in self.nodes.items():
+            device = tree.add(
+                f"[bold cyan]{name}[/bold cyan] [dim]({node.image})[/dim]"
+            )
+
+            interfaces = list(node.interfaces.items())
+            if not interfaces:
+                device.add("[dim](no interfaces)[/dim]")
+                continue
+
+            for if_name, interface in interfaces:
+                neighbour = interface.neighbour
+                if neighbour is None:
+                    device.add(f"[yellow]{if_name}[/yellow] [dim]-- unconnected[/dim]")
+                    continue
+
+                neighbour_interface = neighbour.get_interface(node)
+                neighbour_if_name = (
+                    neighbour_interface.name if neighbour_interface else "?"
+                )
+                device.add(
+                    f"[yellow]{if_name}[/yellow] [dim]->[/dim] "
+                    f"[bold green]{neighbour.name}[/bold green]"
+                    f"[dim]:{neighbour_if_name}[/dim]"
+                )
+
+        Console().print(tree)
 
     def __str__(self) -> str:
         """

@@ -143,6 +143,12 @@ def visualize(
     detailed: bool = typer.Option(
         False, "--detail", "-d", help="Prints the details of the network graph."
     ),
+    tree: bool = typer.Option(
+        False,
+        "--tree",
+        help="Prints a colored tree of each device and its exact "
+        "interface-to-interface connections, instead of the ASCII diagram.",
+    ),
 ) -> None:
     """Construct the graph and print it."""
     validator = TopologyFileValidation(Settings.TOPOLOGY_FILE)
@@ -152,6 +158,10 @@ def visualize(
 
     if detailed:
         print(repr(graph))
+        return
+
+    if tree:
+        graph.print_connection_tree()
         return
 
     graph.visualize()

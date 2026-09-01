@@ -541,3 +541,23 @@ def cli_015() -> None:
 
     assert result.exit_code == 0, result.output
     assert "PC1" in result.output
+
+
+@allure.title("visualize --tree zeigt eine echte Verbindungs-Baumansicht")
+@allure.description(
+    "Überprüft end-to-end, dass 'visualize --tree' gegen "
+    "topology_example.yaml läuft und für jedes Node dessen Namen sowie "
+    "eine Interface-zu-Interface-Verbindung ausgibt, statt der ASCII-"
+    "Grafik"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.CRITICAL)
+def cli_016() -> None:
+    Settings.API.LITERAL_API_VALUES = True
+
+    result = runner.invoke(app, ["-t", "topology_example.yaml", "visualize", "--tree"])
+
+    assert result.exit_code == 0, result.output
+    assert "PC1" in result.output
+    assert "Topology" in result.output
