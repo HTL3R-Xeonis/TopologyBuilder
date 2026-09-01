@@ -523,3 +523,24 @@ def cli_014() -> None:
     assert "[FAIL]" in result.output
     assert "1/2 checks passed" in result.output
     validator_cls.return_value.validate_file.assert_not_called()
+
+
+@allure.title("visualize-Befehl rendert eine echte Topologie ohne Fehler")
+@allure.description(
+    "Überprüft end-to-end (ohne Graph/phart zu mocken), dass der "
+    "visualize-Befehl gegen topology_example.yaml läuft, ohne einen "
+    "Fehler zu werfen - deckt ab, dass Graph.visualize()'s "
+    "LayoutOptions-Aufruf mit der real installierbaren phart-Version "
+    "(1.1.4) kompatibel ist, nicht nur mit der ursprünglich im Code "
+    "referenzierten, öffentlich nicht verfügbaren 2.1.0"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.CRITICAL)
+def cli_015() -> None:
+    Settings.API.LITERAL_API_VALUES = True
+
+    result = runner.invoke(app, ["-t", "topology_example.yaml", "visualize"])
+
+    assert result.exit_code == 0, result.output
+    assert "PC1" in result.output

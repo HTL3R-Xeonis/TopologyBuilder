@@ -152,10 +152,7 @@ class Graph:
 
         renderer = ASCIIRenderer(
             G,
-            options=LayoutOptions(
-                node_style=NodeStyle.SQUARE,
-                layout_strategy="kamada_kawai",
-            ),
+            options=LayoutOptions(node_style=NodeStyle.SQUARE),
         )
 
         print(renderer.render())
