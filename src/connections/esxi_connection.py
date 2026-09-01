@@ -377,13 +377,24 @@ class ESXiConnection(GenericConnection):
     def _add_port_group(self, vlan: VirtualLan) -> None:
         """
         Ensures a port group for the given ``vlan`` exists on the virtual
-        switch, creating it if it's missing. A no-op if a port group with
-        that name already exists - AddPortGroup itself has no "create if
-        missing" mode, so the existing-names check happens here instead,
-        which is what lets a redeployed/incremental topology reuse port
-        groups from an earlier deploy instead of erroring out.
-        The policies are inherited from the virtual Switch on ESXi.
+        switch, creating it if it's missing.
         :param vlan: VLAN Object of the ``graph.blocks.Interface`` to create the port group
+        :return:
+        :raises RuntimeError: Is thrown when no host-system or network-system was found on the ESXi host.
+        """
+        self._ensure_port_group(vlan.name, vlan.id)
+
+    def _ensure_port_group(self, name: str, vlan_id: int) -> None:
+        """
+        Ensures a port group with the given ``name``/``vlan_id`` exists on
+        the virtual switch, creating it if it's missing. A no-op if a port
+        group with that name already exists - AddPortGroup itself has no
+        "create if missing" mode, so the existing-names check happens here
+        instead, which is what lets a redeployed/incremental topology
+        reuse port groups from an earlier deploy instead of erroring out.
+        The policies are inherited from the virtual Switch on ESXi.
+        :param name: name of the port group
+        :param vlan_id: VLAN ID to tag the port group with
         :return:
         :raises RuntimeError: Is thrown when no host-system or network-system was found on the ESXi host.
         """
@@ -391,9 +402,7 @@ class ESXiConnection(GenericConnection):
             return
         # ----------------------------------------------------------------------------------------------------------
         if Settings.IS_DRY_RUN:
-            Verbosity.volumatic_print(
-                Verbosity.NORMAL, f"Would add portgroup {vlan.name}"
-            )
+            Verbosity.volumatic_print(Verbosity.NORMAL, f"Would add portgroup {name}")
             return
         # ----------------------------------------------------------------------------------------------------------
 
@@ -409,23 +418,34 @@ class ESXiConnection(GenericConnection):
         existing_names = {
             portgroup.spec.name for portgroup in network_system.networkInfo.portgroup
         }
-        if vlan.name in existing_names:
+        if name in existing_names:
             return
 
-        Verbosity.volumatic_print(Verbosity.NORMAL, f"Adds portgroup {vlan.name}")
+        Verbosity.volumatic_print(Verbosity.NORMAL, f"Adds portgroup {name}")
         spec = vim.host.PortGroup.Specification()
-        spec.name = vlan.name
+        spec.name = name
         spec.vswitchName = Settings.ESXI.VIRTUAL_SWITCH
-        spec.vlanId = vlan.id
+        spec.vlanId = vlan_id
         spec.policy = vim.host.NetworkPolicy()
 
         try:
             network_system.AddPortGroup(spec)
         except Exception as exc:
-            logger.error(
-                msg := f"Something went wrong while adding port group {vlan.name}."
-            )
+            logger.error(msg := f"Something went wrong while adding port group {name}.")
             raise RuntimeError(msg) from exc
+
+    def ensure_trunk_port_group_exists(self) -> None:
+        """
+        Ensures ``Settings.ESXI.TRUNK_PORT_GROUP`` exists (VLAN 4095 -
+        pass-all-tags/VGT mode, the standard convention for a trunk port
+        group carrying every VLAN through to the GNS3 VM), creating it if
+        missing, then ensures it accepts promiscuous mode/MAC changes/
+        forged transmits either way.
+        :return:
+        :raises RuntimeError: Is thrown when no host-system or network-system was found on the ESXi host, or when creation fails.
+        """
+        self._ensure_port_group(Settings.ESXI.TRUNK_PORT_GROUP, 4095)
+        self.ensure_bridging_security_policy(Settings.ESXI.TRUNK_PORT_GROUP)
 
     def _get_port_groups(self) -> List[pyVmomi.vim.host.PortGroup]:
         """
@@ -534,11 +554,12 @@ class ESXiConnection(GenericConnection):
     def initialize_virtual_switch(self, graph: Graph) -> None:
         """
         Creates the needed port groups on the virtual switch, then ensures
-        the trunk port group (``Settings.ESXI.TRUNK_PORT_GROUP``) accepts
-        promiscuous mode/MAC changes/forged transmits - required for GNS3's
-        Cloud nodes to bridge in topology devices' own MACs through it.
-        ESXi's default security policy silently drops that traffic
-        otherwise, with no error on either side.
+        the trunk port group (``Settings.ESXI.TRUNK_PORT_GROUP``) exists
+        (creating it if missing) and accepts promiscuous mode/MAC changes/
+        forged transmits - required for GNS3's Cloud nodes to bridge in
+        topology devices' own MACs through it. ESXi's default security
+        policy silently drops that traffic otherwise, with no error on
+        either side.
         :param graph: Port groups are based of the VLANs on each ``Interface`` of each ``Node`` in given ``graph``.
         :return:
         :raises RuntimeError: Is thrown when a portgroup already exists  on the ESXi host.
@@ -551,7 +572,7 @@ class ESXiConnection(GenericConnection):
                     continue
                 self._add_port_group(vlan)
 
-        self.ensure_bridging_security_policy(Settings.ESXI.TRUNK_PORT_GROUP)
+        self.ensure_trunk_port_group_exists()
 
     def ensure_bridging_security_policy(self, port_group_name: str) -> None:
         """

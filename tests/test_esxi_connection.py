@@ -969,3 +969,63 @@ def esxi_connection_037() -> None:
 
     with pytest.raises(ValueError, match="No datastore found"):
         conn.find_biggest_datastore()
+
+
+@allure.title("ensure_trunk_port_group_exists erstellt eine fehlende Trunk-Port-Group")
+@allure.description(
+    "Überprüft, dass ensure_trunk_port_group_exists AddPortGroup mit VLAN "
+    "4095 (pass-all-tags) aufruft, wenn die konfigurierte Trunk-Port-Group "
+    "noch nicht existiert, und danach die Bridging-Security-Policy setzt"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_038() -> None:
+    _reset_settings()
+    conn = _make_esxi_connection()
+
+    host_system = MagicMock()
+    host_system.configManager.networkSystem.networkInfo.portgroup = []
+    conn._get_object_by_name = MagicMock(return_value=host_system)
+    conn.ensure_bridging_security_policy = MagicMock()
+
+    conn.ensure_trunk_port_group_exists()
+
+    network_system = host_system.configManager.networkSystem
+    network_system.AddPortGroup.assert_called_once()
+    spec = network_system.AddPortGroup.call_args.args[0]
+    assert spec.name == Settings.ESXI.TRUNK_PORT_GROUP
+    assert spec.vlanId == 4095
+    conn.ensure_bridging_security_policy.assert_called_once_with(
+        Settings.ESXI.TRUNK_PORT_GROUP
+    )
+
+
+@allure.title(
+    "ensure_trunk_port_group_exists setzt nur die Policy, wenn die Trunk-Port-Group existiert"
+)
+@allure.description(
+    "Überprüft, dass ensure_trunk_port_group_exists AddPortGroup nicht "
+    "aufruft, wenn die Trunk-Port-Group bereits existiert, aber "
+    "ensure_bridging_security_policy trotzdem aufruft"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def esxi_connection_039() -> None:
+    _reset_settings()
+    conn = _make_esxi_connection()
+
+    existing = MagicMock()
+    existing.spec.name = Settings.ESXI.TRUNK_PORT_GROUP
+    host_system = MagicMock()
+    host_system.configManager.networkSystem.networkInfo.portgroup = [existing]
+    conn._get_object_by_name = MagicMock(return_value=host_system)
+    conn.ensure_bridging_security_policy = MagicMock()
+
+    conn.ensure_trunk_port_group_exists()
+
+    host_system.configManager.networkSystem.AddPortGroup.assert_not_called()
+    conn.ensure_bridging_security_policy.assert_called_once_with(
+        Settings.ESXI.TRUNK_PORT_GROUP
+    )
