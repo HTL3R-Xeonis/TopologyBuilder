@@ -415,7 +415,14 @@ class VMOrchestrator:
     @staticmethod
     def _partially_link_gns3_nodes(gns3_connection: GNS3Connection, node) -> None:
         """
-        Links only those nodes to this node who already exist on GNS3.
+        Links only those nodes to this node who already exist on GNS3. An
+        edge between two ESXi-hosted nodes is skipped - both VMs' vNICs
+        already share one port group directly at the ESXi layer (see
+        Graph._assign_vlans), so no GNS3-side link is needed or wanted;
+        both nodes still have their own Cloud node in GNS3 (for their
+        *other* edges, if any), but linking those two Cloud nodes
+        together would be redundant and GNS3 rejects it outright (409
+        Conflict).
         :param gns3_connection: GNS3 API connection
         :param node: Node to connect to the other existing nodes.
         :return:
@@ -425,6 +432,8 @@ class VMOrchestrator:
         for interface in node.interfaces:
             neighbour = node.get_neighbour(interface)
             if neighbour is None or neighbour.gns3_node_info is None:
+                continue
+            if node.env == Environment.ON_ESXI and neighbour.env == Environment.ON_ESXI:
                 continue
             gns3_connection.connect_nodes(node, neighbour)
 

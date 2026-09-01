@@ -539,3 +539,58 @@ def vm_orchestrator_015() -> None:
             orchestrator.deploy_graph(graph, "gns3", "gns3pw")
 
     mock_diagnostics.assert_not_called()
+
+
+@allure.title("_partially_link_gns3_nodes überspringt eine direkte ESXi-ESXi-Kante")
+@allure.description(
+    "Überprüft, dass _partially_link_gns3_nodes connect_nodes NICHT "
+    "aufruft, wenn beide Enden einer Kante ESXi-gehostet sind - beide VMs "
+    "teilen sich bereits direkt eine Port-Group auf ESXi-Ebene "
+    "(Graph._assign_vlans), ein GNS3-Link zwischen ihren Cloud-Nodes wäre "
+    "redundant und wird von GNS3 ohnehin mit 409 Conflict abgelehnt"
+)
+@allure.tag("negativ-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_016() -> None:
+    Settings.API.LITERAL_API_VALUES = True
+    vm_a = GenericNode("Ubuntu-Server", "VM", "VM-A")
+    vm_b = GenericNode("Ubuntu-Server", "VM", "VM-B")
+    if_a = vm_a.add_interface("gi0/0")
+    if_b = vm_b.add_interface("gi0/0")
+    if_a.connect_to(vm_b)
+    if_b.connect_to(vm_a)
+    vm_a.gns3_node_info = {"node_id": "cloud-a"}
+    vm_b.gns3_node_info = {"node_id": "cloud-b"}
+
+    gns3_connection = MagicMock()
+    VMOrchestrator._partially_link_gns3_nodes(gns3_connection, vm_a)
+
+    gns3_connection.connect_nodes.assert_not_called()
+
+
+@allure.title("_partially_link_gns3_nodes verlinkt weiterhin eine ESXi-GNS3-Brücke")
+@allure.description(
+    "Überprüft, dass _partially_link_gns3_nodes connect_nodes weiterhin "
+    "aufruft, wenn eine Kante ein ESXi-gehostetes Node mit einem "
+    "GNS3-gehosteten Node verbindet - nur die reine ESXi-ESXi-Kante wird "
+    "übersprungen, die Cloud-Node-Brücke wird weiterhin verlinkt"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_017() -> None:
+    Settings.API.LITERAL_API_VALUES = True
+    esxi_node = GenericNode("Ubuntu-Server", "VM", "VM-A")
+    gns3_node = GenericNode("VPCS", "ROUTER", "R1")
+    esxi_if = esxi_node.add_interface("gi0/0")
+    gns3_if = gns3_node.add_interface("gi0/0")
+    esxi_if.connect_to(gns3_node)
+    gns3_if.connect_to(esxi_node)
+    esxi_node.gns3_node_info = {"node_id": "cloud-a"}
+    gns3_node.gns3_node_info = {"node_id": "r1"}
+
+    gns3_connection = MagicMock()
+    VMOrchestrator._partially_link_gns3_nodes(gns3_connection, esxi_node)
+
+    gns3_connection.connect_nodes.assert_called_once_with(esxi_node, gns3_node)
