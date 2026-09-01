@@ -19,7 +19,7 @@ esxi:
   ip: 10.20.20.202
   username: root
   # Name of the vSwitch to create/remove port groups on.
-  virtual_switch: internal_network
+  virtual_switch: vSwitch0
   # Port group carrying the GNS3 VM's VLAN trunk NIC. Must accept
   # promiscuous mode/MAC changes/forged transmits - ensure_bridging_
   # security_policy sets this automatically on every deploy. This port
