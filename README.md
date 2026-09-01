@@ -22,14 +22,16 @@ system Python wants:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e .
 ```
 
-`phart==2.1.0` (used by `visualize`'s ASCII rendering) is not published on
-public PyPI as of this writing - if `pip install` fails on it, install the
-latest available version instead (`pip install phart`); `visualize` may not
-render correctly with a different version, but the rest of the CLI is
-unaffected.
+This installs the pinned dependencies (from `pyproject.toml`) and registers
+a `topologybuilder` console command in the venv, so you can run
+`topologybuilder deploy ...` directly instead of `python main.py deploy
+...` for the rest of this README - both work identically, since the console
+command goes through the same `main()` entry point (logging setup
+included). If you only want the dependencies without the console command,
+`pip install -r requirements.txt` works too.
 
 ## Prerequisites
 
@@ -145,6 +147,11 @@ edges, the remaining edges get added as new network adapters after import.
 
 ## Usage
 
+Every command below can be run either as `topologybuilder <command> ...` (if
+you installed with `pip install -e .`, see Setup above) or as `python
+main.py <command> ...` - both invoke the exact same code path, so pick
+whichever is available in your environment.
+
 | Command | Purpose |
 |---|---|
 | `topologybuilder validate` | Validate the topology file without building or deploying anything. |
@@ -159,13 +166,13 @@ edges, the remaining edges get added as new network adapters after import.
 
 Global options (`--verbosity`/`-v`, `--settings`/`-s`, `--topology`/`-t`,
 `--literal_api_values`/`-l`) go **before** the subcommand name:
-`python main.py -v d -t ./my_topology.yaml deploy ...`. Run
-`python main.py <command> --help` for a command's full option list.
+`topologybuilder -v d -t ./my_topology.yaml deploy ...`. Run
+`topologybuilder <command> --help` for a command's full option list.
 
 A typical first deploy, with nothing set in `.env`/`settings.yml`:
 
 ```bash
-python main.py --topology ./topology_example.yaml deploy \
+topologybuilder --topology ./topology_example.yaml deploy \
   --address 10.20.20.202 \
   --esxi_username root \
   --esxi_password '...'

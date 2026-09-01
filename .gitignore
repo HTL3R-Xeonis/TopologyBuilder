@@ -6,3 +6,6 @@ __pycache__
 settings.yml
 settings.yaml
 logs/*
+*.egg-info
+build/
+dist/
