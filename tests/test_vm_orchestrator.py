@@ -848,3 +848,107 @@ def vm_orchestrator_025() -> None:
             orchestrator._resolve_gns3_parent_interface(gns3_ssh_connection)
     finally:
         Settings.GNS3.PARENT_INTERFACE = "eth1"
+
+
+@allure.title(
+    "check_prerequisites meldet alle Checks als bestanden, wenn alles bereit ist"
+)
+@allure.description(
+    "Überprüft, dass check_prerequisites 5 (passed, description)-Tupel "
+    "zurückgibt, die alle True sind, wenn vSwitch/Trunk-Port-Group/"
+    "Datastore/GNS3-VM/Template-APIs alle vorhanden bzw. erreichbar sind"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_026() -> None:
+    Settings.API.LITERAL_API_VALUES = True
+    Settings.ESXI.DATASTORE = "my-datastore"
+    orchestrator, esxi_connection = _make_orchestrator()
+
+    esxi_connection.find_virtual_switch.return_value = MagicMock()
+    esxi_connection.find_port_group.return_value = MagicMock()
+    esxi_connection.bridging_security_policy_ok.return_value = True
+    datastore = MagicMock()
+    datastore.summary.freeSpace = 500 * 1024**3
+    esxi_connection.find_datastore.return_value = datastore
+    esxi_connection.get_vm_ip_address.return_value = "10.20.20.231"
+
+    try:
+        with patch("src.vm_orchestrator.vm_orchestrator.GNS3Connection") as gns3_cls:
+            gns3_cls.get_version.return_value = {"version": "2.2.61"}
+            results = orchestrator.check_prerequisites()
+    finally:
+        Settings.ESXI.DATASTORE = None
+
+    assert len(results) == 5
+    assert all(ok for ok, _ in results)
+
+
+@allure.title(
+    "check_prerequisites meldet eine fehlende vSwitch/Trunk-Port-Group als bestanden"
+)
+@allure.description(
+    "Überprüft, dass check_prerequisites eine fehlende vSwitch oder "
+    "Trunk-Port-Group als bestandenen Check meldet ('würde automatisch "
+    "erstellt'), da ein Deploy das selbst heilt"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_027() -> None:
+    Settings.API.LITERAL_API_VALUES = True
+    Settings.ESXI.DATASTORE = "my-datastore"
+    orchestrator, esxi_connection = _make_orchestrator()
+
+    esxi_connection.find_virtual_switch.return_value = None
+    esxi_connection.find_port_group.return_value = None
+    datastore = MagicMock()
+    datastore.summary.freeSpace = 500 * 1024**3
+    esxi_connection.find_datastore.return_value = datastore
+    esxi_connection.get_vm_ip_address.return_value = "10.20.20.231"
+
+    try:
+        with patch("src.vm_orchestrator.vm_orchestrator.GNS3Connection") as gns3_cls:
+            gns3_cls.get_version.return_value = {"version": "2.2.61"}
+            results = orchestrator.check_prerequisites()
+    finally:
+        Settings.ESXI.DATASTORE = None
+
+    assert results[0] == (True, results[0][1])
+    assert "would be auto-created" in results[0][1]
+    assert results[1] == (True, results[1][1])
+    assert "would be auto-created" in results[1][1]
+
+
+@allure.title("check_prerequisites meldet unabhängige Fehler, ohne früh abzubrechen")
+@allure.description(
+    "Überprüft, dass check_prerequisites bei einer Trunk-Port-Group mit "
+    "falscher Policy und einer nicht gefundenen GNS3-VM trotzdem alle 5 "
+    "Checks zurückgibt (nicht nur den ersten Fehler), mit den jeweils "
+    "korrekten pass/fail-Werten"
+)
+@allure.tag("negativ-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_028() -> None:
+    Settings.API.LITERAL_API_VALUES = True
+    Settings.ESXI.DATASTORE = "my-datastore"
+    orchestrator, esxi_connection = _make_orchestrator()
+
+    esxi_connection.find_virtual_switch.return_value = MagicMock()
+    esxi_connection.find_port_group.return_value = MagicMock()
+    esxi_connection.bridging_security_policy_ok.return_value = False
+    datastore = MagicMock()
+    datastore.summary.freeSpace = 500 * 1024**3
+    esxi_connection.find_datastore.return_value = datastore
+    esxi_connection.get_vm_ip_address.return_value = None
+
+    try:
+        results = orchestrator.check_prerequisites()
+    finally:
+        Settings.ESXI.DATASTORE = None
+
+    assert len(results) == 5
+    passed = [ok for ok, _ in results]
+    assert passed == [True, False, True, False, True]

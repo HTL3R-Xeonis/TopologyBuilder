@@ -10,6 +10,7 @@ __status__ = "In development"
 
 import re
 
+from src.connections.api_handler import APIHandler
 from src.connections.esxi_connection import ESXiConnection
 from src.connections.ssh_connection import SSHConnection
 from src.connections.gns3_connection import (
@@ -241,6 +242,124 @@ class VMOrchestrator:
         """
         self.delete_stale_esxi_resources(graph)
         GNS3Connection(self.gns3_vm_ip, Settings.GNS3.PORT, project_name)
+
+    def check_prerequisites(self) -> list[tuple[bool, str]]:
+        """
+        Read-only preflight check against real infrastructure, independent
+        of any topology file: whether the vSwitch/trunk port group exist
+        (or would be auto-created by a real deploy), which datastore a
+        deploy would use and its free space, whether the GNS3 VM is
+        reachable, and whether the Template-APIs are reachable. Never
+        mutates anything - auto-create only happens as part of a real
+        ``deploy_graph`` call.
+        :return: list of (passed, description) tuples, one per check
+        """
+        results: list[tuple[bool, str]] = []
+
+        vswitch_name = Settings.ESXI.VIRTUAL_SWITCH
+        if self.esxi_connection.find_virtual_switch() is not None:
+            results.append((True, f"vSwitch '{vswitch_name}': exists"))
+        else:
+            results.append(
+                (True, f"vSwitch '{vswitch_name}': missing, would be auto-created")
+            )
+
+        trunk_port_group_name = Settings.ESXI.TRUNK_PORT_GROUP
+        trunk_port_group = self.esxi_connection.find_port_group(trunk_port_group_name)
+        if trunk_port_group is None:
+            results.append(
+                (
+                    True,
+                    f"Trunk port group '{trunk_port_group_name}': missing, "
+                    f"would be auto-created",
+                )
+            )
+        elif self.esxi_connection.bridging_security_policy_ok(trunk_port_group):
+            results.append(
+                (
+                    True,
+                    f"Trunk port group '{trunk_port_group_name}': exists, "
+                    f"security policy OK",
+                )
+            )
+        else:
+            results.append(
+                (
+                    False,
+                    f"Trunk port group '{trunk_port_group_name}': exists, but "
+                    f"security policy is not yet correct (fixed automatically "
+                    f"by the next deploy)",
+                )
+            )
+
+        try:
+            if Settings.ESXI.DATASTORE is not None:
+                datastore = self.esxi_connection.find_datastore(Settings.ESXI.DATASTORE)
+                free_gb = datastore.summary.freeSpace / (1024**3)
+                results.append(
+                    (
+                        True,
+                        f"Datastore '{Settings.ESXI.DATASTORE}': exists, "
+                        f"{free_gb:.1f} GB free",
+                    )
+                )
+            else:
+                datastore = self.esxi_connection.find_biggest_datastore()
+                free_gb = datastore.summary.freeSpace / (1024**3)
+                results.append(
+                    (
+                        True,
+                        f"Datastore: none configured, would auto-pick "
+                        f"'{datastore.name}' ({free_gb:.1f} GB free)",
+                    )
+                )
+        except ValueError as error:
+            results.append((False, f"Datastore: {error}"))
+
+        gns3_ip = self.esxi_connection.get_vm_ip_address(self.gns3_vm_name)
+        if gns3_ip is None:
+            results.append(
+                (
+                    False,
+                    f"GNS3 VM '{self.gns3_vm_name}': not found or no IP reported yet",
+                )
+            )
+        else:
+            try:
+                version = GNS3Connection.get_version(gns3_ip, Settings.GNS3.PORT)
+                results.append(
+                    (
+                        True,
+                        f"GNS3 VM '{self.gns3_vm_name}' at {gns3_ip}: reachable "
+                        f"(GNS3 {version.get('version', '?')})",
+                    )
+                )
+            except Exception as error:
+                results.append(
+                    (
+                        False,
+                        f"GNS3 VM '{self.gns3_vm_name}' at {gns3_ip}: not "
+                        f"reachable ({error})",
+                    )
+                )
+
+        if Settings.API.LITERAL_API_VALUES:
+            results.append((True, "Template-APIs: skipped (literal API values in use)"))
+        else:
+            try:
+                esxi_templates = APIHandler.get_esxi_template_names()
+                gns3_templates = APIHandler.get_gns3_template_names()
+                results.append(
+                    (
+                        True,
+                        f"Template-APIs: reachable ({len(esxi_templates)} ESXi, "
+                        f"{len(gns3_templates)} GNS3 template(s))",
+                    )
+                )
+            except Exception as error:
+                results.append((False, f"Template-APIs: not reachable ({error})"))
+
+        return results
 
     def verify_graph(self, graph: Graph, project_name: str) -> list[tuple[bool, str]]:
         """

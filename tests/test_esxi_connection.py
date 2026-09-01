@@ -876,7 +876,7 @@ def esxi_connection_032(tmp_path) -> None:
 def esxi_connection_033() -> None:
     _reset_settings()
     conn = _make_esxi_connection()
-    conn._find_virtual_switch = MagicMock(return_value=None)
+    conn.find_virtual_switch = MagicMock(return_value=None)
 
     host_system = MagicMock()
     conn._get_object_by_name = MagicMock(return_value=host_system)
@@ -901,7 +901,7 @@ def esxi_connection_033() -> None:
 def esxi_connection_034() -> None:
     _reset_settings()
     conn = _make_esxi_connection()
-    conn._find_virtual_switch = MagicMock(return_value=MagicMock())
+    conn.find_virtual_switch = MagicMock(return_value=MagicMock())
     conn._get_object_by_name = MagicMock()
 
     conn.ensure_virtual_switch_exists()
@@ -921,7 +921,7 @@ def esxi_connection_035() -> None:
     _reset_settings()
     Settings.IS_DRY_RUN = True
     conn = _make_esxi_connection()
-    conn._find_virtual_switch = MagicMock(return_value=None)
+    conn.find_virtual_switch = MagicMock(return_value=None)
     conn._get_object_by_name = MagicMock()
 
     try:

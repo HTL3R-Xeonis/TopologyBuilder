@@ -481,3 +481,45 @@ def cli_013() -> None:
     assert datastore == "my-datastore"
     assert virtual_switch == "vSwitch1"
     assert trunk_port_group == "PG-TRUNK"
+
+
+@allure.title(
+    "doctor-Befehl meldet Checks und bricht mit Exit-Code 1 bei einem Fehler ab"
+)
+@allure.description(
+    "Überprüft, dass der doctor-Befehl check_prerequisites aufruft, "
+    "dessen Ergebnisse im [OK]/[FAIL]-Format ausgibt, und mit Exit-Code 1 "
+    "abbricht, wenn mindestens ein Check fehlschlägt - ohne ein "
+    "Topology-File zu benötigen"
+)
+@allure.tag("negativ-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.CRITICAL)
+def cli_014() -> None:
+    with (
+        patch("src.cli.TopologyFileValidation") as validator_cls,
+        patch("src.cli.VMOrchestrator") as orchestrator_cls,
+    ):
+        orchestrator_cls.return_value.check_prerequisites.return_value = [
+            (True, "vSwitch 'internal_network': exists"),
+            (False, "GNS3 VM 'GNS3': not found or no IP reported yet"),
+        ]
+
+        result = runner.invoke(
+            app,
+            [
+                "doctor",
+                "--address",
+                "10.20.20.202",
+                "--esxi_username",
+                "root",
+                "--esxi_password",
+                "pw",
+            ],
+        )
+
+    assert result.exit_code == 1
+    assert "[OK]" in result.output
+    assert "[FAIL]" in result.output
+    assert "1/2 checks passed" in result.output
+    validator_cls.return_value.validate_file.assert_not_called()

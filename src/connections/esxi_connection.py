@@ -314,7 +314,7 @@ class ESXiConnection(GenericConnection):
                     return device.macAddress
         return None
 
-    def _find_virtual_switch(self) -> vim.host.VirtualSwitch | None:
+    def find_virtual_switch(self) -> vim.host.VirtualSwitch | None:
         """
         Looks for a virtual Switch with the name, specified in ``Settings.Esxi.VIRTUAL_SWITCH``, on the ESXi Host.
         :return: the virtual Switch if found, else None.
@@ -334,7 +334,7 @@ class ESXiConnection(GenericConnection):
         :return: Returns the virtual Switch if found.
         :raises ValueError: Is thrown when no fitting virtual Switch was found.
         """
-        vswitch = self._find_virtual_switch()
+        vswitch = self.find_virtual_switch()
         if vswitch is None:
             logger.error(
                 msg
@@ -356,7 +356,7 @@ class ESXiConnection(GenericConnection):
         """
         if Settings.ONLY_ON_GNS3:
             return
-        if self._find_virtual_switch() is not None:
+        if self.find_virtual_switch() is not None:
             return
         # ----------------------------------------------------------------------------------------------------------
         if Settings.IS_DRY_RUN:
@@ -592,6 +592,48 @@ class ESXiConnection(GenericConnection):
                 self._add_port_group(vlan)
 
         self.ensure_trunk_port_group_exists()
+
+    def find_port_group(self, port_group_name: str) -> vim.host.PortGroup | None:
+        """
+        Finds a port group by name on the ESXi host, read-only. Unlike
+        ``_get_port_groups``, doesn't require the configured vSwitch to
+        exist - used by read-only checks (e.g. ``doctor``) that need to
+        report "missing" rather than raise.
+        :param port_group_name: name of the port group to look for
+        :return: the matching port group, or None if not found (including
+            if no host/network system is available at all)
+        """
+        host_system = self._get_object_by_name(vim.HostSystem)
+        if host_system is None:
+            return None
+        network_system = host_system.configManager.networkSystem
+        if network_system is None:
+            return None
+        return next(
+            (
+                pg
+                for pg in network_system.networkInfo.portgroup
+                if pg.spec.name == port_group_name
+            ),
+            None,
+        )
+
+    @staticmethod
+    def bridging_security_policy_ok(port_group: vim.host.PortGroup) -> bool:
+        """
+        Read-only check for whether a port group already accepts
+        promiscuous mode, MAC address changes, and forged transmits.
+        :param port_group: the port group to check
+        :return: True if all three are already accepted
+        """
+        security = getattr(getattr(port_group.spec, "policy", None), "security", None)
+        if security is None:
+            return False
+        return bool(
+            security.allowPromiscuous
+            and security.macChanges
+            and security.forgedTransmits
+        )
 
     def ensure_bridging_security_policy(self, port_group_name: str) -> None:
         """

@@ -323,6 +323,46 @@ def verify(
 
 
 @app.command()
+def doctor(
+    address: str = ESXI_ADDRESS_OPTION,
+    esxi_username: str = ESXI_USERNAME_OPTION,
+    esxi_password: str = ESXI_PASSWORD_OPTION,
+    gns3_vm_name: str = GNS3_VM_NAME_OPTION,
+    datastore: str = ESXI_DATASTORE_OPTION,
+    virtual_switch: str = ESXI_VIRTUAL_SWITCH_OPTION,
+    trunk_port_group: str = ESXI_TRUNK_PORT_GROUP_OPTION,
+) -> None:
+    """
+    Read-only preflight check against real infrastructure: reports
+    whether the vSwitch/trunk port group exist (or would be auto-created
+    by a deploy), which datastore a deploy would use, whether the GNS3 VM
+    is reachable, and whether the Template-APIs are reachable. Never
+    mutates anything. No topology file needed.
+    """
+    _apply_esxi_options(
+        address,
+        esxi_username,
+        esxi_password,
+        gns3_vm_name,
+        datastore,
+        virtual_switch,
+        trunk_port_group,
+    )
+
+    orchestrator = _make_orchestrator()
+    results = orchestrator.check_prerequisites()
+
+    passed = 0
+    for ok, description in results:
+        typer.echo(f"{'[OK]  ' if ok else '[FAIL]'} {description}")
+        passed += ok
+
+    typer.echo(f"{passed}/{len(results)} checks passed")
+    if passed != len(results):
+        raise typer.Exit(code=1)
+
+
+@app.command()
 def status(
     address: str = ESXI_ADDRESS_OPTION,
     esxi_username: str = ESXI_USERNAME_OPTION,
