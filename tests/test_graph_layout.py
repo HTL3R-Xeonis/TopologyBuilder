@@ -7,7 +7,7 @@ __license__ = "GNU GPLv3"
 import allure
 
 from src.graph import Graph
-from src.graph.layout import compute_node_positions
+from src.graph.layout import _marker_for_degree, compute_node_positions, render_graph
 from src.settings import Settings
 
 
@@ -75,3 +75,55 @@ def graph_layout_001() -> None:
 @allure.severity(allure.severity_level.NORMAL)
 def graph_layout_002() -> None:
     assert compute_node_positions({}) == {}
+
+
+@allure.title("render_graph zeichnet jeden Node-Namen in die ASCII-Ausgabe")
+@allure.description(
+    "Überprüft, dass render_graph für einen echten Graph eine mehrzeilige "
+    "ASCII-Darstellung liefert, die den Namen jedes Nodes enthält"
+)
+@allure.tag("positiv-test", "graph-layout")
+@allure.feature("graph_layout")
+@allure.severity(allure.severity_level.CRITICAL)
+def graph_layout_003() -> None:
+    Settings.API.LITERAL_API_VALUES = True
+    graph = Graph(
+        [{"image": "VPCS", "role": "ROUTER", "names": ["R1", "R2", "R3"]}],
+        [["R1", "gi0/0", "R2", "gi0/0"], ["R2", "gi0/1", "R3", "gi0/0"]],
+    )
+
+    output = render_graph(graph.nodes)
+
+    assert "R1" in output
+    assert "R2" in output
+    assert "R3" in output
+    assert "\n" in output
+
+
+@allure.title("render_graph meldet eine leere Topologie ohne Fehler")
+@allure.description(
+    "Überprüft, dass render_graph bei einem Graph ohne Nodes '(empty "
+    "topology)' zurückgibt, statt eines Fehlers"
+)
+@allure.tag("negativ-test", "graph-layout")
+@allure.feature("graph_layout")
+@allure.severity(allure.severity_level.NORMAL)
+def graph_layout_004() -> None:
+    assert render_graph({}) == "(empty topology)"
+
+
+@allure.title("_marker_for_degree wählt das Symbol nach Anzahl der Verbindungen")
+@allure.description(
+    "Überprüft, dass _marker_for_degree für 0/1/2/3+ Verbindungen jeweils "
+    "das dokumentierte Symbol liefert, damit Hubs im ASCII-Rendering "
+    "optisch auffallen"
+)
+@allure.tag("positiv-test", "graph-layout")
+@allure.feature("graph_layout")
+@allure.severity(allure.severity_level.NORMAL)
+def graph_layout_005() -> None:
+    assert _marker_for_degree(0) == "·"
+    assert _marker_for_degree(1) == "□"
+    assert _marker_for_degree(2) == "o"
+    assert _marker_for_degree(3) == "●"
+    assert _marker_for_degree(5) == "●"

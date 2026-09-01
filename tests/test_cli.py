@@ -527,12 +527,9 @@ def cli_014() -> None:
 
 @allure.title("visualize-Befehl rendert eine echte Topologie ohne Fehler")
 @allure.description(
-    "Überprüft end-to-end (ohne Graph/phart zu mocken), dass der "
-    "visualize-Befehl gegen topology_example.yaml läuft, ohne einen "
-    "Fehler zu werfen - deckt ab, dass Graph.visualize()'s "
-    "LayoutOptions-Aufruf mit der real installierbaren phart-Version "
-    "(1.1.4) kompatibel ist, nicht nur mit der ursprünglich im Code "
-    "referenzierten, öffentlich nicht verfügbaren 2.1.0"
+    "Überprüft end-to-end (ohne Graph zu mocken), dass der visualize-"
+    "Befehl gegen topology_example.yaml läuft und eine ASCII-Darstellung "
+    "der Topologie ausgibt, ohne einen Fehler zu werfen"
 )
 @allure.tag("positiv-test", "cli")
 @allure.feature("cli")

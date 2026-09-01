@@ -7,9 +7,8 @@ from src.graph.blocks import GenericNode
 from src.graph.blocks.formatter import nested_formatter
 from src.graph.blocks.vlan import VirtualLan
 from src.graph.environment import Environment
+from src.graph.layout import render_graph
 from loguru import logger
-import networkx as nx
-from phart import ASCIIRenderer, LayoutOptions, NodeStyle
 
 
 class Graph:
@@ -113,49 +112,11 @@ class Graph:
 
     def visualize(self) -> None:
         """
-        Visualizes the graph in the terminal.
+        Visualizes the graph in the terminal as a force-directed ASCII
+        node-link diagram, sized to fit the current terminal width.
         :return:
         """
-        G = nx.Graph()
-
-        for node_name in self.nodes:
-            G.add_node(node_name)
-
-        node_names = {id(node): name for name, node in self.nodes.items()}
-
-        seen = set()
-
-        for node_name, node in self.nodes.items():
-            for interface_name, interface in node.interfaces.items():
-                neighbour = interface.neighbour
-
-                if neighbour is None:
-                    continue
-
-                neighbour_name = node_names.get(id(neighbour))
-
-                if neighbour_name is None:
-                    continue
-
-                edge_key = frozenset((node_name, neighbour_name))
-
-                if edge_key in seen:
-                    continue
-
-                seen.add(edge_key)
-
-                G.add_edge(
-                    node_name,
-                    neighbour_name,
-                    interface=interface_name,
-                )
-
-        renderer = ASCIIRenderer(
-            G,
-            options=LayoutOptions(node_style=NodeStyle.SQUARE),
-        )
-
-        print(renderer.render())
+        print(render_graph(self.nodes))
 
     def __str__(self) -> str:
         """

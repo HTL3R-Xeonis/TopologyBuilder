@@ -1,13 +1,15 @@
 """
 Computes 2D node positions for rendering a built topology graph on a canvas
-(e.g. a GNS3 project's scene) with a small pure-Python force-directed layout
-- no external graphing/plotting library involved.
+(e.g. a GNS3 project's scene) with a small pure-Python force-directed layout,
+and renders that layout as an ASCII node-link diagram for the terminal - no
+external graphing/plotting library involved.
 """
 
 from __future__ import annotations
 
 import math
 import random
+import shutil
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -15,6 +17,7 @@ if TYPE_CHECKING:
 
 _ITERATIONS = 200
 _SEED = 42
+_CHAR_ASPECT_RATIO = 2.0  # terminal character cells are roughly twice as tall as wide
 
 
 def _build_adjacency(nodes: dict[str, GenericNode]) -> dict[str, set[str]]:
@@ -150,3 +153,110 @@ def compute_node_positions(
     """
     adjacency = _build_adjacency(nodes)
     return _layout(adjacency, width, height)
+
+
+def _draw_line(grid: list[list[str]], x0: int, y0: int, x1: int, y1: int) -> None:
+    """
+    Draws a line of '.' characters between two grid cells, in place, using
+    Bresenham's line algorithm. Endpoints are left untouched for node markers.
+    """
+    dx = abs(x1 - x0)
+    dy = -abs(y1 - y0)
+    sx = 1 if x0 < x1 else -1
+    sy = 1 if y0 < y1 else -1
+    err = dx + dy
+    x, y = x0, y0
+
+    while True:
+        if (x, y) not in ((x0, y0), (x1, y1)):
+            if 0 <= y < len(grid) and 0 <= x < len(grid[0]) and grid[y][x] == " ":
+                grid[y][x] = "."
+        if x == x1 and y == y1:
+            break
+        e2 = 2 * err
+        if e2 >= dy:
+            err += dy
+            x += sx
+        if e2 <= dx:
+            err += dx
+            y += sy
+
+
+def _marker_for_degree(degree: int) -> str:
+    """
+    Picks a node marker based on how many connections it has, so hubs stand
+    out from leaf nodes.
+    """
+    if degree >= 3:
+        return "●"  # ●
+    if degree == 2:
+        return "o"
+    if degree == 1:
+        return "□"  # □
+    return "·"  # ·
+
+
+def render_graph(nodes: dict[str, GenericNode]) -> str:
+    """
+    Renders a built topology graph as an ASCII node-link diagram sized to fit
+    the current terminal width.
+    :param nodes: built topology of nodes, e.g. Graph.nodes
+    :return: ASCII rendering of the topology graph
+    """
+    adjacency = _build_adjacency(nodes)
+    if not adjacency:
+        return "(empty topology)"
+
+    terminal_width, _ = shutil.get_terminal_size(fallback=(100, 24))
+    width = max(60, min(terminal_width - 2, 160))
+
+    # Lay out nodes in a square "visual" space, then compress the vertical
+    # axis by the terminal's character aspect ratio (cells are taller than
+    # wide) when mapping to grid rows - otherwise the topology renders far
+    # too tall and narrow.
+    logical_size = float(width - 12)
+    positions = _layout(adjacency, logical_size, logical_size)
+    height = max(20, round(logical_size / _CHAR_ASPECT_RATIO) + 4)
+
+    # Resolve each node to a unique grid cell (nudging down on collision) before
+    # drawing anything, so edges, markers and labels all agree on node positions.
+    occupied: set[tuple[int, int]] = set()
+    node_cell: dict[str, tuple[int, int]] = {}
+    for name, (x, y) in positions.items():
+        cell_x = min(width - 1, max(0, round(x)))
+        cell_y = min(height - 1, max(0, round(y / _CHAR_ASPECT_RATIO)))
+        while (cell_x, cell_y) in occupied and cell_y < height - 1:
+            cell_y += 1
+        occupied.add((cell_x, cell_y))
+        node_cell[name] = (cell_x, cell_y)
+
+    grid = [[" "] * width for _ in range(height)]
+
+    seen_pairs = set()
+    for name, neighbours in adjacency.items():
+        for neighbour in neighbours:
+            pair = tuple(sorted((name, neighbour)))
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
+            x0, y0 = node_cell[name]
+            x1, y1 = node_cell[neighbour]
+            _draw_line(grid, x0, y0, x1, y1)
+
+    for name, (x, y) in node_cell.items():
+        grid[y][x] = _marker_for_degree(len(adjacency[name]))
+
+    for name, (x, y) in node_cell.items():
+        for offset, char in enumerate(f" {name}", start=1):
+            label_x = x + offset
+            if (
+                label_x >= width
+                or (label_x, y) in occupied
+                or (label_x + 1, y) in occupied
+            ):
+                break
+            if grid[y][label_x] not in (" ", "."):
+                break
+            grid[y][label_x] = char
+
+    return "\n".join("".join(row).rstrip() for row in grid if "".join(row).strip())
