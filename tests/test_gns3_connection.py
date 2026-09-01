@@ -7,6 +7,7 @@ __license__ = "GNU GPLv3"
 from unittest.mock import MagicMock, patch
 
 import allure
+import pytest
 
 from src.connections.gns3_connection import GNS3Connection
 from src.settings import Settings
@@ -342,3 +343,99 @@ def gns3_connection_011() -> None:
 
     mock_post.assert_not_called()
     assert result is None
+
+
+@allure.title("_next_position gibt für jeden Node eine andere Grid-Position zurück")
+@allure.description(
+    "Überprüft, dass _next_position bei aufeinanderfolgenden Aufrufen "
+    "unterschiedliche (x, y)-Koordinaten liefert, statt für jeden Node "
+    "dieselbe feste Position - sonst würden alle Nodes im GNS3 Web UI "
+    "übereinander gestapelt landen"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_012() -> None:
+    conn = GNS3Connection.__new__(GNS3Connection)
+    conn._next_node_index = 0
+
+    positions = [conn._next_position() for _ in range(7)]
+
+    assert len(set(positions)) == len(positions)
+    assert positions[0] == (0, 0)
+    assert positions[GNS3Connection._POSITION_COLUMNS] == (
+        0,
+        GNS3Connection._POSITION_Y_SPACING,
+    )
+
+
+def _make_node_info(name: str, port_names: list[str]) -> dict:
+    return {
+        "name": name,
+        "ports": [{"name": port_name} for port_name in port_names],
+    }
+
+
+def _make_interface(name: str, parent_name: str = "R1") -> MagicMock:
+    intf = MagicMock()
+    intf.name = name
+    intf.parent.name = parent_name
+    return intf
+
+
+@allure.title("_get_adapter findet einen exakten Namens-Match")
+@allure.description(
+    "Überprüft, dass _get_adapter bei einer Namensübereinstimmung "
+    "(Groß-/Kleinschreibung egal) diesen Port zurückgibt"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_013() -> None:
+    node_info = _make_node_info("R1", ["Gi0/0", "Gi0/1"])
+    adapter = GNS3Connection._get_adapter(node_info, _make_interface("gi0/1"))
+    assert adapter["name"] == "Gi0/1"
+
+
+@allure.title("_get_adapter fällt auf den einzigen Port zurück")
+@allure.description(
+    "Überprüft, dass _get_adapter bei einem Node mit genau einem Port "
+    "diesen zurückgibt, auch wenn sein Name nicht mit der Topology-"
+    "Config übereinstimmt (z.B. VPCS' 'Ethernet0' vs. 'gi0/0')"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_014() -> None:
+    node_info = _make_node_info("PC1", ["Ethernet0"])
+    adapter = GNS3Connection._get_adapter(node_info, _make_interface("gi0/0", "PC1"))
+    assert adapter["name"] == "Ethernet0"
+
+
+@allure.title("_get_adapter fällt auf eine eindeutige Portnummer zurück")
+@allure.description(
+    "Überprüft, dass _get_adapter bei mehreren Ports ohne Namens-Match "
+    "einen Port über die übereinstimmende, eindeutige Trailing-Portnummer "
+    "findet (z.B. Config 'gi0/2' vs. Template-Port 'Ethernet2')"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_015() -> None:
+    node_info = _make_node_info("R1", ["Ethernet0", "Ethernet1", "Ethernet2"])
+    adapter = GNS3Connection._get_adapter(node_info, _make_interface("gi0/2"))
+    assert adapter["name"] == "Ethernet2"
+
+
+@allure.title("_get_adapter wirft einen Fehler, wenn kein Port zugeordnet werden kann")
+@allure.description(
+    "Überprüft, dass _get_adapter einen ValueError wirft, wenn weder ein "
+    "Namens-Match noch ein eindeutiger Portnummer-Match möglich ist"
+)
+@allure.tag("negativ-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_016() -> None:
+    node_info = _make_node_info("R1", ["Ethernet0", "Ethernet1"])
+    with pytest.raises(ValueError, match="gi0/5"):
+        GNS3Connection._get_adapter(node_info, _make_interface("gi0/5"))

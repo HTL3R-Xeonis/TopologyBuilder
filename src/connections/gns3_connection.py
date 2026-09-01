@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 from typing import TYPE_CHECKING
 
@@ -19,6 +20,23 @@ class GNS3Connection(APIHandler):
     """
     Object which provides methods regarding the GNS3 API
     """
+
+    _POSITION_COLUMNS = 5
+    _POSITION_X_SPACING = 200
+    _POSITION_Y_SPACING = 150
+
+    def _next_position(self) -> tuple[int, int]:
+        """
+        Returns the next grid-cell canvas position for a newly created
+        node, advancing an internal counter each call - without this,
+        every node would land on the exact same hardcoded coordinate and
+        pile up on top of each other in the GNS3 Web UI.
+        :return: (x, y) canvas coordinates
+        """
+        index = self._next_node_index
+        self._next_node_index += 1
+        row, col = divmod(index, self._POSITION_COLUMNS)
+        return col * self._POSITION_X_SPACING, row * self._POSITION_Y_SPACING
 
     def __init__(
         self, ip: str, port: int, project_name: str, incremental: bool = False
@@ -40,6 +58,7 @@ class GNS3Connection(APIHandler):
         super().__init__(ip, port)
         self.url = f"http://{ip}:{port}"
         self.incremental = incremental
+        self._next_node_index = 0
 
         self.project_name = project_name
         self.project = self._init_project(project_name)
@@ -275,7 +294,8 @@ class GNS3Connection(APIHandler):
         if template["builtin"]:
             return self._create_builtin_nodes(node, template)
 
-        payload = {"name": node.name, "x": 100, "y": 100}
+        x, y = self._next_position()
+        payload = {"name": node.name, "x": x, "y": y}
         try:
             response = self.post(
                 f"{self.url}/v2/projects/{self.project['project_id']}/templates/{template['template_id']}",
@@ -322,12 +342,13 @@ class GNS3Connection(APIHandler):
             # ----------------------------------------------------------------------------------------------------------
             template = self._get_template(template)
 
+        x, y = self._next_position()
         payload = {
             "name": node.name,
             "node_type": template["template_type"],
             "compute_id": "local",
-            "x": 100,
-            "y": 100,
+            "x": x,
+            "y": y,
         }
 
         if ports_mapping is not None:
@@ -373,19 +394,62 @@ class GNS3Connection(APIHandler):
         return template
 
     @staticmethod
+    def _trailing_number(name: str) -> int | None:
+        """
+        Extracts the trailing digit run from a port name, e.g. 'gi0/2' ->
+        2, 'Ethernet2' -> 2. Returns None if the name doesn't end in digits.
+        """
+        match = re.search(r"(\d+)$", name)
+        return int(match.group(1)) if match else None
+
+    @staticmethod
     def _get_adapter(gns3_node_info: dict[str, Any], intf: Interface) -> dict[str, Any]:
         """
-        Looks for a gns3 adapter with the same name as given interface.
+        Looks for a GNS3 adapter matching the given interface. Tries, in
+        order: exact name match (case-insensitive); if the node has
+        exactly one port, that port regardless of name - single-port node
+        types (e.g. VPCS's 'Ethernet0') often don't share the topology
+        config's interface naming convention (e.g. 'gi0/0'), but there's
+        no ambiguity when there's only one port; a port whose trailing
+        number matches the requested name's trailing number, if exactly
+        one candidate matches - different GNS3 templates have been
+        observed to use different naming conventions entirely (e.g.
+        'gi0/2' vs. plain 'Ethernet2'), but both still encode the same
+        port index at the end.
         :param gns3_node_info: GNS3 node information.
         :param intf: Interface of the node.
         :return: Returns the GNS3 adapter information.
         :raises ValueError: Is thrown when no adapter can be associated with the given interface.
         This may happen because the names are not the same.
         """
-        for adapter in gns3_node_info["ports"]:
-            # @TODO shortform and longform / better name dedection
+        ports = gns3_node_info["ports"]
+        for adapter in ports:
             if adapter["name"].lower() == intf.name.lower():
                 return adapter
+
+        if len(ports) == 1:
+            logger.warning(
+                f"Node '{gns3_node_info['name']}' has no port named "
+                f"'{intf.name}', using its only port "
+                f"'{ports[0].get('name')}' instead"
+            )
+            return ports[0]
+
+        requested_number = GNS3Connection._trailing_number(intf.name)
+        if requested_number is not None:
+            matches = [
+                adapter
+                for adapter in ports
+                if GNS3Connection._trailing_number(adapter.get("name", ""))
+                == requested_number
+            ]
+            if len(matches) == 1:
+                logger.warning(
+                    f"Node '{gns3_node_info['name']}' has no port named "
+                    f"'{intf.name}', using port '{matches[0].get('name')}' "
+                    f"instead (matched by port number)"
+                )
+                return matches[0]
 
         raise ValueError(
             f"Interface {intf.name} on {intf.parent.name} cannot be associated to any adapter of the {gns3_node_info['name']} template."
