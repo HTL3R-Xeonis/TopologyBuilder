@@ -367,16 +367,23 @@ class ESXiConnection(GenericConnection):
     def _remove_port_groups(self) -> None:
         """
         Deletes all port groups from the virtual switch, except for those
-        specified in ``Settings.ESXI.IGNORE_PORT_GROUPS`` and
-        ``Settings.ESXI.TRUNK_PORT_GROUP`` itself - the trunk port group is
-        always protected regardless of IGNORE_PORT_GROUPS' contents, since
-        deleting it would break the GNS3 VM's own network bridge.
+        specified in ``Settings.ESXI.IGNORE_PORT_GROUPS``,
+        ``Settings.ESXI.TRUNK_PORT_GROUP``, and
+        ``Settings.ESXI.RESERVED_PORT_GROUPS`` - the trunk port group and
+        ESXi's own built-in port groups are always protected regardless of
+        IGNORE_PORT_GROUPS' contents, since deleting the former would break
+        the GNS3 VM's own network bridge, and deleting the latter can sever
+        the host's own management access.
         :return:
         :raises ValueError: Is thrown when no virtual Switch was found.
         :raises RuntimeError: Is thrown when there are issues with removing the port group, like it does not exist, or it is currently in use.
         """
         port_groups = self._get_port_groups()
-        protected = Settings.ESXI.IGNORE_PORT_GROUPS | {Settings.ESXI.TRUNK_PORT_GROUP}
+        protected = (
+            Settings.ESXI.IGNORE_PORT_GROUPS
+            | {Settings.ESXI.TRUNK_PORT_GROUP}
+            | Settings.ESXI.RESERVED_PORT_GROUPS
+        )
         for pg in port_groups:
             if pg.spec.name in protected:
                 continue

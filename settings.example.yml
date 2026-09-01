@@ -26,9 +26,12 @@ esxi:
   # group is always protected from deletion by reset_virtual_switch,
   # regardless of ignore_port_groups below.
   trunk_port_group: PG-GNS3-TRUNK
-  # Extra port groups (besides trunk_port_group, which is always
-  # protected) that reset_virtual_switch should never delete.
-  ignore_port_groups: []
+  # Extra port groups (besides trunk_port_group and ESXi's own built-in
+  # 'VM Network'/'Management Network', which are always protected) that
+  # reset_virtual_switch should never delete. PG-MGMT below is the GNS3
+  # VM's own management NIC's port group on this deployment's ESXi host -
+  # deleting it would cut off access to the GNS3 VM's web UI/API.
+  ignore_port_groups: [PG-MGMT]
   # Datastore to place newly imported topology VMs on.
   datastore: VNX-FC-Datastore-ESXi3
   # Name of the GNS3 VM as registered on the ESXi host.

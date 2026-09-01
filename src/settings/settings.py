@@ -121,6 +121,11 @@ class Settings:
         default security policy silently drops that traffic otherwise."""
         IGNORE_PORT_GROUPS: set[str] = {"PG_GNS3_TRUNK"}
         """Specifies which port groups not to delete on the virtual switch."""
+        RESERVED_PORT_GROUPS: set[str] = {"VM Network", "Management Network"}
+        """ESXi's own built-in port groups (present on essentially every
+        install, not created by this tool). Always protected from deletion
+        regardless of IGNORE_PORT_GROUPS' contents - deleting 'Management
+        Network' in particular can sever the host's own management access."""
         DATASTORE: str = "datastore1 (2)"
         """Specifies the name of the datastore to use on the ESXi client."""
         GNS3_VM_NAME = "GNS3 (1)"
