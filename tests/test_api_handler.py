@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import allure
 import pytest
+import requests
 
 from src.connections.api_handler import APIHandler
 
@@ -99,3 +100,31 @@ def api_handler_002(tmp_path) -> None:
             APIHandler.download_ova("Ubuntu-Server", dest_path)
 
     assert mock_get.call_count == 3
+
+
+@allure.title("download_ova wiederholt den Download bei einem Verbindungsfehler")
+@allure.description(
+    "Überprüft, dass download_ova einen erneuten Versuch startet, wenn "
+    "der Request selbst fehlschlägt (z.B. ConnectionError/Timeout, nicht "
+    "nur eine abgeschnittene Datei), statt den Fehler unbehandelt und "
+    "ungeloggt bis zum Aufrufer durchzureichen"
+)
+@allure.tag("positiv-test", "api-handler")
+@allure.feature("api_handler")
+@allure.severity(allure.severity_level.CRITICAL)
+def api_handler_003(tmp_path) -> None:
+    ova_bytes = _make_ova_bytes()
+    dest_path = str(tmp_path / "template.ova")
+    responses = [
+        requests.exceptions.ConnectionError("connection reset"),
+        _make_response(ova_bytes),
+    ]
+
+    with patch(
+        "src.connections.api_handler.requests.get", side_effect=responses
+    ) as mock_get:
+        APIHandler.download_ova("Ubuntu-Server", dest_path)
+
+    assert mock_get.call_count == 2
+    with tarfile.open(dest_path) as archive:
+        assert archive.getnames() == ["vm.ovf"]

@@ -38,8 +38,10 @@ def main():
     try:
         app()
     except Exception as e:
+        logger.error(f"{type(e).__name__}: {e}")
         if Settings.VERBOSITY_LEVEL.level == Verbosity.DEBUG.level:
             raise e
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -159,16 +159,26 @@ class APIHandler:
         """
         last_error: Exception | None = None
         for attempt in range(1, _OVA_DOWNLOAD_MAX_ATTEMPTS + 1):
-            response = requests.get(
-                f"{Settings.API.ESXI_TEMPLATE_SERVER_URL}/api/download",
-                params={"name": template_name},
-                stream=True,
-                timeout=30,
-            )
-            response.raise_for_status()
-            with open(dest_path, "wb") as f:
-                for chunk in response.iter_content(chunk_size=_OVA_DOWNLOAD_CHUNK_SIZE):
-                    f.write(chunk)
+            try:
+                response = requests.get(
+                    f"{Settings.API.ESXI_TEMPLATE_SERVER_URL}/api/download",
+                    params={"name": template_name},
+                    stream=True,
+                    timeout=30,
+                )
+                response.raise_for_status()
+                with open(dest_path, "wb") as f:
+                    for chunk in response.iter_content(
+                        chunk_size=_OVA_DOWNLOAD_CHUNK_SIZE
+                    ):
+                        f.write(chunk)
+            except requests.exceptions.RequestException as error:
+                last_error = error
+                logger.warning(
+                    f"Download request for OVA '{template_name}' failed ({error}); "
+                    f"retrying ({attempt}/{_OVA_DOWNLOAD_MAX_ATTEMPTS})"
+                )
+                continue
 
             try:
                 with tarfile.open(dest_path) as archive:
