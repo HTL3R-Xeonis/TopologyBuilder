@@ -25,6 +25,19 @@ _CONSOLE_PORT_COLLISION_PATTERN = re.compile(r"already in use|errno 98", re.IGNO
 _CONSOLE_PORT_COLLISION_RETRY_BACKOFF_SECONDS = 5
 
 
+def is_console_port_collision_error(error: BaseException) -> bool:
+    """
+    True if the given exception's message matches the known console-port-
+    collision signature a GNS3 node-start failure can carry. Exposed at
+    module level (not just used internally by start_all_nodes) so
+    VMOrchestrator can recognize the same failure and capture SSH
+    diagnostics when start_all_nodes' own retry doesn't resolve it.
+    :param error: the exception raised by a failed node-start
+    :return: True if it matches the console-port-collision signature
+    """
+    return bool(_CONSOLE_PORT_COLLISION_PATTERN.search(str(error)))
+
+
 # @TODO shortform and longform / better name dedection
 class GNS3Connection(APIHandler):
     """
@@ -616,6 +629,7 @@ class GNS3Connection(APIHandler):
             raise RuntimeError(msg) from exc
 
         failed_names = []
+        failure_details = []
         for node in nodes:
             Verbosity.volumatic_print(
                 Verbosity.NORMAL, f"Starts GNS3 node {node['name']}"
@@ -625,7 +639,7 @@ class GNS3Connection(APIHandler):
                 self.post(start_url)
                 continue
             except requests.exceptions.HTTPError as error:
-                if _CONSOLE_PORT_COLLISION_PATTERN.search(str(error)):
+                if is_console_port_collision_error(error):
                     logger.warning(
                         f"Node '{node['name']}' hit a console port collision "
                         f"on start, retrying once after "
@@ -639,12 +653,18 @@ class GNS3Connection(APIHandler):
                         error = retry_error
 
                 failed_names.append(node["name"])
+                failure_details.append(str(error))
                 logger.error(f"Failed to start GNS3 node '{node['name']}': {error}")
 
         if failed_names:
+            # failure_details is folded into the message (not just logged)
+            # so a console-port-collision signature that survived the
+            # retry above is still detectable by is_console_port_collision_
+            # error on the raised exception itself, e.g. for
+            # VMOrchestrator to decide whether to capture SSH diagnostics.
             raise RuntimeError(
                 f"Failed to start {len(failed_names)}/{len(nodes)} node(s): "
                 f"{failed_names}. The rest started successfully; check the "
                 f"GNS3 Web UI, then rerun deploy if needed (redeploys are "
-                f"idempotent)."
+                f"idempotent). Errors: {failure_details}"
             )

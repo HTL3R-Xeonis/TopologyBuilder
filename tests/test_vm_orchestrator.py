@@ -7,6 +7,7 @@ __license__ = "GNU GPLv3"
 from unittest.mock import MagicMock, patch
 
 import allure
+import pytest
 
 from src.graph import Graph
 from src.graph.blocks.generic_node import GenericNode
@@ -465,3 +466,76 @@ def vm_orchestrator_013() -> None:
         orchestrator.deploy_graph(graph, "gns3", "gns3pw", incremental=True)
 
     mock_delete_stale.assert_not_called()
+
+
+@allure.title("deploy_graph erfasst SSH-Diagnostik bei einer Console-Port-Kollision")
+@allure.description(
+    "Überprüft, dass deploy_graph _log_console_port_collision_diagnostics "
+    "aufruft, wenn gns3_conn.start_all_nodes mit einem Fehler scheitert, "
+    "der wie eine Console-Port-Kollision aussieht, und den Fehler danach "
+    "trotzdem weiterwirft"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_014() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    graph = MagicMock()
+    graph.nodes = {}
+
+    with (
+        patch("src.vm_orchestrator.vm_orchestrator.SSHConnection"),
+        patch("src.vm_orchestrator.vm_orchestrator.GNS3VMInterfaceSetup"),
+        patch(
+            "src.vm_orchestrator.vm_orchestrator.GNS3Connection"
+        ) as gns3_connection_cls,
+        patch.object(orchestrator, "delete_unused_vms"),
+        patch.object(orchestrator, "delete_stale_esxi_resources"),
+        patch.object(
+            orchestrator, "_log_console_port_collision_diagnostics"
+        ) as mock_diagnostics,
+    ):
+        gns3_connection_cls.return_value.start_all_nodes.side_effect = RuntimeError(
+            "Failed to start 1/3 node(s): ['R1']. Errors: ['address already in use']"
+        )
+        with pytest.raises(RuntimeError):
+            orchestrator.deploy_graph(graph, "gns3", "gns3pw")
+
+    mock_diagnostics.assert_called_once_with("gns3", "gns3pw")
+
+
+@allure.title(
+    "deploy_graph erfasst keine SSH-Diagnostik bei einem anderen Node-Start-Fehler"
+)
+@allure.description(
+    "Überprüft, dass deploy_graph _log_console_port_collision_diagnostics "
+    "NICHT aufruft, wenn gns3_conn.start_all_nodes mit einem Fehler ohne "
+    "Console-Port-Kollisions-Signatur scheitert"
+)
+@allure.tag("negativ-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.NORMAL)
+def vm_orchestrator_015() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    graph = MagicMock()
+    graph.nodes = {}
+
+    with (
+        patch("src.vm_orchestrator.vm_orchestrator.SSHConnection"),
+        patch("src.vm_orchestrator.vm_orchestrator.GNS3VMInterfaceSetup"),
+        patch(
+            "src.vm_orchestrator.vm_orchestrator.GNS3Connection"
+        ) as gns3_connection_cls,
+        patch.object(orchestrator, "delete_unused_vms"),
+        patch.object(orchestrator, "delete_stale_esxi_resources"),
+        patch.object(
+            orchestrator, "_log_console_port_collision_diagnostics"
+        ) as mock_diagnostics,
+    ):
+        gns3_connection_cls.return_value.start_all_nodes.side_effect = RuntimeError(
+            "Failed to start 1/3 node(s): ['R1']. Errors: ['500 server error']"
+        )
+        with pytest.raises(RuntimeError):
+            orchestrator.deploy_graph(graph, "gns3", "gns3pw")
+
+    mock_diagnostics.assert_not_called()

@@ -12,7 +12,10 @@ import re
 
 from src.connections.esxi_connection import ESXiConnection
 from src.connections.ssh_connection import SSHConnection
-from src.connections.gns3_connection import GNS3Connection
+from src.connections.gns3_connection import (
+    GNS3Connection,
+    is_console_port_collision_error,
+)
 from src.settings import Settings
 from src.graph import Environment, Graph
 from src.vm_orchestrator.gns3_vm_interface_setup import GNS3VMInterfaceSetup
@@ -142,7 +145,14 @@ class VMOrchestrator:
 
             self._partially_link_gns3_nodes(gns3_conn, node)
 
-        gns3_conn.start_all_nodes()
+        try:
+            gns3_conn.start_all_nodes()
+        except RuntimeError as error:
+            if is_console_port_collision_error(error):
+                self._log_console_port_collision_diagnostics(
+                    gns3_username, gns3_password
+                )
+            raise
 
     def delete_unused_vms(self, graph: Graph) -> None:
         """
@@ -446,3 +456,34 @@ class VMOrchestrator:
 
         gns3_interface_setup.initialize_commands(graph)
         gns3_interface_setup.execute_script()
+
+    def _log_console_port_collision_diagnostics(
+        self, gns3_username: str, gns3_password: str | None
+    ) -> None:
+        """
+        Best-effort diagnostic capture for a console-port-collision
+        failure that survived GNS3Connection.start_all_nodes' own retry -
+        SSHes into the GNS3 VM to record which process is actually
+        holding the console port, so the next occurrence leaves real
+        evidence in the logs instead of only a presumed cause. Never
+        raises - a failed diagnostic attempt must not mask the real
+        deploy error it was trying to help explain.
+        :param gns3_username: username to connect to the GNS3 VM via SSH
+        :param gns3_password: password to connect to the GNS3 VM via SSH
+        :return:
+        """
+        try:
+            gns3_connection = SSHConnection(
+                self.gns3_vm_ip, 22, gns3_username, gns3_password
+            )
+            for command in ("ss -tlnp", "ps aux | grep qemu"):
+                _, stdout, _ = gns3_connection.exec_command(command)
+                output = stdout.read().decode().strip()
+                logger.error(
+                    f"Console port collision diagnostics - '{command}':\n{output}"
+                )
+        except Exception as diagnostic_error:
+            logger.warning(
+                f"Could not capture console port collision diagnostics: "
+                f"{diagnostic_error}"
+            )

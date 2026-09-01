@@ -539,3 +539,20 @@ def gns3_connection_019() -> None:
 
     assert mock_post.call_count == 2
     mock_sleep.assert_called_once()
+
+
+@allure.title("is_console_port_collision_error erkennt die bekannten Fehlersignaturen")
+@allure.description(
+    "Überprüft, dass is_console_port_collision_error True für Fehler mit "
+    "'already in use' oder 'errno 98' liefert (Groß-/Kleinschreibung "
+    "egal), und False für andere Fehler"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_connection_020() -> None:
+    from src.connections.gns3_connection import is_console_port_collision_error
+
+    assert is_console_port_collision_error(Exception("Address already in use"))
+    assert is_console_port_collision_error(Exception("[Errno 98] ..."))
+    assert not is_console_port_collision_error(Exception("500 server error"))
