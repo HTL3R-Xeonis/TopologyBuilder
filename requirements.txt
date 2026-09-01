@@ -20,7 +20,7 @@ networkx==3.6.1
 numpy==2.5.2
 packaging==26.2
 paramiko==5.0.0
-phart==2.1.0
+phart==1.1.4
 pluggy==1.6.0
 pycparser==3.0
 Pygments==2.20.0
