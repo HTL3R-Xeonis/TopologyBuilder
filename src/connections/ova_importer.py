@@ -75,13 +75,17 @@ class OVAImporter:
         :param datastore_name: datastore to place the VM's files on
         :param network_names: ESXi port group for each network adapter the
             new VM should end up with, in the same order the OVF declares
-            its networks. Must have at least as many entries as the OVF
-            declares networks - the first len(parse_result.network) are
-            mapped positionally during import; any extra entries are added
-            as new network adapters afterward (e.g. an OVA declaring fewer
-            networks than the node needs).
+            its networks. If the OVF declares more networks than the node's
+            topology interfaces cover (e.g. an appliance OVA with a
+            second built-in WAN/LAN NIC the topology never wired up), the
+            last entry is reused for each extra OVF-declared network so
+            the import doesn't fail - if network_names is empty (a node
+            with no interfaces at all), this raises instead, since there
+            is nothing to reuse. Any entries beyond what the OVF declares
+            are added as new network adapters afterward (e.g. an OVA
+            declaring fewer networks than the node needs).
         :return: the created VM
-        :raises ValueError: Is thrown when fewer network names are given than the OVF declares.
+        :raises ValueError: Is thrown when no network names are given but the OVF declares at least one network.
         :raises RuntimeError: Is thrown when the import spec creation fails.
         """
         content = self.esxi_connection.content
@@ -97,13 +101,24 @@ class OVAImporter:
             parse_result = content.ovfManager.ParseDescriptor(
                 ovf_descriptor, vim.OvfManager.ParseDescriptorParams()
             )
-            if len(parse_result.network) > len(network_names):
+            if parse_result.network and not network_names:
                 logger.error(
                     msg := f"OVF declares {len(parse_result.network)} network(s) "
-                    f"({[net.name for net in parse_result.network]}) but only "
-                    f"{len(network_names)} ESXi network(s) were given: {network_names}"
+                    f"({[net.name for net in parse_result.network]}) but no ESXi "
+                    f"network was given - node has no interfaces to reuse"
                 )
                 raise ValueError(msg)
+            if len(parse_result.network) > len(network_names):
+                logger.warning(
+                    f"OVF declares {len(parse_result.network)} network(s) "
+                    f"({[net.name for net in parse_result.network]}) but only "
+                    f"{len(network_names)} ESXi network(s) were given: "
+                    f"{network_names} - reusing the last one for the extra "
+                    f"OVF-declared network(s)"
+                )
+                network_names = network_names + [network_names[-1]] * (
+                    len(parse_result.network) - len(network_names)
+                )
             declared_network_names = network_names[: len(parse_result.network)]
             extra_network_names = network_names[len(parse_result.network) :]
 

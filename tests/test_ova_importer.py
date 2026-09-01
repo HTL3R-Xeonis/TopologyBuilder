@@ -95,13 +95,17 @@ def ova_importer_000() -> None:
     )
 
 
-@allure.title("OVA mit mehr deklarierten Netzwerken als angegeben wirft Fehler")
-@allure.description(
-    "Überprüft, dass import_ova einen ValueError wirft, wenn die OVF mehr "
-    "Netzwerke deklariert als ESXi-Port-Group-Namen übergeben wurden, da "
-    "dann nicht eindeutig ist, welches Netzwerk unzugeordnet bleiben soll"
+@allure.title(
+    "OVA mit mehr deklarierten Netzwerken als angegeben nutzt das letzte erneut"
 )
-@allure.tag("negativ-test", "ova_importer")
+@allure.description(
+    "Überprüft, dass import_ova bei einer OVF mit mehr deklarierten "
+    "Netzwerken als übergebenen Port-Group-Namen (z.B. eine Appliance-OVA "
+    "mit eingebauter zweiter WAN/LAN-NIC, die die Topologie nie verkabelt "
+    "hat) den letzten übergebenen Namen für die zusätzlichen "
+    "OVF-Netzwerke wiederverwendet, statt den Import abzubrechen"
+)
+@allure.tag("positiv-test", "ova_importer")
 @allure.feature("ova_importer")
 @allure.severity(allure.severity_level.CRITICAL)
 def ova_importer_001() -> None:
@@ -112,8 +116,37 @@ def ova_importer_001() -> None:
         "src.connections.ova_importer.tarfile.open",
         return_value=tarfile.open(fileobj=io.BytesIO(ova_bytes), mode="r"),
     ):
-        with pytest.raises(ValueError, match=r"OVF declares 2 network\(s\)"):
+        with patch.object(importer, "_upload_disks"):
             importer.import_ova("/fake/path.ova", "GNS3-VM", "datastore1", ["PG-MGMT"])
+
+    create_spec_call = esxi_connection.content.ovfManager.CreateImportSpec.call_args
+    mapping = create_spec_call.args[3].networkMapping
+    assert len(mapping) == 2
+    assert mapping[0].name == "net1"
+    assert mapping[1].name == "net2"
+    esxi_connection.find_network.assert_any_call("PG-MGMT")
+
+
+@allure.title("OVA mit deklarierten Netzwerken aber ganz ohne Interfaces wirft Fehler")
+@allure.description(
+    "Überprüft, dass import_ova einen ValueError wirft, wenn die OVF "
+    "mindestens ein Netzwerk deklariert, aber gar keine Port-Group-Namen "
+    "übergeben wurden - dann gibt es keinen Namen, der wiederverwendet "
+    "werden könnte"
+)
+@allure.tag("negativ-test", "ova_importer")
+@allure.feature("ova_importer")
+@allure.severity(allure.severity_level.CRITICAL)
+def ova_importer_002() -> None:
+    importer, esxi_connection = _make_importer(["net1"])
+    ova_bytes = _make_ova_bytes()
+
+    with patch(
+        "src.connections.ova_importer.tarfile.open",
+        return_value=tarfile.open(fileobj=io.BytesIO(ova_bytes), mode="r"),
+    ):
+        with pytest.raises(ValueError, match=r"OVF declares 1 network\(s\)"):
+            importer.import_ova("/fake/path.ova", "GNS3-VM", "datastore1", [])
 
 
 @allure.title(
@@ -126,7 +159,7 @@ def ova_importer_001() -> None:
 @allure.tag("negativ-test", "ova_importer")
 @allure.feature("ova_importer")
 @allure.severity(allure.severity_level.CRITICAL)
-def ova_importer_002() -> None:
+def ova_importer_003() -> None:
     importer, esxi_connection = _make_importer([])
     esxi_connection.content.ovfManager.CreateImportSpec.return_value.error = [
         MagicMock(msg="something bad")
