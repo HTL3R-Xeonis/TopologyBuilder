@@ -52,14 +52,6 @@ esxi:
   # here or match gns3_vm_name exactly. A VM without the annotation, i.e.
   # anything this tool didn't create itself, is never touched either way.
   delete_unused_vms: true
-  # Directory an OVA is staged in before uploading it to ESXi. Defaults
-  # to the OS temp directory (usually /tmp) if unset - but /tmp is
-  # sometimes a size-capped tmpfs (RAM-backed), which a multi-gigabyte
-  # OVA can exhaust even though `df -h` shows plenty of free real disk
-  # elsewhere ('No space left on device' despite free space is the
-  # symptom). Pointing this at a real-disk directory instead avoids
-  # that entirely; the directory is created automatically if missing.
-  ova_staging_dir: ./tmp_ova
 
 gns3:
   username: gns3
@@ -78,9 +70,13 @@ gns3:
 
 api:
   # Base URLs of the ESXi/NFS template-listing service, the GNS3
-  # template-listing service, and the Topology Generator service (used
-  # by the `generate` command). Only needed if these live somewhere
-  # other than this project's own internal network default.
+  # template-listing service, the Topology Generator service (used by
+  # the `generate` command), and the OVA-deploy service (used to import
+  # ESXi VMs directly from its own NFS mount, with no local
+  # download/upload hop on this project's side). Only needed if these
+  # live somewhere other than this project's own internal network
+  # default.
   esxi_template_server_url: http://10.20.20.171:8000
   gns3_template_server_url: http://10.20.20.171:8001
   topology_generator_url: http://10.20.20.172:8002
+  ova_deploy_url: http://10.20.20.172:8003

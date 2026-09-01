@@ -27,7 +27,6 @@ def _reset_esxi_gns3_defaults() -> None:
     Settings.ESXI.DATASTORE = None
     Settings.ESXI.GNS3_VM_NAME = "GNS3 (1)"
     Settings.ESXI.DELETE_UNUSED_VMS = True
-    Settings.ESXI.OVA_STAGING_DIR = None
     Settings.GNS3.USERNAME = "gns3"
     Settings.GNS3.PROJECT_NAME = "tb_gns3_project"
     Settings.GNS3.PORT = 80
@@ -59,7 +58,6 @@ def settings_000(tmp_path) -> None:
                 "datastore": "VNX-FC-Datastore-ESXi3",
                 "gns3_vm_name": "GNS3-VM (1)",
                 "delete_unused_vms": False,
-                "ova_staging_dir": "./tmp_ova",
             },
             "gns3": {
                 "username": "gns3user",
@@ -70,6 +68,7 @@ def settings_000(tmp_path) -> None:
             "api": {
                 "esxi_template_server_url": "http://example.com:8000",
                 "gns3_template_server_url": "http://example.com:8001",
+                "ova_deploy_url": "http://example.com:8003",
             },
         },
     )
@@ -86,13 +85,13 @@ def settings_000(tmp_path) -> None:
         assert Settings.ESXI.DATASTORE == "VNX-FC-Datastore-ESXi3"
         assert Settings.ESXI.GNS3_VM_NAME == "GNS3-VM (1)"
         assert Settings.ESXI.DELETE_UNUSED_VMS is False
-        assert Settings.ESXI.OVA_STAGING_DIR == "./tmp_ova"
         assert Settings.GNS3.USERNAME == "gns3user"
         assert Settings.GNS3.PROJECT_NAME == "my_lab"
         assert Settings.GNS3.PORT == 8080
         assert Settings.GNS3.PARENT_INTERFACE == "eth2"
         assert Settings.API.ESXI_TEMPLATE_SERVER_URL == "http://example.com:8000"
         assert Settings.API.GNS3_TEMPLATE_SERVER_URL == "http://example.com:8001"
+        assert Settings.API.OVA_DEPLOY_URL == "http://example.com:8003"
     finally:
         _reset_esxi_gns3_defaults()
 

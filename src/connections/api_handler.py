@@ -1,5 +1,4 @@
 import json
-import tarfile
 from typing import Set
 
 import requests
@@ -7,9 +6,6 @@ from loguru import logger
 
 from src.settings import Settings
 from .generic_connection import GenericConnection
-
-_OVA_DOWNLOAD_CHUNK_SIZE = 8 * 1024 * 1024
-_OVA_DOWNLOAD_MAX_ATTEMPTS = 3
 
 
 class APIHandler:
@@ -140,64 +136,74 @@ class APIHandler:
         return {template["name"] for template in data["templates"]}
 
     @staticmethod
-    def download_ova(template_name: str, dest_path: str) -> None:
+    def find_esxi_template_file(image: str) -> str:
         """
-        Downloads the OVA file for the NFS-share template best matching
-        ``template_name`` to ``dest_path``, streamed in chunks since these
-        files run into multiple gigabytes.
+        Resolves a node's ``image`` to the exact OVA filename on the
+        ESXi Template-API's NFS share, for use with the OVA-deploy API's
+        ``ova_filename`` field (which does a plain filename lookup on its
+        own mounted template directory, not a fuzzy name match).
+        :param image: image name to search for, e.g. a node's image
+        :return: the matched template's exact OVA filename.
+        :raises ValueError: Is thrown when no template matches ``image``.
+        :raises TimeoutError: Is thrown when it takes too long to receive a response.
+        """
+        from src.graph.environment import normalize_template_name
 
-        The proxy's upstream connection to the NFS share has been observed
-        to drop mid-transfer without that surfacing as an HTTP-level error -
-        the response still looks like a normal 200 completion, just with a
-        truncated body. Every download is verified to be a structurally
-        complete tar archive before being accepted, with a few retries
-        since this has been observed to be intermittent.
-        :param template_name: template name to search for, e.g. a node's image
-        :param dest_path: local filesystem path to write the OVA to
+        data = APIHandler.get(f"{Settings.API.ESXI_TEMPLATE_SERVER_URL}/api/templates")
+        normalized = normalize_template_name(image)
+        for template in data["templates"]:
+            if normalize_template_name(template["name"]) == normalized:
+                return template["file"]
+
+        logger.error(msg := f"No ESXi template found matching image '{image}'")
+        raise ValueError(msg)
+
+    @staticmethod
+    def deploy_ova(
+        ip: str,
+        port: int,
+        vm_name: str,
+        ova_filename: str,
+        datastore: str,
+        network: dict[str, str],
+    ) -> None:
+        """
+        Deploys an OVA straight from the TopologyBuilderServices API's own
+        NFS mount to ESXi, entirely server-side - no local download/upload
+        hop on this project's side.
+        :param ip: IP address of the ESXi host.
+        :param port: Port of the ESXi host.
+        :param vm_name: Name to give the imported VM.
+        :param ova_filename: Exact OVA filename on the service's NFS mount.
+        :param datastore: Name of the datastore to import onto.
+        :param network: Mapping of the OVA's interface names to ESXi port group names.
         :return:
-        :raises RuntimeError: Is thrown when no complete OVA could be downloaded after all attempts.
+        :raises RuntimeError: Is thrown when the API call fails.
+        :raises TimeoutError: Is thrown when it takes too long to receive a response.
         """
-        last_error: Exception | None = None
-        for attempt in range(1, _OVA_DOWNLOAD_MAX_ATTEMPTS + 1):
-            try:
-                response = requests.get(
-                    f"{Settings.API.ESXI_TEMPLATE_SERVER_URL}/api/download",
-                    params={"name": template_name},
-                    stream=True,
-                    timeout=30,
-                )
-                response.raise_for_status()
-                with open(dest_path, "wb") as f:
-                    for chunk in response.iter_content(
-                        chunk_size=_OVA_DOWNLOAD_CHUNK_SIZE
-                    ):
-                        f.write(chunk)
-            except requests.exceptions.RequestException as error:
-                last_error = error
-                logger.warning(
-                    f"Download request for OVA '{template_name}' failed ({error}); "
-                    f"retrying ({attempt}/{_OVA_DOWNLOAD_MAX_ATTEMPTS})"
-                )
-                continue
-
-            try:
-                with tarfile.open(dest_path) as archive:
-                    archive.getmembers()
-            except tarfile.TarError as error:
-                last_error = error
-                logger.warning(
-                    f"Downloaded OVA for '{template_name}' is incomplete or corrupt "
-                    f"({error}); retrying ({attempt}/{_OVA_DOWNLOAD_MAX_ATTEMPTS})"
-                )
-                continue
-
-            return
-
-        logger.error(
-            msg := f"Failed to download a complete OVA for '{template_name}' after "
-            f"{_OVA_DOWNLOAD_MAX_ATTEMPTS} attempts: {last_error}"
-        )
-        raise RuntimeError(msg)
+        try:
+            response = requests.post(
+                f"{Settings.API.OVA_DEPLOY_URL}/deploy/ova",
+                json={
+                    "ip": ip,
+                    "port": port,
+                    "vm_name": vm_name,
+                    "ova_filename": ova_filename,
+                    "datastore": datastore,
+                    "network": network,
+                },
+                timeout=Settings.API.OVA_DEPLOY_TIMEOUT_SECONDS,
+            )
+            response.raise_for_status()
+        except requests.Timeout:
+            logger.error(msg := f"OVA deploy request timed out for VM '{vm_name}'")
+            raise TimeoutError(msg)
+        except requests.exceptions.RequestException as error:
+            logger.error(
+                msg := f"OVA deploy request failed for VM '{vm_name}': {error}. "
+                f"Response: {getattr(error.response, 'text', '')}"
+            )
+            raise RuntimeError(msg)
 
     @staticmethod
     def get_gns3_template_names() -> Set[str]:

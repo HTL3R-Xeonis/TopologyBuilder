@@ -3,9 +3,7 @@ from __future__ import annotations
 import atexit
 import re
 import ssl
-import tempfile
 import time
-from pathlib import Path
 from typing import Optional, List, TypeVar
 from typing import TYPE_CHECKING
 
@@ -16,7 +14,6 @@ from pyVmomi import vim, vmodl
 
 from .api_handler import APIHandler
 from .generic_connection import GenericConnection
-from .ova_importer import OVAImporter
 
 if TYPE_CHECKING:
     from src.graph import Graph
@@ -705,11 +702,12 @@ class ESXiConnection(GenericConnection):
         self, node: GenericNode, datastore: str, incremental: bool = False
     ) -> None:
         """
-        Deploys the virtual machine on the ESXi host: downloads the OVA
-        matching the node's image from the NFS template API and imports it
-        directly via vSphere's HttpNfcLease flow (OVAImporter), with its
-        network adapters wired to the VLAN port groups
-        initialize_virtual_switch already set up, then powers it on.
+        Deploys the virtual machine on the ESXi host: resolves the node's
+        image to its exact OVA filename on the Template-API's NFS share,
+        then has the TopologyBuilderServices OVA-deploy API import it
+        directly from there to ESXi, with its network adapters wired to
+        the VLAN port groups initialize_virtual_switch already set up,
+        then powers it on.
         :param node: Node which represents the virtual machine to be deployed.
         :param datastore: Name of the datastore, to store the virtual machine on.
         :param incremental: if True, skips (re-)deploying a node whose VM
@@ -717,7 +715,8 @@ class ESXiConnection(GenericConnection):
             auto-renamed duplicate.
         :return:
         :raises TimeoutError: Is thrown when it took too long to receive a response.
-        :raises RuntimeError: Is thrown when the OVA download or import fails.
+        :raises RuntimeError: Is thrown when the OVA deploy fails, or the
+            resulting VM cannot be found afterwards.
         :raises ValueError: Is thrown when a vlan, which should exist, does not exist on a corresponding interface.
         """
         if Settings.ONLY_ON_GNS3:
@@ -739,7 +738,7 @@ class ESXiConnection(GenericConnection):
         )
         # --------------------------------------------------------------------------------------------------------------
 
-        network_names = []
+        network_mapping = {}
         for interface in node.interfaces.values():
             if interface.vlan is None:
                 logger.error(
@@ -747,19 +746,20 @@ class ESXiConnection(GenericConnection):
                     := f"Something went wrong with the graph initialization. Needed VLAN does not exist on {node.name}.{interface.name}"
                 )
                 raise ValueError(msg)
-            network_names.append(interface.vlan.name)
+            network_mapping[interface.name] = interface.vlan.name
 
-        staging_dir = Settings.ESXI.OVA_STAGING_DIR
-        if staging_dir is not None:
-            Path(staging_dir).mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(
-            prefix="topologybuilder-ova-", dir=staging_dir
-        ) as tmp_dir:
-            ova_path = str(Path(tmp_dir) / f"{node.name}.ova")
-            APIHandler.download_ova(node.image, ova_path)
+        ova_filename = APIHandler.find_esxi_template_file(node.image)
+        APIHandler.deploy_ova(
+            self.ip, self.port, node.name, ova_filename, datastore, network_mapping
+        )
 
-            importer = OVAImporter(self)
-            vm = importer.import_ova(ova_path, node.name, datastore, network_names)
+        vm = self.get_vm(node.name)
+        if vm is None:
+            logger.error(
+                msg := f"OVA deploy for {node.name} reported success, but no "
+                f"matching VM was found afterwards."
+            )
+            raise RuntimeError(msg)
 
         self.set_vm_annotation(vm, f"topologybuilder-image:{node.image}")
         self.power_on_vm(vm)
@@ -780,65 +780,6 @@ class ESXiConnection(GenericConnection):
         if task.info.state == vim.TaskInfo.State.error:
             logger.error(msg := f"vSphere task failed: {task.info.error}")
             raise RuntimeError(msg)
-
-    def add_vm_network_adapters(
-        self, vm: vim.VirtualMachine, network_names: list[str]
-    ) -> None:
-        """
-        Adds a new network adapter to the VM for each given port group, in
-        order. Used when an OVA declares fewer networks than the VM
-        ultimately needs.
-        :param vm: the VM to add adapters to
-        :param network_names: ESXi port group name for each adapter to add, in order
-        :return:
-        """
-        device_changes = []
-        for network_name in network_names:
-            device = vim.vm.device.VirtualVmxnet3()
-            device.backing = vim.vm.device.VirtualEthernetCard.NetworkBackingInfo(
-                network=self.find_network(network_name), deviceName=network_name
-            )
-            device.connectable = vim.vm.device.VirtualDevice.ConnectInfo(
-                startConnected=True, connected=True, allowGuestControl=True
-            )
-            device_changes.append(
-                vim.vm.device.VirtualDeviceSpec(
-                    operation=vim.vm.device.VirtualDeviceSpec.Operation.add,
-                    device=device,
-                )
-            )
-
-        config_spec = vim.vm.ConfigSpec(deviceChange=device_changes)
-        self._wait_for_task(vm.ReconfigVM_Task(spec=config_spec))
-
-    def remove_vm_network_adapters(self, vm: vim.VirtualMachine, count: int) -> None:
-        """
-        Removes the last ``count`` Ethernet network adapters from the VM,
-        in device order. Used when an OVA declares more networks than the
-        node's topology interfaces cover - after import, the extra NIC(s)
-        (wired to a reused port group during import so the import itself
-        doesn't fail, see OVAImporter.import_ova) are removed so the VM
-        ends up with exactly as many adapters as the topology defines,
-        instead of a redundant extra NIC sharing another interface's
-        port group.
-        :param vm: the VM to remove adapters from
-        :param count: how many trailing Ethernet adapters to remove
-        :return:
-        """
-        ethernet_devices = [
-            device
-            for device in vm.config.hardware.device
-            if isinstance(device, vim.vm.device.VirtualEthernetCard)
-        ]
-        device_changes = [
-            vim.vm.device.VirtualDeviceSpec(
-                operation=vim.vm.device.VirtualDeviceSpec.Operation.remove,
-                device=device,
-            )
-            for device in ethernet_devices[-count:]
-        ]
-        config_spec = vim.vm.ConfigSpec(deviceChange=device_changes)
-        self._wait_for_task(vm.ReconfigVM_Task(spec=config_spec))
 
     def power_on_vm(self, vm: vim.VirtualMachine) -> None:
         """

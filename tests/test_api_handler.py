@@ -4,8 +4,6 @@ Tests to validate functionality of src/connections/api_handler.py
 
 __license__ = "GNU GPLv3"
 
-import io
-import tarfile
 from unittest.mock import MagicMock, patch
 
 import allure
@@ -13,118 +11,124 @@ import pytest
 import requests
 
 from src.connections.api_handler import APIHandler
+from src.settings import Settings
 
 
-def _make_ova_bytes() -> bytes:
-    buf = io.BytesIO()
-    with tarfile.open(fileobj=buf, mode="w") as tf:
-        ovf = b"<Envelope/>"
-        info = tarfile.TarInfo(name="vm.ovf")
-        info.size = len(ovf)
-        tf.addfile(info, io.BytesIO(ovf))
-    return buf.getvalue()
-
-
-def _make_response(body: bytes) -> MagicMock:
-    response = MagicMock()
-    response.raise_for_status = MagicMock()
-    response.iter_content = MagicMock(return_value=[body])
-    return response
-
-
-@allure.title("download_ova speichert eine vollständige OVA beim ersten Versuch")
+@allure.title("find_esxi_template_file findet die OVA-Datei für ein passendes Template")
 @allure.description(
-    "Überprüft, dass download_ova die heruntergeladene Datei akzeptiert, "
-    "wenn sie ein strukturell vollständiges Tar-Archiv ist"
+    "Überprüft, dass find_esxi_template_file das Template-Verzeichnis abruft, "
+    "per normalisiertem Namen matcht und das 'file'-Feld des passenden "
+    "Templates zurückgibt"
 )
 @allure.tag("positiv-test", "api-handler")
 @allure.feature("api_handler")
 @allure.severity(allure.severity_level.CRITICAL)
-def api_handler_000(tmp_path) -> None:
-    ova_bytes = _make_ova_bytes()
-    dest_path = str(tmp_path / "template.ova")
+def api_handler_000() -> None:
+    data = {
+        "templates": [
+            {"name": "Ubuntu-Server", "file": "ubuntu-server.ova"},
+            {"name": "pfSense", "file": "pfsense.ova"},
+        ]
+    }
 
-    with patch(
-        "src.connections.api_handler.requests.get",
-        return_value=_make_response(ova_bytes),
-    ) as mock_get:
-        APIHandler.download_ova("Ubuntu-Server", dest_path)
+    with patch.object(APIHandler, "get", return_value=data) as mock_get:
+        result = APIHandler.find_esxi_template_file("ubuntu-server")
 
-    mock_get.assert_called_once()
-    with tarfile.open(dest_path) as archive:
-        assert archive.getnames() == ["vm.ovf"]
+    mock_get.assert_called_once_with(
+        f"{Settings.API.ESXI_TEMPLATE_SERVER_URL}/api/templates"
+    )
+    assert result == "ubuntu-server.ova"
 
 
-@allure.title("download_ova wiederholt den Download bei einer abgeschnittenen Datei")
+@allure.title("find_esxi_template_file wirft ValueError, wenn kein Template passt")
 @allure.description(
-    "Überprüft, dass download_ova einen erneuten Versuch startet, wenn die "
-    "heruntergeladene Datei kein vollständiges Tar-Archiv ist, und die "
-    "zweite, vollständige Antwort akzeptiert"
-)
-@allure.tag("positiv-test", "api-handler")
-@allure.feature("api_handler")
-@allure.severity(allure.severity_level.CRITICAL)
-def api_handler_001(tmp_path) -> None:
-    ova_bytes = _make_ova_bytes()
-    dest_path = str(tmp_path / "template.ova")
-    responses = [_make_response(b"truncated-garbage"), _make_response(ova_bytes)]
-
-    with patch(
-        "src.connections.api_handler.requests.get", side_effect=responses
-    ) as mock_get:
-        APIHandler.download_ova("Ubuntu-Server", dest_path)
-
-    assert mock_get.call_count == 2
-    with tarfile.open(dest_path) as archive:
-        assert archive.getnames() == ["vm.ovf"]
-
-
-@allure.title("download_ova gibt nach wiederholt unvollständigen Downloads auf")
-@allure.description(
-    "Überprüft, dass download_ova einen RuntimeError wirft, wenn jeder "
-    "Versuch eine unvollständige Datei liefert"
+    "Überprüft, dass find_esxi_template_file einen ValueError wirft, wenn "
+    "kein Template-Name mit dem gesuchten Image übereinstimmt"
 )
 @allure.tag("negativ-test", "api-handler")
 @allure.feature("api_handler")
 @allure.severity(allure.severity_level.CRITICAL)
-def api_handler_002(tmp_path) -> None:
-    dest_path = str(tmp_path / "template.ova")
+def api_handler_001() -> None:
+    data = {"templates": [{"name": "pfSense", "file": "pfsense.ova"}]}
 
-    with patch(
-        "src.connections.api_handler.requests.get",
-        return_value=_make_response(b"still-garbage"),
-    ) as mock_get:
-        with pytest.raises(
-            RuntimeError, match=r"Failed to download a complete OVA for 'Ubuntu-Server'"
-        ):
-            APIHandler.download_ova("Ubuntu-Server", dest_path)
-
-    assert mock_get.call_count == 3
+    with patch.object(APIHandler, "get", return_value=data):
+        with pytest.raises(ValueError):
+            APIHandler.find_esxi_template_file("Ubuntu-Server")
 
 
-@allure.title("download_ova wiederholt den Download bei einem Verbindungsfehler")
+@allure.title("deploy_ova postet die Deploy-Daten an die OVA-Deploy-API")
 @allure.description(
-    "Überprüft, dass download_ova einen erneuten Versuch startet, wenn "
-    "der Request selbst fehlschlägt (z.B. ConnectionError/Timeout, nicht "
-    "nur eine abgeschnittene Datei), statt den Fehler unbehandelt und "
-    "ungeloggt bis zum Aufrufer durchzureichen"
+    "Überprüft, dass deploy_ova einen POST an {OVA_DEPLOY_URL}/deploy/ova "
+    "mit ip, port, vm_name, ova_filename, datastore und network im "
+    "JSON-Body schickt"
 )
 @allure.tag("positiv-test", "api-handler")
 @allure.feature("api_handler")
 @allure.severity(allure.severity_level.CRITICAL)
-def api_handler_003(tmp_path) -> None:
-    ova_bytes = _make_ova_bytes()
-    dest_path = str(tmp_path / "template.ova")
-    responses = [
-        requests.exceptions.ConnectionError("connection reset"),
-        _make_response(ova_bytes),
-    ]
+def api_handler_002() -> None:
+    response = MagicMock()
+    response.raise_for_status = MagicMock()
 
     with patch(
-        "src.connections.api_handler.requests.get", side_effect=responses
-    ) as mock_get:
-        APIHandler.download_ova("Ubuntu-Server", dest_path)
+        "src.connections.api_handler.requests.post", return_value=response
+    ) as mock_post:
+        APIHandler.deploy_ova(
+            "10.20.20.202",
+            443,
+            "PC1",
+            "ubuntu-server.ova",
+            "datastore1",
+            {"gi0/0": "PG-VLAN-10"},
+        )
 
-    assert mock_get.call_count == 2
-    with tarfile.open(dest_path) as archive:
-        assert archive.getnames() == ["vm.ovf"]
+    mock_post.assert_called_once_with(
+        f"{Settings.API.OVA_DEPLOY_URL}/deploy/ova",
+        json={
+            "ip": "10.20.20.202",
+            "port": 443,
+            "vm_name": "PC1",
+            "ova_filename": "ubuntu-server.ova",
+            "datastore": "datastore1",
+            "network": {"gi0/0": "PG-VLAN-10"},
+        },
+        timeout=Settings.API.OVA_DEPLOY_TIMEOUT_SECONDS,
+    )
+
+
+@allure.title("deploy_ova wirft TimeoutError bei einem Timeout")
+@allure.description(
+    "Überprüft, dass deploy_ova einen TimeoutError wirft, wenn der Request "
+    "in ein requests.Timeout läuft"
+)
+@allure.tag("negativ-test", "api-handler")
+@allure.feature("api_handler")
+@allure.severity(allure.severity_level.CRITICAL)
+def api_handler_003() -> None:
+    with patch(
+        "src.connections.api_handler.requests.post",
+        side_effect=requests.Timeout(),
+    ):
+        with pytest.raises(TimeoutError):
+            APIHandler.deploy_ova(
+                "10.20.20.202", 443, "PC1", "ubuntu-server.ova", "datastore1", {}
+            )
+
+
+@allure.title("deploy_ova wirft RuntimeError bei einem HTTP-Fehler")
+@allure.description(
+    "Überprüft, dass deploy_ova einen RuntimeError wirft, wenn der Request "
+    "mit einem anderen requests.RequestException fehlschlägt (z.B. ein "
+    "HTTPError durch raise_for_status)"
+)
+@allure.tag("negativ-test", "api-handler")
+@allure.feature("api_handler")
+@allure.severity(allure.severity_level.CRITICAL)
+def api_handler_004() -> None:
+    response = MagicMock()
+    response.raise_for_status.side_effect = requests.HTTPError("500 server error")
+
+    with patch("src.connections.api_handler.requests.post", return_value=response):
+        with pytest.raises(RuntimeError):
+            APIHandler.deploy_ova(
+                "10.20.20.202", 443, "PC1", "ubuntu-server.ova", "datastore1", {}
+            )

@@ -268,41 +268,73 @@ def esxi_connection_010() -> None:
         ESXiConnection._wait_for_task(task)
 
 
-@allure.title("add_vm_network_adapters fügt einen Adapter pro Netzwerknamen hinzu")
+@allure.title(
+    "deploy_virtual_machine löst die OVA-Datei auf, deployt sie über die "
+    "API und schaltet die VM ein"
+)
 @allure.description(
-    "Überprüft, dass add_vm_network_adapters für jeden gegebenen Namen "
-    "einen neuen Netzwerkadapter über ReconfigVM_Task hinzufügt"
+    "Überprüft, dass deploy_virtual_machine im Normalbetrieb die OVA-Datei "
+    "über APIHandler.find_esxi_template_file auflöst, sie über "
+    "APIHandler.deploy_ova mit der korrekten network-Zuordnung deployt und "
+    "die neue VM danach taggt und einschaltet"
 )
 @allure.tag("positiv-test", "esxi-connection")
 @allure.feature("esxi_connection")
 @allure.severity(allure.severity_level.CRITICAL)
 def esxi_connection_011() -> None:
-    from pyVmomi import vim
+    from src.graph.blocks.generic_node import GenericNode
+    from src.graph.blocks.vlan import VirtualLan
 
+    _reset_settings()
+    Settings.API.LITERAL_API_VALUES = True
     conn = _make_esxi_connection()
-    conn.find_network = MagicMock(side_effect=lambda name: vim.Network(name))
+    conn._ip_address = "10.20.20.202"
+    conn._port = 443
 
-    vm = MagicMock()
-    task = MagicMock()
-    task.info.state = vim.TaskInfo.State.success
-    vm.ReconfigVM_Task.return_value = task
+    node = GenericNode("Ubuntu-Server", "VM", "VM1")
+    interface = node.add_interface("ens160")
+    interface.vlan = VirtualLan("VM1", "ens160")
 
-    conn.add_vm_network_adapters(vm, ["PG-MGMT", "PG-GNS3-TRUNK"])
+    fake_vm = MagicMock()
+    with (
+        patch(
+            "src.connections.esxi_connection.APIHandler.find_esxi_template_file",
+            return_value="ubuntu-server.ova",
+        ) as mock_find_file,
+        patch(
+            "src.connections.esxi_connection.APIHandler.deploy_ova"
+        ) as mock_deploy_ova,
+        patch.object(conn, "get_vm", return_value=fake_vm),
+        patch.object(conn, "set_vm_annotation") as mock_set_annotation,
+        patch.object(conn, "power_on_vm") as mock_power_on,
+    ):
+        conn.deploy_virtual_machine(node, "datastore1")
 
-    vm.ReconfigVM_Task.assert_called_once()
-    device_changes = vm.ReconfigVM_Task.call_args.kwargs["spec"].deviceChange
-    assert len(device_changes) == 2
+    mock_find_file.assert_called_once_with("Ubuntu-Server")
+    mock_deploy_ova.assert_called_once_with(
+        "10.20.20.202",
+        443,
+        "VM1",
+        "ubuntu-server.ova",
+        "datastore1",
+        {"ens160": interface.vlan.name},
+    )
+    mock_set_annotation.assert_called_once_with(
+        fake_vm, "topologybuilder-image:Ubuntu-Server"
+    )
+    mock_power_on.assert_called_once_with(fake_vm)
 
 
 @allure.title(
-    "deploy_virtual_machine lädt die OVA herunter, importiert sie und schaltet die VM ein"
+    "deploy_virtual_machine wirft RuntimeError, wenn die VM nach dem Deploy "
+    "nicht gefunden wird"
 )
 @allure.description(
-    "Überprüft, dass deploy_virtual_machine im Normalbetrieb die OVA über "
-    "APIHandler.download_ova herunterlädt, über OVAImporter importiert und "
-    "die neue VM danach einschaltet"
+    "Überprüft, dass deploy_virtual_machine einen RuntimeError wirft, wenn "
+    "APIHandler.deploy_ova erfolgreich zurückkehrt, aber get_vm die VM "
+    "danach nicht findet"
 )
-@allure.tag("positiv-test", "esxi-connection")
+@allure.tag("negativ-test", "esxi-connection")
 @allure.feature("esxi_connection")
 @allure.severity(allure.severity_level.CRITICAL)
 def esxi_connection_012() -> None:
@@ -312,40 +344,29 @@ def esxi_connection_012() -> None:
     _reset_settings()
     Settings.API.LITERAL_API_VALUES = True
     conn = _make_esxi_connection()
+    conn._ip_address = "10.20.20.202"
+    conn._port = 443
 
     node = GenericNode("Ubuntu-Server", "VM", "VM1")
     interface = node.add_interface("ens160")
     interface.vlan = VirtualLan("VM1", "ens160")
 
-    fake_vm = MagicMock()
     with (
         patch(
-            "src.connections.esxi_connection.APIHandler.download_ova"
-        ) as mock_download,
-        patch("src.connections.esxi_connection.OVAImporter") as mock_importer_cls,
-        patch.object(conn, "set_vm_annotation") as mock_set_annotation,
-        patch.object(conn, "power_on_vm") as mock_power_on,
+            "src.connections.esxi_connection.APIHandler.find_esxi_template_file",
+            return_value="ubuntu-server.ova",
+        ),
+        patch("src.connections.esxi_connection.APIHandler.deploy_ova"),
+        patch.object(conn, "get_vm", return_value=None),
+        pytest.raises(RuntimeError),
     ):
-        mock_importer_cls.return_value.import_ova.return_value = fake_vm
         conn.deploy_virtual_machine(node, "datastore1")
-
-    mock_download.assert_called_once()
-    assert mock_download.call_args.args[0] == "Ubuntu-Server"
-    mock_importer_cls.return_value.import_ova.assert_called_once()
-    import_args = mock_importer_cls.return_value.import_ova.call_args.args
-    assert import_args[1] == "VM1"
-    assert import_args[2] == "datastore1"
-    assert import_args[3] == [interface.vlan.name]
-    mock_set_annotation.assert_called_once_with(
-        fake_vm, "topologybuilder-image:Ubuntu-Server"
-    )
-    mock_power_on.assert_called_once_with(fake_vm)
 
 
 @allure.title("deploy_virtual_machine überspringt alles im Dry-Run-Modus")
 @allure.description(
-    "Überprüft, dass deploy_virtual_machine im Dry-Run-Modus weder die OVA "
-    "herunterlädt noch importiert"
+    "Überprüft, dass deploy_virtual_machine im Dry-Run-Modus die OVA-Datei "
+    "weder auflöst noch deployt"
 )
 @allure.tag("positiv-test", "esxi-connection")
 @allure.feature("esxi_connection")
@@ -362,13 +383,13 @@ def esxi_connection_013() -> None:
 
     try:
         with patch(
-            "src.connections.esxi_connection.APIHandler.download_ova"
-        ) as mock_download:
+            "src.connections.esxi_connection.APIHandler.find_esxi_template_file"
+        ) as mock_find_file:
             conn.deploy_virtual_machine(node, "datastore1")
     finally:
         _reset_settings()
 
-    mock_download.assert_not_called()
+    mock_find_file.assert_not_called()
 
 
 @allure.title(
@@ -583,8 +604,8 @@ def esxi_connection_021() -> None:
     "deploy_virtual_machine überspringt eine bereits existierende VM im incremental-Modus"
 )
 @allure.description(
-    "Überprüft, dass deploy_virtual_machine im incremental-Modus weder die "
-    "OVA herunterlädt noch importiert, wenn bereits eine VM mit dem "
+    "Überprüft, dass deploy_virtual_machine im incremental-Modus die "
+    "OVA-Datei weder auflöst noch deployt, wenn bereits eine VM mit dem "
     "Node-Namen existiert"
 )
 @allure.tag("positiv-test", "esxi-connection")
@@ -602,11 +623,11 @@ def esxi_connection_022() -> None:
     node.add_interface("ens160")
 
     with patch(
-        "src.connections.esxi_connection.APIHandler.download_ova"
-    ) as mock_download:
+        "src.connections.esxi_connection.APIHandler.find_esxi_template_file"
+    ) as mock_find_file:
         conn.deploy_virtual_machine(node, "datastore1", incremental=True)
 
-    mock_download.assert_not_called()
+    mock_find_file.assert_not_called()
 
 
 @allure.title("is_vm_powered_on erkennt eine eingeschaltete VM")
@@ -782,86 +803,6 @@ def esxi_connection_030() -> None:
     vm.ReconfigVM_Task.assert_called_once()
     spec = vm.ReconfigVM_Task.call_args.kwargs["spec"]
     assert spec.annotation == "topologybuilder-image:Ubuntu-Server"
-
-
-@allure.title("remove_vm_network_adapters entfernt die letzten N Ethernet-Adapter")
-@allure.description(
-    "Überprüft, dass remove_vm_network_adapters nur die letzten `count` "
-    "Ethernet-Geräte über ReconfigVM_Task entfernt, in Geräte-Reihenfolge, "
-    "und andere Gerätetypen (z.B. eine Disk) unangetastet lässt"
-)
-@allure.tag("positiv-test", "esxi-connection")
-@allure.feature("esxi_connection")
-@allure.severity(allure.severity_level.CRITICAL)
-def esxi_connection_031() -> None:
-    from pyVmomi import vim
-
-    conn = _make_esxi_connection()
-
-    disk = MagicMock()
-    disk.__class__ = vim.vm.device.VirtualDisk
-    nic_0 = MagicMock()
-    nic_0.__class__ = vim.vm.device.VirtualVmxnet3
-    nic_1 = MagicMock()
-    nic_1.__class__ = vim.vm.device.VirtualVmxnet3
-    nic_2 = MagicMock()
-    nic_2.__class__ = vim.vm.device.VirtualVmxnet3
-
-    vm = MagicMock()
-    vm.config.hardware.device = [disk, nic_0, nic_1, nic_2]
-    task = MagicMock()
-    task.info.state = vim.TaskInfo.State.success
-    vm.ReconfigVM_Task.return_value = task
-
-    conn.remove_vm_network_adapters(vm, 2)
-
-    vm.ReconfigVM_Task.assert_called_once()
-    device_changes = vm.ReconfigVM_Task.call_args.kwargs["spec"].deviceChange
-    assert [change.device for change in device_changes] == [nic_1, nic_2]
-    assert all(
-        change.operation == vim.vm.device.VirtualDeviceSpec.Operation.remove
-        for change in device_changes
-    )
-
-
-@allure.title("deploy_virtual_machine staged die OVA in Settings.ESXI.OVA_STAGING_DIR")
-@allure.description(
-    "Überprüft, dass deploy_virtual_machine die OVA in dem via "
-    "Settings.ESXI.OVA_STAGING_DIR konfigurierten Verzeichnis statt im "
-    "OS-Standard-Temp-Verzeichnis staged (relevant wenn /tmp ein "
-    "größenbegrenztes tmpfs ist), und dieses Verzeichnis bei Bedarf anlegt"
-)
-@allure.tag("positiv-test", "esxi-connection")
-@allure.feature("esxi_connection")
-@allure.severity(allure.severity_level.CRITICAL)
-def esxi_connection_032(tmp_path) -> None:
-    from src.graph.blocks.generic_node import GenericNode
-    from src.graph.blocks.vlan import VirtualLan
-
-    _reset_settings()
-    Settings.API.LITERAL_API_VALUES = True
-    staging_dir = str(tmp_path / "does-not-exist-yet")
-    Settings.ESXI.OVA_STAGING_DIR = staging_dir
-    conn = _make_esxi_connection()
-
-    node = GenericNode("Ubuntu-Server", "VM", "VM1")
-    interface = node.add_interface("ens160")
-    interface.vlan = VirtualLan("VM1", "ens160")
-
-    fake_vm = MagicMock()
-    try:
-        with (
-            patch("src.connections.esxi_connection.APIHandler.download_ova"),
-            patch("src.connections.esxi_connection.OVAImporter") as mock_importer_cls,
-            patch.object(conn, "set_vm_annotation"),
-            patch.object(conn, "power_on_vm"),
-        ):
-            mock_importer_cls.return_value.import_ova.return_value = fake_vm
-            conn.deploy_virtual_machine(node, "datastore1")
-    finally:
-        Settings.ESXI.OVA_STAGING_DIR = None
-
-    assert (tmp_path / "does-not-exist-yet").is_dir()
 
 
 @allure.title("ensure_virtual_switch_exists erstellt eine fehlende vSwitch intern")

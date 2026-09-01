@@ -72,8 +72,6 @@ class Settings:
             Settings.ESXI.GNS3_VM_NAME = esxi["gns3_vm_name"]
         if "delete_unused_vms" in esxi:
             Settings.ESXI.DELETE_UNUSED_VMS = bool(esxi["delete_unused_vms"])
-        if "ova_staging_dir" in esxi:
-            Settings.ESXI.OVA_STAGING_DIR = esxi["ova_staging_dir"]
 
         if "username" in gns3:
             Settings.GNS3.USERNAME = gns3["username"]
@@ -91,6 +89,8 @@ class Settings:
             Settings.API.GNS3_TEMPLATE_SERVER_URL = api["gns3_template_server_url"]
         if "topology_generator_url" in api:
             Settings.API.TOPOLOGY_GENERATOR_URL = api["topology_generator_url"]
+        if "ova_deploy_url" in api:
+            Settings.API.OVA_DEPLOY_URL = api["ova_deploy_url"]
 
         logger.info(f"Loaded settings overrides from {path}")
 
@@ -149,17 +149,6 @@ class Settings:
         (see ESXiConnection.find_gns3_vm) and never deleted, regardless of
         this setting. A VM without the annotation - i.e. anything this
         tool didn't create itself - is never touched either way."""
-        OVA_STAGING_DIR: str | None = None
-        """Directory an OVA is downloaded/extracted into before uploading
-        it to ESXi. None (default) uses the OS temp directory
-        (tempfile.gettempdir(), usually /tmp) - fine on most systems, but
-        /tmp is sometimes a size-capped tmpfs (RAM-backed), which a
-        multi-gigabyte OVA can exhaust even though the actual disk has
-        plenty of free space. Set this to a real-disk path (e.g. a
-        directory inside this project's own working directory) if
-        deploys fail with 'No space left on device' despite `df -h`
-        showing free space - that's the tmpfs cap, not real disk
-        pressure. The directory is created if it doesn't exist."""
 
     class GNS3:
         """Settings related to GNS3."""
@@ -198,6 +187,16 @@ class Settings:
         """How long to wait for a response from the Topology Generator
         API. Generation can legitimately take a while on constrained
         hardware, across multiple Ollama servers/retries server-side."""
+        OVA_DEPLOY_URL = "http://10.20.20.172:8003"
+        """URL to the TopologyBuilderServices OVA-deploy API, used by
+        ESXiConnection.deploy_virtual_machine to import an OVA straight
+        from its own NFS mount to ESXi, with network wiring driven
+        entirely by the request's own `network` mapping - no local
+        download/upload hop on this project's side at all."""
+        OVA_DEPLOY_TIMEOUT_SECONDS: int = 600
+        """How long to wait for a response from the OVA-deploy API. This
+        is a synchronous call that blocks for the entire server-side
+        transfer, with no progress polling exposed over HTTP."""
 
         LITERAL_API_VALUES: bool = (
             os.getenv("LITERAL_API_VALUES", "false").lower() == "true"

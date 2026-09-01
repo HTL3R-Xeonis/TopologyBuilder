@@ -136,17 +136,12 @@ a VLAN subinterface on the GNS3 VM. An edge between two ESXi-hosted nodes
 needs no GNS3-side wiring at all - both VMs' vNICs are placed on the same
 VLAN-tagged port group.
 
-An ESXi-hosted node's vNICs are wired positionally to its topology
-interfaces, one port group per edge touching it. If the node's OVA template
-itself declares *more* built-in networks than the node has edges (e.g. a
-firewall appliance's OVA with a default WAN+LAN pair, deployed with only one
-edge wired up in the topology), the extra OVA-declared network(s) briefly
-reuse the last edge's port group just so the import itself succeeds, then
-the resulting extra NIC(s) are removed right after import - a warning is
-logged when this happens, and the VM ends up with exactly as many adapters
-as the topology defines. If the OVA declares *fewer* networks than the node
-has edges, the remaining edges get added as new network adapters after
-import.
+An ESXi-hosted node's vNICs are wired to its topology interfaces by name, one
+port group per edge touching it. The OVA is imported straight from the
+Template-API's NFS share to ESXi via the TopologyBuilderServices OVA-deploy
+API, which rebuilds the VM's NIC list entirely from this mapping - however
+many networks the OVA template itself declares, the resulting VM always ends
+up with exactly as many adapters as the topology defines.
 
 ## Usage
 
