@@ -8,9 +8,15 @@ __date__ = "28/07/2026"
 __license__ = "GNU GPLv3"
 __status__ = "In development"
 
+import re
+
+from src.connections.api_handler import APIHandler
 from src.connections.esxi_connection import ESXiConnection
 from src.connections.ssh_connection import SSHConnection
-from src.connections.gns3_connection import GNS3Connection
+from src.connections.gns3_connection import (
+    GNS3Connection,
+    is_console_port_collision_error,
+)
 from src.settings import Settings
 from src.graph import Environment, Graph
 from src.vm_orchestrator.gns3_vm_interface_setup import GNS3VMInterfaceSetup
@@ -65,16 +71,39 @@ class VMOrchestrator:
             )
             raise RuntimeError(msg)
         self.gns3_vm_ip = gns3_vm_ip
+        self.gns3_vm_name = gns3_vm_name
 
     def deploy_graph(
-        self, graph: Graph, gns3_username: str, gns3_password: str | None = None
+        self,
+        graph: Graph,
+        gns3_username: str,
+        gns3_password: str | None = None,
+        incremental: bool = False,
     ) -> None:
         """
         Deploys the graph on the ESXi host and GNS3 VM. The connection between the nodes runs solely between GNS3.
         This is established with multiple port groups with unique vlans on the vSwitch in ESXi.
+        Starts every created GNS3 node once linking is complete - GNS3 does
+        not start a node automatically when it's created via the API.
         :param graph: Graph to deploy
         :param gns3_username: Username for the GNS3 VM
         :param gns3_password: Password for the GNS3 VM. Set to  None if no password is set.
+        :param incremental: if True, skips resetting the ESXi vSwitch,
+            deleting unused VMs (see delete_unused_vms) and stale
+            same-topology VMs (see delete_stale_esxi_resources - both also
+            skipped in incremental mode, same reasoning), and reuses an
+            existing GNS3 project instead of deleting and recreating it -
+            only ESXi
+            VMs/GNS3 nodes/links that don't already exist by name/endpoint
+            get created, everything already present is left running
+            untouched. Never removes anything dropped from the graph - use
+            a full (non-incremental) deploy or destroy for that. Note: the
+            GNS3 VM's VLAN subinterfaces are
+            still fully torn down and recreated even in incremental mode,
+            since that script always does a full delete+recreate pass - this
+            briefly interrupts traffic on already-running Cloud-node
+            bridges, unlike the ESXi/GNS3-node-level skipping incremental
+            otherwise provides.
         :return:
 
         :raises TimeoutError: Is thrown when it took too long to receive a response.
@@ -90,17 +119,39 @@ class VMOrchestrator:
             May also be thrown when a portgroup already exists on the ESXi host. May also be thrown when no host-system or network-system was found on the ESXi host.
         """
         self._configure_gns3_interfaces(graph, gns3_username, gns3_password)
-        self.esxi_connection.reset_virtual_switch()
+        self.esxi_connection.ensure_virtual_switch_exists()
+        if not incremental:
+            self.delete_unused_vms(graph)
+            self.delete_stale_esxi_resources(graph)
+            self.esxi_connection.reset_virtual_switch()
         self.esxi_connection.initialize_virtual_switch(graph)
 
         gns3_conn = GNS3Connection(
-            self.gns3_vm_ip, Settings.GNS3.PORT, Settings.GNS3.PROJECT_NAME
+            self.gns3_vm_ip,
+            Settings.GNS3.PORT,
+            Settings.GNS3.PROJECT_NAME,
+            incremental=incremental,
         )
+        gns3_conn.set_node_positions(graph)
+
+        datastore_name = Settings.ESXI.DATASTORE
+        if datastore_name is None and any(
+            node.env == Environment.ON_ESXI for node in graph.nodes.values()
+        ):
+            biggest = self.esxi_connection.find_biggest_datastore()
+            datastore_name = biggest.name
+            free_gb = biggest.summary.freeSpace / (1024**3)
+            logger.info(
+                f"No datastore configured, auto-selected '{datastore_name}' "
+                f"({free_gb:.1f} GB free)"
+            )
 
         for node in graph.nodes.values():
             if node.env == Environment.ON_ESXI:
                 self.esxi_connection.deploy_virtual_machine(
-                    node=node, datastore=Settings.ESXI.DATASTORE
+                    node=node,
+                    datastore=datastore_name,
+                    incremental=incremental,
                 )
                 gns3_conn.create_node(node)
 
@@ -109,10 +160,402 @@ class VMOrchestrator:
 
             self._partially_link_gns3_nodes(gns3_conn, node)
 
+        try:
+            gns3_conn.start_all_nodes()
+        except RuntimeError as error:
+            if is_console_port_collision_error(error):
+                self._log_console_port_collision_diagnostics(
+                    gns3_username, gns3_password
+                )
+            raise
+
+    def delete_unused_vms(self, graph: Graph) -> None:
+        """
+        Deletes ESXi VMs this tool previously created (identified via
+        their 'topologybuilder-image:' annotation, set on every VM this
+        tool imports) that are neither the GNS3 VM nor part of the given
+        graph's current ESXi-hosted nodes - cleans up leftovers from an
+        earlier deploy of a *different* topology, which
+        delete_stale_esxi_resources doesn't reach since it only ever
+        looks at the current graph's own node names. Runs before
+        resetting the vSwitch so a stale VM's NIC can't block port-group
+        removal. Never touches a VM without that annotation, so anything
+        not created by this tool (or created by a version of it that
+        didn't yet tag VMs) is always left alone. No-op if
+        ``Settings.ESXI.DELETE_UNUSED_VMS`` is False.
+        :param graph: the current topology - its ESXi-hosted node names
+            (and any auto-renamed-duplicate of them) are never deleted
+            even if a matching VM carries the annotation
+        :return:
+        """
+        if not Settings.ESXI.DELETE_UNUSED_VMS:
+            return
+
+        current_names = {
+            node.name
+            for node in graph.nodes.values()
+            if node.env == Environment.ON_ESXI
+        }
+        gns3_vm = self.esxi_connection.find_gns3_vm()
+        gns3_vm_name = gns3_vm.name if gns3_vm is not None else None
+
+        for vm in self.esxi_connection.get_all_vms():
+            if vm.name == gns3_vm_name:
+                continue
+            annotation = vm.config.annotation or ""
+            if not annotation.startswith("topologybuilder-image:"):
+                continue
+            base_name = re.sub(r"[ _]\(?\d+\)?$", "", vm.name)
+            if base_name in current_names:
+                continue
+            self.esxi_connection.delete_vm(vm)
+
+    def delete_stale_esxi_resources(self, graph: Graph) -> None:
+        """
+        Deletes VMs and port groups left over from an earlier deploy of the
+        graph's ESXi-hosted nodes, so redeploying doesn't accumulate
+        duplicate/renamed VMs or leave a port group behind under the same
+        name but a stale VLAN ID from a previous topology layout.
+        :param graph: Graph whose ESXi-hosted nodes' stale resources to delete
+        :return:
+        """
+        for node in graph.nodes.values():
+            if node.env != Environment.ON_ESXI:
+                continue
+
+            for vm in self.esxi_connection.find_vms_matching(node.name):
+                self.esxi_connection.delete_vm(vm)
+
+            for interface in node.interfaces.values():
+                if interface.vlan is not None:
+                    self.esxi_connection.delete_port_group(interface.vlan.name)
+
+    def destroy_graph(self, graph: Graph, project_name: str) -> None:
+        """
+        Tears down a previously deployed topology: deletes its ESXi-hosted
+        VMs/port groups, and its GNS3 project's nodes (GNS3Connection's own
+        constructor already deletes and recreates an existing project by
+        name, which is exactly what's needed here too).
+        :param graph: Graph whose deployed resources to tear down
+        :param project_name: name of the GNS3 project to clear
+        :return:
+        """
+        self.delete_stale_esxi_resources(graph)
+        GNS3Connection(self.gns3_vm_ip, Settings.GNS3.PORT, project_name)
+
+    def check_prerequisites(self) -> list[tuple[bool, str]]:
+        """
+        Read-only preflight check against real infrastructure, independent
+        of any topology file: whether the vSwitch/trunk port group exist
+        (or would be auto-created by a real deploy), which datastore a
+        deploy would use and its free space, whether the GNS3 VM is
+        reachable, and whether the Template-APIs are reachable. Never
+        mutates anything - auto-create only happens as part of a real
+        ``deploy_graph`` call.
+        :return: list of (passed, description) tuples, one per check
+        """
+        results: list[tuple[bool, str]] = []
+
+        vswitch_name = Settings.ESXI.VIRTUAL_SWITCH
+        if self.esxi_connection.find_virtual_switch() is not None:
+            results.append((True, f"vSwitch '{vswitch_name}': exists"))
+        else:
+            results.append(
+                (True, f"vSwitch '{vswitch_name}': missing, would be auto-created")
+            )
+
+        trunk_port_group_name = Settings.ESXI.TRUNK_PORT_GROUP
+        trunk_port_group = self.esxi_connection.find_port_group(trunk_port_group_name)
+        if trunk_port_group is None:
+            results.append(
+                (
+                    True,
+                    f"Trunk port group '{trunk_port_group_name}': missing, "
+                    f"would be auto-created",
+                )
+            )
+        elif self.esxi_connection.bridging_security_policy_ok(trunk_port_group):
+            results.append(
+                (
+                    True,
+                    f"Trunk port group '{trunk_port_group_name}': exists, "
+                    f"security policy OK",
+                )
+            )
+        else:
+            results.append(
+                (
+                    False,
+                    f"Trunk port group '{trunk_port_group_name}': exists, but "
+                    f"security policy is not yet correct (fixed automatically "
+                    f"by the next deploy)",
+                )
+            )
+
+        try:
+            if Settings.ESXI.DATASTORE is not None:
+                datastore = self.esxi_connection.find_datastore(Settings.ESXI.DATASTORE)
+                free_gb = datastore.summary.freeSpace / (1024**3)
+                results.append(
+                    (
+                        True,
+                        f"Datastore '{Settings.ESXI.DATASTORE}': exists, "
+                        f"{free_gb:.1f} GB free",
+                    )
+                )
+            else:
+                datastore = self.esxi_connection.find_biggest_datastore()
+                free_gb = datastore.summary.freeSpace / (1024**3)
+                results.append(
+                    (
+                        True,
+                        f"Datastore: none configured, would auto-pick "
+                        f"'{datastore.name}' ({free_gb:.1f} GB free)",
+                    )
+                )
+        except ValueError as error:
+            results.append((False, f"Datastore: {error}"))
+
+        gns3_ip = self.esxi_connection.get_vm_ip_address(self.gns3_vm_name)
+        if gns3_ip is None:
+            results.append(
+                (
+                    False,
+                    f"GNS3 VM '{self.gns3_vm_name}': not found or no IP reported yet",
+                )
+            )
+        else:
+            try:
+                version = GNS3Connection.get_version(gns3_ip, Settings.GNS3.PORT)
+                results.append(
+                    (
+                        True,
+                        f"GNS3 VM '{self.gns3_vm_name}' at {gns3_ip}: reachable "
+                        f"(GNS3 {version.get('version', '?')})",
+                    )
+                )
+            except Exception as error:
+                results.append(
+                    (
+                        False,
+                        f"GNS3 VM '{self.gns3_vm_name}' at {gns3_ip}: not "
+                        f"reachable ({error})",
+                    )
+                )
+
+        if Settings.API.LITERAL_API_VALUES:
+            results.append((True, "Template-APIs: skipped (literal API values in use)"))
+        else:
+            try:
+                esxi_templates = APIHandler.get_esxi_template_names()
+                gns3_templates = APIHandler.get_gns3_template_names()
+                results.append(
+                    (
+                        True,
+                        f"Template-APIs: reachable ({len(esxi_templates)} ESXi, "
+                        f"{len(gns3_templates)} GNS3 template(s))",
+                    )
+                )
+            except Exception as error:
+                results.append((False, f"Template-APIs: not reachable ({error})"))
+
+        return results
+
+    def verify_graph(self, graph: Graph, project_name: str) -> list[tuple[bool, str]]:
+        """
+        Runs a structural health check against real infrastructure. This is
+        NOT a connectivity/ping test - this project never assigns an IP
+        address to any node from its own config, so there is no address to
+        ping for either side of an edge. Checks: the GNS3 VM's trunk NIC is
+        wired to ``Settings.ESXI.TRUNK_PORT_GROUP``; every GNS3-hosted node
+        is 'started'; every ESXi-hosted VM is powered on and reports an IP
+        via VMware Tools; both sides of a direct ESXi-ESXi link agree on
+        VLAN ID; an ESXi<->GNS3 bridge's Cloud node exists (named after the
+        ESXi node, per create_node's own convention); and a GNS3-internal
+        link actually exists between the two node IDs.
+        :param graph: built topology to verify
+        :param project_name: name of the GNS3 project to check
+        :return: list of (passed, description) tuples, one per check
+        """
+        results: list[tuple[bool, str]] = []
+        port_groups = {
+            pg["name"]: pg["vlan_id"] for pg in self.esxi_connection.list_port_groups()
+        }
+
+        gns3_nodes_by_name: dict[str, dict] = {}
+        gns3_links: list[dict] = []
+        project = next(
+            (
+                p
+                for p in GNS3Connection.list_all_projects(
+                    self.gns3_vm_ip, Settings.GNS3.PORT
+                )
+                if p.get("name") == project_name
+            ),
+            None,
+        )
+        if project is None:
+            results.append((False, f"GNS3 project '{project_name}': not found"))
+        else:
+            gns3_nodes_by_name = {
+                node.get("name"): node
+                for node in GNS3Connection.list_project_nodes(
+                    self.gns3_vm_ip, Settings.GNS3.PORT, project["project_id"]
+                )
+            }
+            gns3_links = GNS3Connection.list_project_links(
+                self.gns3_vm_ip, Settings.GNS3.PORT, project["project_id"]
+            )
+
+        gns3_vm = self.esxi_connection.get_vm(Settings.ESXI.GNS3_VM_NAME)
+        if gns3_vm is None:
+            results.append(
+                (
+                    False,
+                    f"Trunk NIC wiring: '{Settings.ESXI.GNS3_VM_NAME}' VM not found",
+                )
+            )
+        else:
+            network_names = self.esxi_connection.get_vm_network_names(gns3_vm)
+            ok = Settings.ESXI.TRUNK_PORT_GROUP in network_names
+            results.append(
+                (
+                    ok,
+                    f"Trunk NIC wiring: connected to '{Settings.ESXI.TRUNK_PORT_GROUP}'"
+                    if ok
+                    else f"Trunk NIC wiring: no network adapter connected to "
+                    f"'{Settings.ESXI.TRUNK_PORT_GROUP}' (connected to: {network_names})",
+                )
+            )
+
+        for name, node in graph.nodes.items():
+            if node.env == Environment.ON_GNS3:
+                gns3_node = gns3_nodes_by_name.get(name)
+                if gns3_node is None:
+                    results.append((False, f"GNS3 node '{name}': not found in project"))
+                elif gns3_node.get("status") == "started":
+                    results.append((True, f"GNS3 node '{name}': started"))
+                else:
+                    results.append(
+                        (
+                            False,
+                            f"GNS3 node '{name}': status is '{gns3_node.get('status')}'",
+                        )
+                    )
+            elif node.env == Environment.ON_ESXI:
+                vm = self.esxi_connection.get_vm(name)
+                if vm is None:
+                    results.append((False, f"ESXi VM '{name}': not found"))
+                elif not self.esxi_connection.is_vm_powered_on(vm):
+                    results.append((False, f"ESXi VM '{name}': not powered on"))
+                else:
+                    ip_address = self.esxi_connection.get_vm_ip_address(name)
+                    if ip_address is None:
+                        results.append(
+                            (
+                                False,
+                                f"ESXi VM '{name}': powered on, but no IP reported yet",
+                            )
+                        )
+                    else:
+                        results.append(
+                            (True, f"ESXi VM '{name}': powered on, IP {ip_address}")
+                        )
+
+        seen_edges = set()
+        for node in graph.nodes.values():
+            for if_name, interface in node.interfaces.items():
+                neighbour = interface.neighbour
+                if neighbour is None:
+                    continue
+
+                neighbour_interface = neighbour.get_interface(node)
+                neighbour_if_name = (
+                    neighbour_interface.name if neighbour_interface else "?"
+                )
+                edge_key = frozenset(
+                    [(node.name, if_name), (neighbour.name, neighbour_if_name)]
+                )
+                if edge_key in seen_edges:
+                    continue
+                seen_edges.add(edge_key)
+
+                label = (
+                    f"{node.name}:{if_name} <-> {neighbour.name}:{neighbour_if_name}"
+                )
+                esxi_1 = node.env == Environment.ON_ESXI
+                esxi_2 = neighbour.env == Environment.ON_ESXI
+
+                if esxi_1 and esxi_2:
+                    # A direct ESXi-to-ESXi link's two interfaces share the
+                    # exact same VirtualLan object (see Graph._assign_vlans)
+                    # - there's no bridging device to translate between two
+                    # different VLANs, so both vNICs sit on the one shared
+                    # port group by construction. Nothing to compare between
+                    # "both sides" here, just confirm that shared port group
+                    # actually exists on the live ESXi host.
+                    vlan_name = interface.vlan.name if interface.vlan else None
+                    vlan_id = port_groups.get(vlan_name) if vlan_name else None
+                    if vlan_id is None:
+                        results.append(
+                            (False, f"{label}: port group '{vlan_name}' missing")
+                        )
+                    else:
+                        results.append(
+                            (
+                                True,
+                                f"{label}: VLAN {vlan_id} on shared port group '{vlan_name}'",
+                            )
+                        )
+                elif esxi_1 or esxi_2:
+                    esxi_node = node if esxi_1 else neighbour
+                    if esxi_node.name not in gns3_nodes_by_name:
+                        results.append(
+                            (
+                                False,
+                                f"{label}: Cloud node for '{esxi_node.name}' not found",
+                            )
+                        )
+                    else:
+                        results.append(
+                            (
+                                True,
+                                f"{label}: bridged via Cloud node '{esxi_node.name}'",
+                            )
+                        )
+                else:
+                    node_gns3 = gns3_nodes_by_name.get(node.name)
+                    neighbour_gns3 = gns3_nodes_by_name.get(neighbour.name)
+                    if node_gns3 is None or neighbour_gns3 is None:
+                        results.append(
+                            (False, f"{label}: one or both GNS3 nodes not found")
+                        )
+                        continue
+                    ids = {node_gns3.get("node_id"), neighbour_gns3.get("node_id")}
+                    linked = any(
+                        {endpoint["node_id"] for endpoint in link["nodes"]} == ids
+                        for link in gns3_links
+                    )
+                    results.append(
+                        (
+                            linked,
+                            f"{label}: {'linked' if linked else 'no matching GNS3 link found'}",
+                        )
+                    )
+
+        return results
+
     @staticmethod
     def _partially_link_gns3_nodes(gns3_connection: GNS3Connection, node) -> None:
         """
-        Links only those nodes to this node who already exist on GNS3.
+        Links only those nodes to this node who already exist on GNS3. An
+        edge between two ESXi-hosted nodes is skipped - both VMs' vNICs
+        already share one port group directly at the ESXi layer (see
+        Graph._assign_vlans), so no GNS3-side link is needed or wanted;
+        both nodes still have their own Cloud node in GNS3 (for their
+        *other* edges, if any), but linking those two Cloud nodes
+        together would be redundant and GNS3 rejects it outright (409
+        Conflict).
         :param gns3_connection: GNS3 API connection
         :param node: Node to connect to the other existing nodes.
         :return:
@@ -122,6 +565,8 @@ class VMOrchestrator:
         for interface in node.interfaces:
             neighbour = node.get_neighbour(interface)
             if neighbour is None or neighbour.gns3_node_info is None:
+                continue
+            if node.env == Environment.ON_ESXI and neighbour.env == Environment.ON_ESXI:
                 continue
             gns3_connection.connect_nodes(node, neighbour)
 
@@ -147,9 +592,95 @@ class VMOrchestrator:
         gns3_connection = SSHConnection(
             self.gns3_vm_ip, port, gns3_username, gns3_password
         )
-        gns3_interface_setup = GNS3VMInterfaceSetup(
-            gns3_connection, Settings.GNS3.PARENT_INTERFACE
-        )
+        parent_interface = self._resolve_gns3_parent_interface(gns3_connection)
+        gns3_interface_setup = GNS3VMInterfaceSetup(gns3_connection, parent_interface)
 
         gns3_interface_setup.initialize_commands(graph)
         gns3_interface_setup.execute_script()
+
+    def _resolve_gns3_parent_interface(self, gns3_ssh_connection: SSHConnection) -> str:
+        """
+        Resolves the guest-OS interface name on the GNS3 VM that carries
+        the VLAN trunk, for GNS3VMInterfaceSetup to create subinterfaces
+        on. If ``Settings.GNS3.PARENT_INTERFACE`` is set explicitly,
+        returns it unchanged - no detection attempted. Otherwise, detects
+        it by MAC address: looks up which of the GNS3 VM's own vNICs (on
+        the ESXi side) is wired to ``Settings.ESXI.TRUNK_PORT_GROUP``,
+        then SSHes into the GNS3 VM to find the guest-OS interface with
+        that same MAC - the interface *name* isn't guaranteed to match
+        any particular convention across different GNS3 VM builds (e.g.
+        'eth1' vs. 'ens192'), but the MAC does.
+        :param gns3_ssh_connection: SSH connection to the GNS3 VM
+        :return: the resolved interface name
+        :raises RuntimeError: Is thrown when no vNIC on the GNS3 VM is wired to the trunk port group, or when no guest-OS interface with that MAC can be found.
+        """
+        if Settings.GNS3.PARENT_INTERFACE is not None:
+            return Settings.GNS3.PARENT_INTERFACE
+
+        gns3_vm = self.esxi_connection.get_vm(self.gns3_vm_name)
+        mac_address = self.esxi_connection.find_vm_nic_mac_by_port_group(
+            gns3_vm, Settings.ESXI.TRUNK_PORT_GROUP
+        )
+        if mac_address is None:
+            raise RuntimeError(
+                f"Could not auto-detect the GNS3 VM's trunk interface: no "
+                f"NIC on '{self.gns3_vm_name}' is wired to trunk port group "
+                f"'{Settings.ESXI.TRUNK_PORT_GROUP}'. Set "
+                f"gns3.parent_interface explicitly in settings.yml instead."
+            )
+
+        mac = mac_address.lower()
+        # Excludes '@'-suffixed names (e.g. 'PC4_gi0-0@eth1') - a VLAN
+        # subinterface inherits its parent's MAC address by default, so
+        # any leftover subinterface from an earlier deploy would
+        # otherwise also match and produce multiple candidates.
+        _, stdout, _ = gns3_ssh_connection.exec_command(
+            f"ip -br link show | awk 'tolower($3) == \"{mac}\" && $1 !~ /@/ {{print $1}}'"
+        )
+        output = stdout.read().decode().strip()
+        interface_names = [line for line in output.splitlines() if line]
+        if len(interface_names) != 1:
+            raise RuntimeError(
+                f"Could not auto-detect the GNS3 VM's trunk interface: "
+                f"expected exactly one guest-OS interface with MAC "
+                f"{mac_address} on '{self.gns3_vm_name}', found "
+                f"{interface_names or 'none'}. Set gns3.parent_interface "
+                f"explicitly in settings.yml instead."
+            )
+        interface_name = interface_names[0]
+        logger.info(
+            f"Auto-detected GNS3 VM trunk interface '{interface_name}' "
+            f"(MAC {mac_address})"
+        )
+        return interface_name
+
+    def _log_console_port_collision_diagnostics(
+        self, gns3_username: str, gns3_password: str | None
+    ) -> None:
+        """
+        Best-effort diagnostic capture for a console-port-collision
+        failure that survived GNS3Connection.start_all_nodes' own retry -
+        SSHes into the GNS3 VM to record which process is actually
+        holding the console port, so the next occurrence leaves real
+        evidence in the logs instead of only a presumed cause. Never
+        raises - a failed diagnostic attempt must not mask the real
+        deploy error it was trying to help explain.
+        :param gns3_username: username to connect to the GNS3 VM via SSH
+        :param gns3_password: password to connect to the GNS3 VM via SSH
+        :return:
+        """
+        try:
+            gns3_connection = SSHConnection(
+                self.gns3_vm_ip, 22, gns3_username, gns3_password
+            )
+            for command in ("ss -tlnp", "ps aux | grep qemu"):
+                _, stdout, _ = gns3_connection.exec_command(command)
+                output = stdout.read().decode().strip()
+                logger.error(
+                    f"Console port collision diagnostics - '{command}':\n{output}"
+                )
+        except Exception as diagnostic_error:
+            logger.warning(
+                f"Could not capture console port collision diagnostics: "
+                f"{diagnostic_error}"
+            )

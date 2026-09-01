@@ -3,6 +3,10 @@ from pathlib import Path
 import typer
 
 from src.settings import Settings, Verbosity
+from src.connections.api_handler import APIHandler
+from src.connections.esxi_connection import ESXiConnection
+from src.connections.gns3_connection import GNS3Connection
+from src.connections.topology_generator_client import TopologyGeneratorClient
 from src.graph import Graph
 from src.topology_file_validation import TopologyFileValidation
 from src.vm_orchestrator.vm_orchestrator import VMOrchestrator
@@ -13,13 +17,81 @@ app = typer.Typer(
     help="Build and deploy network topologies to GNS3/ESXi from a YAML config file.",
     add_completion=False,
 )
-connection_app = typer.Typer()
 
-app.add_typer(
-    connection_app,
-    name="connect",
-    help="Connects to the ESXi server for further options and commands.",
+ESXI_ADDRESS_OPTION = typer.Option(
+    None, "--address", "-a", help="The IP address of the ESXi server."
 )
+ESXI_USERNAME_OPTION = typer.Option(
+    None, "--esxi_username", help="A username of the ESXi server."
+)
+ESXI_PASSWORD_OPTION = typer.Option(
+    None, "--esxi_password", help="The password for the ESXi user."
+)
+GNS3_VM_NAME_OPTION = typer.Option(
+    None, "--gns3_vm_name", "-n", help="The name of the GNS3 VM on the ESXi server."
+)
+ESXI_DATASTORE_OPTION = typer.Option(
+    None,
+    "--datastore",
+    help="Datastore to place newly imported topology VMs on. Auto-picks "
+    "the one with the most free space if not given.",
+)
+ESXI_VIRTUAL_SWITCH_OPTION = typer.Option(
+    None,
+    "--virtual_switch",
+    help="Name of the vSwitch to create/remove port groups on. Created "
+    "as an internal-only vSwitch if it doesn't already exist.",
+)
+ESXI_TRUNK_PORT_GROUP_OPTION = typer.Option(
+    None,
+    "--trunk_port_group",
+    help="Port group carrying the GNS3 VM's VLAN trunk NIC. Created if "
+    "it doesn't already exist.",
+)
+
+
+def _apply_esxi_options(
+    address: str | None,
+    esxi_username: str | None,
+    esxi_password: str | None,
+    gns3_vm_name: str | None,
+    datastore: str | None = None,
+    virtual_switch: str | None = None,
+    trunk_port_group: str | None = None,
+) -> None:
+    """
+    Applies the given ESXi/GNS3-VM connection options to Settings, leaving
+    any not given at their current value.
+    :return:
+    """
+    if address is not None:
+        Settings.ESXI.IP = address
+    if esxi_username is not None:
+        Settings.ESXI.USERNAME = esxi_username
+    if esxi_password is not None:
+        Settings.ESXI.PASSWORD = esxi_password
+    if gns3_vm_name is not None:
+        Settings.ESXI.GNS3_VM_NAME = gns3_vm_name
+    if datastore is not None:
+        Settings.ESXI.DATASTORE = datastore
+    if virtual_switch is not None:
+        Settings.ESXI.VIRTUAL_SWITCH = virtual_switch
+    if trunk_port_group is not None:
+        Settings.ESXI.TRUNK_PORT_GROUP = trunk_port_group
+
+
+def _make_orchestrator() -> VMOrchestrator:
+    """
+    Builds a VMOrchestrator connected according to the current ESXi settings.
+    :return:
+    """
+    return VMOrchestrator(
+        esxi_host=Settings.ESXI.IP,
+        esxi_port=Settings.ESXI.PORT,
+        esxi_username=Settings.ESXI.USERNAME,
+        esxi_password=Settings.ESXI.PASSWORD,
+        gns3_vm_name=Settings.ESXI.GNS3_VM_NAME,
+    )
 
 
 @app.callback()
@@ -60,6 +132,42 @@ def main(
 
 
 @app.command()
+def generate(
+    prompt: str = typer.Argument(
+        ..., help="Natural-language description of the desired topology."
+    ),
+    output: Path = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Path to write the generated topology file to. Defaults to "
+        "--topology/-t's current value.",
+    ),
+) -> None:
+    """
+    Generates a topology file from a natural-language prompt via the
+    Topology Generator API.
+    """
+    output_path = output if output is not None else Path(Settings.TOPOLOGY_FILE)
+
+    result = TopologyGeneratorClient.generate_topology(prompt)
+
+    for warning in result.get("warnings", []):
+        typer.secho(f"Warning: {warning}", fg=typer.colors.YELLOW, err=True)
+
+    if not result.get("valid"):
+        typer.secho(
+            "Topology generation failed; no file written.",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    output_path.write_text(result["yaml"])
+    typer.echo(f"Wrote generated topology to {output_path}")
+
+
+@app.command()
 def validate() -> None:
     """Validate the topology file."""
     validator = TopologyFileValidation(Settings.TOPOLOGY_FILE)
@@ -72,6 +180,12 @@ def visualize(
     detailed: bool = typer.Option(
         False, "--detail", "-d", help="Prints the details of the network graph."
     ),
+    tree: bool = typer.Option(
+        False,
+        "--tree",
+        help="Prints a colored tree of each device and its exact "
+        "interface-to-interface connections, instead of the ASCII diagram.",
+    ),
 ) -> None:
     """Construct the graph and print it."""
     validator = TopologyFileValidation(Settings.TOPOLOGY_FILE)
@@ -83,39 +197,22 @@ def visualize(
         print(repr(graph))
         return
 
+    if tree:
+        graph.print_connection_tree()
+        return
+
     graph.visualize()
 
 
-@connection_app.callback()
-def connection_main(
-    address: str = typer.Option(
-        None, "--address", "-a", help="The IP address of the ESXi server."
-    ),
-    esxi_username: str = typer.Option(
-        None, "--esxi_username", "-u", help="A username of the ESXi server."
-    ),
-    esxi_password: str = typer.Option(
-        None, "--esxi_password", "-p", help="The password for the ESXi user."
-    ),
-    gns3_vm_name: str = typer.Option(
-        None,
-        "--gns3_vm_name",
-        "-n",
-        help="The name of the GNS3 VM on the ESXi server.",
-    ),
-):
-    if address is not None:
-        Settings.ESXI.IP = address
-    if esxi_username is not None:
-        Settings.ESXI.USERNAME = esxi_username
-    if esxi_password is not None:
-        Settings.ESXI.PASSWORD = esxi_password
-    if gns3_vm_name is not None:
-        Settings.ESXI.GNS3_VM_NAME = gns3_vm_name
-
-
-@connection_app.command()
+@app.command()
 def deploy(
+    address: str = ESXI_ADDRESS_OPTION,
+    esxi_username: str = ESXI_USERNAME_OPTION,
+    esxi_password: str = ESXI_PASSWORD_OPTION,
+    gns3_vm_name: str = GNS3_VM_NAME_OPTION,
+    datastore: str = ESXI_DATASTORE_OPTION,
+    virtual_switch: str = ESXI_VIRTUAL_SWITCH_OPTION,
+    trunk_port_group: str = ESXI_TRUNK_PORT_GROUP_OPTION,
     gns3_username: str = typer.Option(
         None, "--gns3_username", "-u", help="A username of the GNS3 server."
     ),
@@ -138,8 +235,29 @@ def deploy(
         help="Only deploys nodes which are in the ESXi environment."
         "Still creates Cloud-nodes on GNS3 to ensure possible connections between the ESXi-VMs.",
     ),
-):
+    incremental: bool = typer.Option(
+        False,
+        "--incremental",
+        "-i",
+        help="Skip resetting the ESXi vSwitch and recreating the GNS3 "
+        "project - only create what's missing by name/endpoint, leaving "
+        "already-running VMs/nodes/links untouched. Never removes nodes "
+        "dropped from the topology file, and won't pick up an existing "
+        "node's image changing while its name stays the same - use a full "
+        "(non-incremental) deploy or destroy for either of those.",
+    ),
+) -> None:
     """Deploys the nodes from the topology on ESXi and GNS3."""
+    _apply_esxi_options(
+        address,
+        esxi_username,
+        esxi_password,
+        gns3_vm_name,
+        datastore,
+        virtual_switch,
+        trunk_port_group,
+    )
+
     if only_on_gns3:
         Settings.ONLY_ON_GNS3 = only_on_gns3
     if only_on_esxi:
@@ -161,16 +279,268 @@ def deploy(
 
     graph = Graph(validator.nodes, validator.edges)
 
-    orchestrator = VMOrchestrator(
-        esxi_host=Settings.ESXI.IP,
-        esxi_port=Settings.ESXI.PORT,
-        esxi_username=Settings.ESXI.USERNAME,
-        esxi_password=Settings.ESXI.PASSWORD,
-        gns3_vm_name=Settings.ESXI.GNS3_VM_NAME,
-    )
+    orchestrator = _make_orchestrator()
 
     orchestrator.deploy_graph(
         graph=graph,
         gns3_username=Settings.GNS3.USERNAME,
         gns3_password=Settings.GNS3.PASSWORD,
+        incremental=incremental,
     )
+
+
+@app.command()
+def destroy(
+    address: str = ESXI_ADDRESS_OPTION,
+    esxi_username: str = ESXI_USERNAME_OPTION,
+    esxi_password: str = ESXI_PASSWORD_OPTION,
+    gns3_vm_name: str = GNS3_VM_NAME_OPTION,
+    datastore: str = ESXI_DATASTORE_OPTION,
+    virtual_switch: str = ESXI_VIRTUAL_SWITCH_OPTION,
+    trunk_port_group: str = ESXI_TRUNK_PORT_GROUP_OPTION,
+) -> None:
+    """
+    Tears down a previously deployed topology: deletes its GNS3 project's
+    nodes and its ESXi-hosted VMs/port groups.
+    """
+    _apply_esxi_options(
+        address,
+        esxi_username,
+        esxi_password,
+        gns3_vm_name,
+        datastore,
+        virtual_switch,
+        trunk_port_group,
+    )
+
+    validator = TopologyFileValidation(Settings.TOPOLOGY_FILE)
+    validator.validate_file()
+
+    graph = Graph(validator.nodes, validator.edges)
+
+    orchestrator = _make_orchestrator()
+    orchestrator.destroy_graph(graph, Settings.GNS3.PROJECT_NAME)
+    typer.secho("Destroy complete.", fg=typer.colors.GREEN)
+
+
+@app.command()
+def verify(
+    address: str = ESXI_ADDRESS_OPTION,
+    esxi_username: str = ESXI_USERNAME_OPTION,
+    esxi_password: str = ESXI_PASSWORD_OPTION,
+    gns3_vm_name: str = GNS3_VM_NAME_OPTION,
+    datastore: str = ESXI_DATASTORE_OPTION,
+    virtual_switch: str = ESXI_VIRTUAL_SWITCH_OPTION,
+    trunk_port_group: str = ESXI_TRUNK_PORT_GROUP_OPTION,
+) -> None:
+    """
+    Runs a structural health check against a deployed topology: confirms
+    every GNS3 node is started, every ESXi VM is powered on and reports an
+    IP, the trunk NIC is wired correctly, and both sides of a link agree
+    on VLAN ID. This is NOT a connectivity/ping test - this project never
+    assigns an IP address to any node from its own config, so there is no
+    address to ping.
+    """
+    _apply_esxi_options(
+        address,
+        esxi_username,
+        esxi_password,
+        gns3_vm_name,
+        datastore,
+        virtual_switch,
+        trunk_port_group,
+    )
+
+    validator = TopologyFileValidation(Settings.TOPOLOGY_FILE)
+    validator.validate_file()
+
+    graph = Graph(validator.nodes, validator.edges)
+
+    orchestrator = _make_orchestrator()
+    results = orchestrator.verify_graph(graph, Settings.GNS3.PROJECT_NAME)
+
+    passed = 0
+    for ok, description in results:
+        typer.echo(f"{'[OK]  ' if ok else '[FAIL]'} {description}")
+        passed += ok
+
+    typer.echo(f"{passed}/{len(results)} checks passed")
+    if passed != len(results):
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def doctor(
+    address: str = ESXI_ADDRESS_OPTION,
+    esxi_username: str = ESXI_USERNAME_OPTION,
+    esxi_password: str = ESXI_PASSWORD_OPTION,
+    gns3_vm_name: str = GNS3_VM_NAME_OPTION,
+    datastore: str = ESXI_DATASTORE_OPTION,
+    virtual_switch: str = ESXI_VIRTUAL_SWITCH_OPTION,
+    trunk_port_group: str = ESXI_TRUNK_PORT_GROUP_OPTION,
+) -> None:
+    """
+    Read-only preflight check against real infrastructure: reports
+    whether the vSwitch/trunk port group exist (or would be auto-created
+    by a deploy), which datastore a deploy would use, whether the GNS3 VM
+    is reachable, and whether the Template-APIs are reachable. Never
+    mutates anything. No topology file needed.
+    """
+    _apply_esxi_options(
+        address,
+        esxi_username,
+        esxi_password,
+        gns3_vm_name,
+        datastore,
+        virtual_switch,
+        trunk_port_group,
+    )
+
+    orchestrator = _make_orchestrator()
+    results = orchestrator.check_prerequisites()
+
+    passed = 0
+    for ok, description in results:
+        typer.echo(f"{'[OK]  ' if ok else '[FAIL]'} {description}")
+        passed += ok
+
+    typer.echo(f"{passed}/{len(results)} checks passed")
+    if passed != len(results):
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def status(
+    address: str = ESXI_ADDRESS_OPTION,
+    esxi_username: str = ESXI_USERNAME_OPTION,
+    esxi_password: str = ESXI_PASSWORD_OPTION,
+    gns3_vm_name: str = GNS3_VM_NAME_OPTION,
+    datastore: str = ESXI_DATASTORE_OPTION,
+    virtual_switch: str = ESXI_VIRTUAL_SWITCH_OPTION,
+    trunk_port_group: str = ESXI_TRUNK_PORT_GROUP_OPTION,
+) -> None:
+    """
+    Checks connectivity to the ESXi host and GNS3 VM, and lists GNS3
+    projects with each one's node/started counts. No topology file needed.
+    """
+    _apply_esxi_options(
+        address,
+        esxi_username,
+        esxi_password,
+        gns3_vm_name,
+        datastore,
+        virtual_switch,
+        trunk_port_group,
+    )
+
+    esxi_connection = ESXiConnection(
+        Settings.ESXI.IP,
+        Settings.ESXI.PORT,
+        Settings.ESXI.USERNAME,
+        Settings.ESXI.PASSWORD,
+    )
+    typer.echo(f"ESXi host {Settings.ESXI.IP}: reachable")
+
+    gns3_vm_ip = esxi_connection.get_vm_ip_address(Settings.ESXI.GNS3_VM_NAME)
+    if gns3_vm_ip is None:
+        typer.secho(
+            f"GNS3 VM '{Settings.ESXI.GNS3_VM_NAME}': not found or no IP reported yet",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    version = GNS3Connection.get_version(gns3_vm_ip, Settings.GNS3.PORT)
+    typer.echo(
+        f"GNS3 VM '{Settings.ESXI.GNS3_VM_NAME}' at {gns3_vm_ip}: reachable "
+        f"(GNS3 {version.get('version', '?')})"
+    )
+
+    projects = GNS3Connection.list_all_projects(gns3_vm_ip, Settings.GNS3.PORT)
+    if not projects:
+        typer.echo("No GNS3 projects.")
+        return
+
+    for project in projects:
+        nodes = GNS3Connection.list_project_nodes(
+            gns3_vm_ip, Settings.GNS3.PORT, project["project_id"]
+        )
+        started = sum(1 for node in nodes if node.get("status") == "started")
+        typer.echo(
+            f"  Project '{project['name']}' ({project.get('status', '?')}): "
+            f"{len(nodes)} node(s), {started} started"
+        )
+
+
+@app.command()
+def templates() -> None:
+    """
+    List available ESXi and GNS3 template names - valid values for a
+    node's 'image' field in the topology file.
+    """
+    esxi_templates = sorted(APIHandler.get_esxi_template_names())
+    gns3_templates = sorted(APIHandler.get_gns3_template_names())
+
+    typer.echo(f"ESXi templates ({len(esxi_templates)}):")
+    for name in esxi_templates:
+        typer.echo(f"  - {name}")
+
+    typer.echo(f"GNS3 templates ({len(gns3_templates)}):")
+    for name in gns3_templates:
+        typer.echo(f"  - {name}")
+
+
+@app.command()
+def portgroups(
+    address: str = ESXI_ADDRESS_OPTION,
+    esxi_username: str = ESXI_USERNAME_OPTION,
+    esxi_password: str = ESXI_PASSWORD_OPTION,
+    datastore: str = ESXI_DATASTORE_OPTION,
+    virtual_switch: str = ESXI_VIRTUAL_SWITCH_OPTION,
+    trunk_port_group: str = ESXI_TRUNK_PORT_GROUP_OPTION,
+) -> None:
+    """List the port groups configured on the ESXi host's vSwitch."""
+    _apply_esxi_options(
+        address,
+        esxi_username,
+        esxi_password,
+        None,
+        datastore,
+        virtual_switch,
+        trunk_port_group,
+    )
+
+    esxi_connection = ESXiConnection(
+        Settings.ESXI.IP,
+        Settings.ESXI.PORT,
+        Settings.ESXI.USERNAME,
+        Settings.ESXI.PASSWORD,
+    )
+    for portgroup in esxi_connection.list_port_groups():
+        typer.echo(
+            f"{portgroup['name']} (VLAN {portgroup['vlan_id']}) on {portgroup['vswitch']}"
+        )
+
+
+@app.command()
+def logs(
+    lines: int = typer.Option(
+        50,
+        "--lines",
+        "-n",
+        min=1,
+        help="Number of most recent log lines to show.",
+    ),
+) -> None:
+    """Show the most recent entries from the log file."""
+    log_file_path = Path(Settings.LOG_FILE_PATH)
+    if not log_file_path.exists():
+        typer.secho(
+            f"No log file found at {log_file_path}.", fg=typer.colors.RED, err=True
+        )
+        raise typer.Exit(code=1)
+
+    with open(log_file_path, "r") as file:
+        recent_lines = file.readlines()[-lines:]
+    for line in recent_lines:
+        typer.echo(line, nl=False)

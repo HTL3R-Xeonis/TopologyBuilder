@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+import re
+import time
 from typing import Any
 from typing import TYPE_CHECKING
 
@@ -6,10 +10,32 @@ import requests
 from ..settings import Verbosity, Settings
 
 if TYPE_CHECKING:
+    from src.graph import Graph
     from src.graph.blocks import GenericNode, Interface
 
 from .api_handler import APIHandler
+from src.graph.layout import compute_node_positions
 from loguru import logger
+
+# Matches the error GNS3 raises when a node's console TCP port is already
+# bound by another process - most likely an orphaned QEMU process from an
+# earlier delete not yet finished releasing the port. Retried once in
+# start_all_nodes since the port often frees itself within a few seconds.
+_CONSOLE_PORT_COLLISION_PATTERN = re.compile(r"already in use|errno 98", re.IGNORECASE)
+_CONSOLE_PORT_COLLISION_RETRY_BACKOFF_SECONDS = 5
+
+
+def is_console_port_collision_error(error: BaseException) -> bool:
+    """
+    True if the given exception's message matches the known console-port-
+    collision signature a GNS3 node-start failure can carry. Exposed at
+    module level (not just used internally by start_all_nodes) so
+    VMOrchestrator can recognize the same failure and capture SSH
+    diagnostics when start_all_nodes' own retry doesn't resolve it.
+    :param error: the exception raised by a failed node-start
+    :return: True if it matches the console-port-collision signature
+    """
+    return bool(_CONSOLE_PORT_COLLISION_PATTERN.search(str(error)))
 
 
 # @TODO shortform and longform / better name dedection
@@ -18,24 +44,141 @@ class GNS3Connection(APIHandler):
     Object which provides methods regarding the GNS3 API
     """
 
-    def __init__(self, ip: str, port: int, project_name: str) -> None:
+    _LAYOUT_WIDTH = 2000.0
+    _LAYOUT_HEIGHT = 1000.0
+
+    def set_node_positions(self, graph: Graph) -> None:
+        """
+        Precomputes a force-directed canvas layout for every node in the
+        graph, so create_node/_create_builtin_nodes can place each node
+        sensibly relative to its neighbours instead of everything landing
+        on the same hardcoded coordinate and piling up in the GNS3 Web UI.
+        Positions are shifted so the layout is centered on GNS3's own
+        canvas origin (0, 0) rather than starting at it - GNS3's default
+        view is centered on the origin, so an uncentered [0, width] x
+        [0, height] layout renders shifted entirely into one corner
+        instead of filling the visible canvas. Call this once, right
+        after construction, before creating any nodes.
+        :param graph: the topology about to be deployed
+        :return:
+        """
+        raw_positions = compute_node_positions(
+            graph.nodes, self._LAYOUT_WIDTH, self._LAYOUT_HEIGHT
+        )
+        x_offset = int(self._LAYOUT_WIDTH / 2)
+        y_offset = int(self._LAYOUT_HEIGHT / 2)
+        self._positions = {
+            name: (int(x) - x_offset, int(y) - y_offset)
+            for name, (x, y) in raw_positions.items()
+        }
+
+    def _position_for(self, node_name: str) -> tuple[int, int]:
+        """
+        Returns the precomputed canvas position for a node, or a fallback
+        if set_node_positions was never called (e.g. in tests) or the
+        node wasn't part of the graph it was computed from.
+        :param node_name: name of the node to position
+        :return: (x, y) canvas coordinates
+        """
+        return getattr(self, "_positions", {}).get(node_name, (0, 0))
+
+    def __init__(
+        self, ip: str, port: int, project_name: str, incremental: bool = False
+    ) -> None:
         """
         :param ip: GNS3 IP address
         :param port: GNS3 API port
         :param project_name: Name of the GNS3 project to work on
+        :param incremental: if True, an existing project is reused as-is
+            instead of being deleted and recreated, and create_node/
+            connect_nodes skip anything that already exists by name/
+            endpoint instead of creating a duplicate. Never removes a node
+            dropped from the graph - use a full (non-incremental) deploy or
+            destroy for that.
         :raises ValueError: Is thrown when the IPv4 address is not a public, private or loopback address.
         :raises TypeError: Is thrown when the parameters are of the wrong types.
         """
 
         super().__init__(ip, port)
         self.url = f"http://{ip}:{port}"
+        self.incremental = incremental
+        self._positions: dict[str, tuple[int, int]] = {}
 
         self.project_name = project_name
         self.project = self._init_project(project_name)
 
+        self._existing_nodes_by_name: dict[str, dict[str, Any]] = {}
+        self._existing_links: list[dict[str, Any]] = []
+        if incremental and self.project is not None and not Settings.IS_DRY_RUN:
+            self._existing_nodes_by_name = {
+                node["name"]: node
+                for node in GNS3Connection.list_project_nodes(
+                    ip, port, self.project["project_id"]
+                )
+            }
+            self._existing_links = GNS3Connection.list_project_links(
+                ip, port, self.project["project_id"]
+            )
+
+    @staticmethod
+    def get_version(ip: str, port: int) -> dict[str, Any]:
+        """
+        Returns the GNS3 server's own version/edition info. Purely
+        read-only, side-effect-free reachability check - unlike
+        constructing a GNS3Connection, this never touches a project.
+        :param ip: GNS3 IP address
+        :param port: GNS3 API port
+        :return: dict with at least a 'version' key
+        :raises TimeoutError: Is thrown when it takes too long to receive a response.
+        """
+        return GNS3Connection.get(f"http://{ip}:{port}/v2/version")
+
+    @staticmethod
+    def list_all_projects(ip: str, port: int) -> list[dict[str, Any]]:
+        """
+        Lists every project on the given GNS3 server, open or not. Purely
+        read-only - unlike constructing a GNS3Connection for one named
+        project, this never creates or deletes anything.
+        :param ip: GNS3 IP address
+        :param port: GNS3 API port
+        :return: list of project dicts, each with at least 'project_id' and 'name'
+        :raises TimeoutError: Is thrown when it takes too long to receive a response.
+        """
+        return GNS3Connection.get(f"http://{ip}:{port}/v2/projects")
+
+    @staticmethod
+    def list_project_nodes(ip: str, port: int, project_id: str) -> list[dict[str, Any]]:
+        """
+        Lists every node currently in the given project. Purely read-only.
+        :param ip: GNS3 IP address
+        :param port: GNS3 API port
+        :param project_id: the project to list nodes for
+        :return: list of node dicts, each with at least 'node_id', 'name', and 'status'
+        :raises TimeoutError: Is thrown when it takes too long to receive a response.
+        """
+        return GNS3Connection.get(f"http://{ip}:{port}/v2/projects/{project_id}/nodes")
+
+    @staticmethod
+    def list_project_links(ip: str, port: int, project_id: str) -> list[dict[str, Any]]:
+        """
+        Lists every link currently in the given project. Purely read-only.
+        :param ip: GNS3 IP address
+        :param port: GNS3 API port
+        :param project_id: the project to list links for
+        :return: list of link dicts, each with a 'nodes' list of
+            {'node_id', 'adapter_number', 'port_number'} for both endpoints
+        :raises TimeoutError: Is thrown when it takes too long to receive a response.
+        """
+        return GNS3Connection.get(f"http://{ip}:{port}/v2/projects/{project_id}/links")
+
     def _init_project(self, name: str) -> dict[str, Any] | None:
         """
-        Create a new GNS3 project. If project already exists, it is deleted first.
+        Create a new GNS3 project. If project already exists, it is deleted
+        first - unless ``self.incremental`` is set, in which case an
+        existing project is reused as-is instead. Under
+        ``Settings.IS_DRY_RUN``, neither deletes nor creates anything -
+        returns the existing project's info read-only (or None if it
+        doesn't exist yet), so dry-run stays genuinely side-effect-free.
         :param name: Name of the GNS3 project.
         :return: Returns the newly generated GNS3 project information. Returns ``None`` if the ``Settings.ONLY_ON_ESXI`` is ``True``.
         :raises TimeoutError: Is thrown when it takes too long to receive a response.
@@ -50,6 +193,32 @@ class GNS3Connection(APIHandler):
             raise RuntimeError(msg) from exc
 
         project = next((p for p in projects if p["name"] == name), None)
+
+        # ----------------------------------------------------------------------------------------------------------
+        if Settings.IS_DRY_RUN:
+            if project is None:
+                Verbosity.volumatic_print(
+                    Verbosity.NORMAL, f"Would create GNS3 project {name}"
+                )
+            else:
+                Verbosity.volumatic_print(
+                    Verbosity.NORMAL,
+                    f"Would delete and recreate existing GNS3 project {name}",
+                )
+            return project
+        # ----------------------------------------------------------------------------------------------------------
+
+        if self.incremental:
+            if project is None:
+                return self._create_new_project(name)
+            Verbosity.volumatic_print(
+                Verbosity.NORMAL, f"GNS3 project {name} already exists, reusing it"
+            )
+            if project.get("status") != "opened":
+                project = self.post(
+                    f"{self.url}/v2/projects/{project['project_id']}/open"
+                )
+            return project
 
         if project is None:
             return self._create_new_project(name)
@@ -139,6 +308,16 @@ class GNS3Connection(APIHandler):
         if Settings.ONLY_ON_ESXI:
             return None
 
+        if self.incremental:
+            existing = self._existing_nodes_by_name.get(node.name)
+            if existing is not None:
+                Verbosity.volumatic_print(
+                    Verbosity.NORMAL,
+                    f"Node {node.name} already exists on GNS3, reusing it (incremental)",
+                )
+                node.gns3_node_info = existing
+                return existing
+
         if node.env == Environment.ON_ESXI:
             ports_mapping = self._create_ports_mapping(node)
             return self._create_builtin_nodes(node, "Cloud", ports_mapping)
@@ -159,7 +338,8 @@ class GNS3Connection(APIHandler):
         if template["builtin"]:
             return self._create_builtin_nodes(node, template)
 
-        payload = {"name": node.name, "x": 100, "y": 100}
+        x, y = self._position_for(node.name)
+        payload = {"name": node.name, "x": x, "y": y}
         try:
             response = self.post(
                 f"{self.url}/v2/projects/{self.project['project_id']}/templates/{template['template_id']}",
@@ -206,12 +386,13 @@ class GNS3Connection(APIHandler):
             # ----------------------------------------------------------------------------------------------------------
             template = self._get_template(template)
 
+        x, y = self._position_for(node.name)
         payload = {
             "name": node.name,
             "node_type": template["template_type"],
             "compute_id": "local",
-            "x": 100,
-            "y": 100,
+            "x": x,
+            "y": y,
         }
 
         if ports_mapping is not None:
@@ -257,22 +438,80 @@ class GNS3Connection(APIHandler):
         return template
 
     @staticmethod
+    def _trailing_number(name: str) -> int | None:
+        """
+        Extracts the trailing digit run from a port name, e.g. 'gi0/2' ->
+        2, 'Ethernet2' -> 2. Returns None if the name doesn't end in digits.
+        """
+        match = re.search(r"(\d+)$", name)
+        return int(match.group(1)) if match else None
+
+    @staticmethod
     def _get_adapter(gns3_node_info: dict[str, Any], intf: Interface) -> dict[str, Any]:
         """
-        Looks for a gns3 adapter with the same name as given interface.
+        Looks for a GNS3 adapter matching the given interface. Tries, in
+        order: exact name match (case-insensitive); if the node has
+        exactly one port, that port regardless of name - single-port node
+        types (e.g. VPCS's 'Ethernet0') often don't share the topology
+        config's interface naming convention (e.g. 'gi0/0'), but there's
+        no ambiguity when there's only one port; a port whose trailing
+        number matches the requested name's trailing number, if exactly
+        one candidate matches - different GNS3 templates have been
+        observed to use different naming conventions entirely (e.g.
+        'gi0/2' vs. plain 'Ethernet2'), but both still encode the same
+        port index at the end.
         :param gns3_node_info: GNS3 node information.
         :param intf: Interface of the node.
         :return: Returns the GNS3 adapter information.
         :raises ValueError: Is thrown when no adapter can be associated with the given interface.
         This may happen because the names are not the same.
         """
-        for adapter in gns3_node_info["ports"]:
-            # @TODO shortform and longform / better name dedection
+        ports = gns3_node_info["ports"]
+        for adapter in ports:
             if adapter["name"].lower() == intf.name.lower():
                 return adapter
 
+        if len(ports) == 1:
+            logger.warning(
+                f"Node '{gns3_node_info['name']}' has no port named "
+                f"'{intf.name}', using its only port "
+                f"'{ports[0].get('name')}' instead"
+            )
+            return ports[0]
+
+        requested_number = GNS3Connection._trailing_number(intf.name)
+        if requested_number is not None:
+            matches = [
+                adapter
+                for adapter in ports
+                if GNS3Connection._trailing_number(adapter.get("name", ""))
+                == requested_number
+            ]
+            if len(matches) == 1:
+                logger.warning(
+                    f"Node '{gns3_node_info['name']}' has no port named "
+                    f"'{intf.name}', using port '{matches[0].get('name')}' "
+                    f"instead (matched by port number)"
+                )
+                return matches[0]
+
         raise ValueError(
             f"Interface {intf.name} on {intf.parent.name} cannot be associated to any adapter of the {gns3_node_info['name']} template."
+        )
+
+    def _link_exists(self, node_id_a: str, node_id_b: str) -> bool:
+        """
+        Checks whether a link already exists between the two given nodes,
+        based on the links collected at construction time (incremental
+        mode only).
+        :param node_id_a: GNS3 node_id of one endpoint
+        :param node_id_b: GNS3 node_id of the other endpoint
+        :return: True if a link between exactly these two nodes already exists
+        """
+        wanted = {node_id_a, node_id_b}
+        return any(
+            {endpoint["node_id"] for endpoint in link["nodes"]} == wanted
+            for link in self._existing_links
         )
 
     def connect_nodes(
@@ -297,6 +536,20 @@ class GNS3Connection(APIHandler):
             raise RuntimeError(
                 f"Node {node_1.name} has no internal connection to {node_2.name}"
             )
+
+        gns3_info_1 = node_1.gns3_node_info
+        gns3_info_2 = node_2.gns3_node_info
+
+        if gns3_info_1 is None:
+            raise RuntimeError(f"Node {node_1.name} does not exist on GNS3.")
+        if gns3_info_2 is None:
+            raise RuntimeError(f"Node {node_2.name} does not exist on GNS3.")
+
+        if self.incremental and self._link_exists(
+            gns3_info_1["node_id"], gns3_info_2["node_id"]
+        ):
+            return None
+
         # --------------------------------------------------------------------------------------------------------------
         if Settings.IS_DRY_RUN:
             Verbosity.volumatic_print(
@@ -309,14 +562,6 @@ class GNS3Connection(APIHandler):
             f"Connects {node_1.name}[{intf_1.name}] to {node_2.name}[{intf_2.name}]",
         )
         # --------------------------------------------------------------------------------------------------------------
-
-        gns3_info_1 = node_1.gns3_node_info
-        gns3_info_2 = node_2.gns3_node_info
-
-        if gns3_info_1 is None:
-            raise RuntimeError(f"Node {node_1.name} does not exist on GNS3.")
-        if gns3_info_2 is None:
-            raise RuntimeError(f"Node {node_2.name} does not exist on GNS3.")
 
         adapter_1 = self._get_adapter(gns3_info_1, intf_1)
         adapter_2 = self._get_adapter(gns3_info_2, intf_2)
@@ -346,4 +591,80 @@ class GNS3Connection(APIHandler):
                 raise RuntimeError(msg) from exc
             raise RuntimeError(
                 f"Something went wrong while linking two nodes on {self.ip}"
+            )
+
+    def start_all_nodes(self) -> None:
+        """
+        Starts every node currently in this GNS3 project, one at a time.
+        GNS3 does not start a node automatically when it's created via
+        the API - without this, deploy_graph would create and link every
+        node but leave the whole topology powered off.
+
+        Every node is attempted, even after an earlier one fails, so a
+        single bad node doesn't leave the rest of an otherwise-successful
+        topology unstarted. A failure matching the known console-port-
+        collision signature (a leftover QEMU process from an earlier
+        delete not yet finished releasing the port) gets one retry after
+        a short backoff before being counted as failed. Any still-failing
+        nodes are reported together at the end; nodes that did start are
+        left running.
+        :return: Returns ``None`` if the ``Settings.ONLY_ON_ESXI``/``Settings.IS_DRY_RUN`` options are True.
+        :raises TimeoutError: Is thrown when it takes too long to receive a response.
+        :raises RuntimeError: Is thrown when it fails to collect the project's nodes, or when starting one or more nodes fails.
+        """
+        if Settings.ONLY_ON_ESXI:
+            return
+        # --------------------------------------------------------------------------------------------------------------
+        if Settings.IS_DRY_RUN:
+            Verbosity.volumatic_print(Verbosity.NORMAL, "Would start all GNS3 nodes")
+            return
+        # --------------------------------------------------------------------------------------------------------------
+
+        try:
+            nodes = self.get(
+                f"{self.url}/v2/projects/{self.project['project_id']}/nodes"
+            )
+        except requests.exceptions.HTTPError as exc:
+            logger.error(msg := "Failed to collect GNS3 node information.")
+            raise RuntimeError(msg) from exc
+
+        failed_names = []
+        failure_details = []
+        for node in nodes:
+            Verbosity.volumatic_print(
+                Verbosity.NORMAL, f"Starts GNS3 node {node['name']}"
+            )
+            start_url = f"{self.url}/v2/projects/{self.project['project_id']}/nodes/{node['node_id']}/start"
+            try:
+                self.post(start_url)
+                continue
+            except requests.exceptions.HTTPError as error:
+                if is_console_port_collision_error(error):
+                    logger.warning(
+                        f"Node '{node['name']}' hit a console port collision "
+                        f"on start, retrying once after "
+                        f"{_CONSOLE_PORT_COLLISION_RETRY_BACKOFF_SECONDS}s"
+                    )
+                    time.sleep(_CONSOLE_PORT_COLLISION_RETRY_BACKOFF_SECONDS)
+                    try:
+                        self.post(start_url)
+                        continue
+                    except requests.exceptions.HTTPError as retry_error:
+                        error = retry_error
+
+                failed_names.append(node["name"])
+                failure_details.append(str(error))
+                logger.error(f"Failed to start GNS3 node '{node['name']}': {error}")
+
+        if failed_names:
+            # failure_details is folded into the message (not just logged)
+            # so a console-port-collision signature that survived the
+            # retry above is still detectable by is_console_port_collision_
+            # error on the raised exception itself, e.g. for
+            # VMOrchestrator to decide whether to capture SSH diagnostics.
+            raise RuntimeError(
+                f"Failed to start {len(failed_names)}/{len(nodes)} node(s): "
+                f"{failed_names}. The rest started successfully; check the "
+                f"GNS3 Web UI, then rerun deploy if needed (redeploys are "
+                f"idempotent). Errors: {failure_details}"
             )

@@ -1,4 +1,8 @@
 import os
+
+import yaml
+from loguru import logger
+
 from .verbosity import Verbosity
 from dotenv import load_dotenv
 
@@ -16,12 +20,86 @@ class Settings:
 
     @staticmethod
     def initialise_settings(path: str) -> None:
-        pass
+        """
+        Loads settings overrides from a YAML file (see
+        ``settings.example.yml``) and applies them onto this class and its
+        nested ESXI/GNS3/API classes. Any key not present in the file is
+        left at its current value, so the file only needs to declare what
+        it wants to override.
+
+        Passwords are deliberately not supported here - use the
+        ESXI_PASSWORD/GNS3_PASSWORD environment variables (a .env file
+        works too, see ``.env.example``) or the CLI's own
+        --esxi_password/--gns3_password options instead, so a secret never
+        ends up sitting in a settings file on disk.
+        :param path: path to the YAML settings file
+        :return:
+        :raises FileNotFoundError: is thrown when no file exists at ``path``.
+        :raises ValueError: is thrown when the file contains a 'password' key anywhere.
+        """
+        with open(path, "r") as file:
+            data = yaml.safe_load(file) or {}
+
+        esxi = data.get("esxi", {})
+        gns3 = data.get("gns3", {})
+        if "password" in esxi or "password" in gns3:
+            raise ValueError(
+                "Passwords are not supported in the settings file - use "
+                "ESXI_PASSWORD/GNS3_PASSWORD environment variables (e.g. via "
+                "a .env file) or the corresponding CLI options instead."
+            )
+
+        if "topology_file" in data:
+            Settings.TOPOLOGY_FILE = data["topology_file"]
+        if "log_file_path" in data:
+            Settings.LOG_FILE_PATH = data["log_file_path"]
+
+        if "ip" in esxi:
+            Settings.ESXI.IP = esxi["ip"]
+        if "port" in esxi:
+            Settings.ESXI.PORT = esxi["port"]
+        if "username" in esxi:
+            Settings.ESXI.USERNAME = esxi["username"]
+        if "virtual_switch" in esxi:
+            Settings.ESXI.VIRTUAL_SWITCH = esxi["virtual_switch"]
+        if "trunk_port_group" in esxi:
+            Settings.ESXI.TRUNK_PORT_GROUP = esxi["trunk_port_group"]
+        if "ignore_port_groups" in esxi:
+            Settings.ESXI.IGNORE_PORT_GROUPS = set(esxi["ignore_port_groups"])
+        if "datastore" in esxi:
+            Settings.ESXI.DATASTORE = esxi["datastore"]
+        if "gns3_vm_name" in esxi:
+            Settings.ESXI.GNS3_VM_NAME = esxi["gns3_vm_name"]
+        if "delete_unused_vms" in esxi:
+            Settings.ESXI.DELETE_UNUSED_VMS = bool(esxi["delete_unused_vms"])
+
+        if "username" in gns3:
+            Settings.GNS3.USERNAME = gns3["username"]
+        if "project_name" in gns3:
+            Settings.GNS3.PROJECT_NAME = gns3["project_name"]
+        if "port" in gns3:
+            Settings.GNS3.PORT = gns3["port"]
+        if "parent_interface" in gns3:
+            Settings.GNS3.PARENT_INTERFACE = gns3["parent_interface"]
+
+        api = data.get("api", {})
+        if "esxi_template_server_url" in api:
+            Settings.API.ESXI_TEMPLATE_SERVER_URL = api["esxi_template_server_url"]
+        if "gns3_template_server_url" in api:
+            Settings.API.GNS3_TEMPLATE_SERVER_URL = api["gns3_template_server_url"]
+        if "topology_generator_url" in api:
+            Settings.API.TOPOLOGY_GENERATOR_URL = api["topology_generator_url"]
+        if "ova_deploy_url" in api:
+            Settings.API.OVA_DEPLOY_URL = api["ova_deploy_url"]
+
+        logger.info(f"Loaded settings overrides from {path}")
 
     VERBOSITY_LEVEL: Verbosity = Verbosity.NORMAL
     """The verbosity level of the program."""
     TOPOLOGY_FILE: str = "./topology_example.yaml"
     """Path to the YAML file which represents the topology."""
+    LOG_FILE_PATH: str = "./logs/app.log"
+    """Path to the log file main() configures loguru to write to."""
     IS_DRY_RUN: bool = False
     """If True, only prints what would happen. May still execute API requests."""
     ONLY_ON_GNS3: bool = False
@@ -42,12 +120,35 @@ class Settings:
         """Password to use for the ESXi connections."""
         VIRTUAL_SWITCH: str = "internal_network"
         """Specifies the virtual switch to use on the ESXi client."""
+        TRUNK_PORT_GROUP: str = "PG_GNS3_TRUNK"
+        """Name of the port group carrying the GNS3 VM's VLAN trunk NIC. Must
+        accept promiscuous mode/MAC changes/forged transmits, which GNS3's
+        Cloud nodes need to bridge topology devices through it - ESXi's
+        default security policy silently drops that traffic otherwise."""
         IGNORE_PORT_GROUPS: set[str] = {"PG_GNS3_TRUNK"}
         """Specifies which port groups not to delete on the virtual switch."""
-        DATASTORE: str = "datastore1 (2)"
-        """Specifies the name of the datastore to use on the ESXi client."""
+        RESERVED_PORT_GROUPS: set[str] = {"VM Network", "Management Network"}
+        """ESXi's own built-in port groups (present on essentially every
+        install, not created by this tool). Always protected from deletion
+        regardless of IGNORE_PORT_GROUPS' contents - deleting 'Management
+        Network' in particular can sever the host's own management access."""
+        DATASTORE: str | None = None
+        """Specifies the name of the datastore to use on the ESXi client.
+        None (default) auto-picks the datastore with the most free space
+        at deploy time (see ESXiConnection.find_biggest_datastore)."""
         GNS3_VM_NAME = "GNS3 (1)"
         """Name of the GNS3 VM to work on."""
+        DELETE_UNUSED_VMS: bool = True
+        """If True (default), a non-incremental deploy automatically
+        deletes ESXi VMs this tool previously created (identified via
+        their 'topologybuilder-image:' annotation, set on every VM this
+        tool imports) that are no longer part of the current topology -
+        cleans up leftovers from an earlier deploy of a *different*
+        topology before resetting the vSwitch, so a stale VM's NIC can't
+        block port-group removal. The GNS3 VM is always auto-detected
+        (see ESXiConnection.find_gns3_vm) and never deleted, regardless of
+        this setting. A VM without the annotation - i.e. anything this
+        tool didn't create itself - is never touched either way."""
 
     class GNS3:
         """Settings related to GNS3."""
@@ -60,8 +161,16 @@ class Settings:
         """Name of the GNS3 project to work on. If this project already exists on the GNS3 server, it is going to be overwritten."""
         PORT: int = 80
         """Port of the GNS3 client, where the API requests are expected."""
-        PARENT_INTERFACE: str = "eth1"
-        """Name of the interface of the GNS3 VM to create and delete the subinterfaces."""
+        PARENT_INTERFACE: str | None = None
+        """Name of the interface of the GNS3 VM to create and delete the
+        subinterfaces. None (default) auto-detects it by MAC address: the
+        GNS3 VM's own vNIC wired to Settings.ESXI.TRUNK_PORT_GROUP is
+        looked up on the ESXi side, then matched against the GNS3 VM's
+        guest-OS interfaces by MAC (see VMOrchestrator.
+        _resolve_gns3_parent_interface) - this interface name isn't
+        guaranteed to match across different GNS3 VM builds (e.g. 'eth1'
+        vs. 'ens192'), but the MAC does. Set explicitly to skip detection
+        and force a specific name."""
 
     class API:
         """Settings related to API requests."""
@@ -70,9 +179,26 @@ class Settings:
         """URL to the GNS3 template API server."""
         ESXI_TEMPLATE_SERVER_URL = "http://10.20.20.171:8000"
         """URL to the ESXi template API server."""
+        TOPOLOGY_GENERATOR_URL = "http://10.20.20.172:8002"
+        """URL to the Topology Generator API server, used by the
+        `generate` command to turn a natural-language prompt into a
+        topology config file via an LLM."""
+        TOPOLOGY_GENERATOR_TIMEOUT_SECONDS: int = 1800
+        """How long to wait for a response from the Topology Generator
+        API. Generation can legitimately take a while on constrained
+        hardware, across multiple Ollama servers/retries server-side."""
+        OVA_DEPLOY_URL = "http://10.20.20.172:8003"
+        """URL to the TopologyBuilderServices OVA-deploy API, used by
+        ESXiConnection.deploy_virtual_machine to import an OVA straight
+        from its own NFS mount to ESXi, with network wiring driven
+        entirely by the request's own `network` mapping - no local
+        download/upload hop on this project's side at all."""
+        OVA_DEPLOY_TIMEOUT_SECONDS: int = 600
+        """How long to wait for a response from the OVA-deploy API. This
+        is a synchronous call that blocks for the entire server-side
+        transfer, with no progress polling exposed over HTTP."""
 
-        # @TODO Remove always True. Is currently set for convenience
-        LITERAL_API_VALUES: bool = True or (
+        LITERAL_API_VALUES: bool = (
             os.getenv("LITERAL_API_VALUES", "false").lower() == "true"
         )
         """Specifies whether to use literal API values instead of using API calls to get the existing templates."""

@@ -3,4 +3,10 @@
 __pycache__
 *.py[cod]
 .env
+settings.yml
+settings.yaml
 logs/*
+*.egg-info
+build/
+dist/
+tmp_ova/

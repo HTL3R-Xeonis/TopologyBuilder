@@ -1,0 +1,82 @@
+# Optional settings overrides for TopologyBuilder, loaded via
+# `main.py --settings settings.yml` (or `-s settings.yml`).
+# Copy this file to settings.yml (git-ignored) and fill in your own
+# values - only the keys you actually list here get overridden, everything
+# else keeps its built-in default (see src/settings/settings.py).
+#
+# Passwords are intentionally NOT supported here - use the ESXI_PASSWORD/
+# GNS3_PASSWORD environment variables instead (a .env file works too, see
+# .env.example), or pass --esxi_password/--gns3_password on the command
+# line. initialise_settings() refuses to load a file containing a
+# 'password' key, so a secret never ends up sitting in a settings file on
+# disk.
+
+# Path to the topology YAML file, if you don't want to pass --topology
+# every time.
+topology_file: ./topology_example.yaml
+
+esxi:
+  ip: 10.20.20.202
+  username: root
+  # Name of the vSwitch to create/remove port groups on. Created
+  # automatically (as a plain internal-only vSwitch, no physical uplink)
+  # if it doesn't already exist.
+  virtual_switch: vSwitch0
+  # Port group carrying the GNS3 VM's VLAN trunk NIC. Created
+  # automatically (VLAN 4095, pass-all-tags) if it doesn't already exist.
+  # Must accept promiscuous mode/MAC changes/forged transmits -
+  # ensure_bridging_security_policy sets this automatically on every
+  # deploy. This port group is always protected from deletion by
+  # reset_virtual_switch, regardless of ignore_port_groups below.
+  trunk_port_group: PG-GNS3-TRUNK
+  # Extra port groups (besides trunk_port_group and ESXi's own built-in
+  # 'VM Network'/'Management Network', which are always protected) that
+  # reset_virtual_switch should never delete. PG-MGMT below is the GNS3
+  # VM's own management NIC's port group on this deployment's ESXi host -
+  # deleting it would cut off access to the GNS3 VM's web UI/API.
+  ignore_port_groups: [PG-MGMT]
+  # Datastore to place newly imported topology VMs on. Omit this key (or
+  # comment it out) to auto-pick the datastore with the most free space
+  # at deploy time instead.
+  datastore: VNX-FC-Datastore-ESXi3
+  # Name of the GNS3 VM as registered on the ESXi host.
+  gns3_vm_name: GNS3-VM (1)
+  # If true (default), a non-incremental deploy automatically deletes
+  # ESXi VMs this tool previously created (identified via their
+  # 'topologybuilder-image:' annotation) that are no longer part of the
+  # current topology - cleans up leftovers from an earlier deploy of a
+  # *different* topology before resetting the vSwitch, so a stale VM's
+  # NIC can't block port-group removal. The GNS3 VM itself is always
+  # auto-detected by name (any VM whose name contains 'gns3',
+  # case-insensitive) and never deleted - it does NOT need to be listed
+  # here or match gns3_vm_name exactly. A VM without the annotation, i.e.
+  # anything this tool didn't create itself, is never touched either way.
+  delete_unused_vms: true
+
+gns3:
+  username: gns3
+  # Name of the GNS3 project to create/reuse. If it already exists, it is
+  # overwritten on a non-incremental deploy.
+  project_name: tb_gns3_project
+  port: 80
+  # Name of the GNS3 VM's own guest-OS interface for its VLAN trunk NIC
+  # (not the ESXi port group above - this is the interface name inside the
+  # GNS3 VM's guest OS). Omit this key to auto-detect it by MAC address
+  # instead (matches the vNIC wired to esxi.trunk_port_group above against
+  # the GNS3 VM's guest-OS interfaces) - safer than a fixed name, since
+  # this isn't guaranteed to match across different GNS3 VM builds. Set
+  # explicitly only if auto-detection doesn't work for some reason.
+  # parent_interface: eth1
+
+api:
+  # Base URLs of the ESXi/NFS template-listing service, the GNS3
+  # template-listing service, the Topology Generator service (used by
+  # the `generate` command), and the OVA-deploy service (used to import
+  # ESXi VMs directly from its own NFS mount, with no local
+  # download/upload hop on this project's side). Only needed if these
+  # live somewhere other than this project's own internal network
+  # default.
+  esxi_template_server_url: http://10.20.20.171:8000
+  gns3_template_server_url: http://10.20.20.171:8001
+  topology_generator_url: http://10.20.20.172:8002
+  ova_deploy_url: http://10.20.20.172:8003

@@ -30,14 +30,18 @@ def main():
         "<level>{message}</level>"
     )
 
-    logger.add("./logs/app.log", format=file_format, level="WARNING", rotation="10MB")
+    logger.add(
+        Settings.LOG_FILE_PATH, format=file_format, level="WARNING", rotation="10MB"
+    )
     logger.add(sys.stdout, format=print_format)
 
     try:
         app()
     except Exception as e:
+        logger.error(f"{type(e).__name__}: {e}")
         if Settings.VERBOSITY_LEVEL.level == Verbosity.DEBUG.level:
             raise e
+        sys.exit(1)
 
 
 if __name__ == "__main__":
