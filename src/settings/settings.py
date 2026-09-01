@@ -89,6 +89,8 @@ class Settings:
             Settings.API.ESXI_TEMPLATE_SERVER_URL = api["esxi_template_server_url"]
         if "gns3_template_server_url" in api:
             Settings.API.GNS3_TEMPLATE_SERVER_URL = api["gns3_template_server_url"]
+        if "topology_generator_url" in api:
+            Settings.API.TOPOLOGY_GENERATOR_URL = api["topology_generator_url"]
 
         logger.info(f"Loaded settings overrides from {path}")
 
@@ -188,6 +190,14 @@ class Settings:
         """URL to the GNS3 template API server."""
         ESXI_TEMPLATE_SERVER_URL = "http://10.20.20.171:8000"
         """URL to the ESXi template API server."""
+        TOPOLOGY_GENERATOR_URL = "http://10.20.20.172:8002"
+        """URL to the Topology Generator API server, used by the
+        `generate` command to turn a natural-language prompt into a
+        topology config file via an LLM."""
+        TOPOLOGY_GENERATOR_TIMEOUT_SECONDS: int = 1800
+        """How long to wait for a response from the Topology Generator
+        API. Generation can legitimately take a while on constrained
+        hardware, across multiple Ollama servers/retries server-side."""
 
         LITERAL_API_VALUES: bool = (
             os.getenv("LITERAL_API_VALUES", "false").lower() == "true"

@@ -6,6 +6,7 @@ from src.settings import Settings, Verbosity
 from src.connections.api_handler import APIHandler
 from src.connections.esxi_connection import ESXiConnection
 from src.connections.gns3_connection import GNS3Connection
+from src.connections.topology_generator_client import TopologyGeneratorClient
 from src.graph import Graph
 from src.topology_file_validation import TopologyFileValidation
 from src.vm_orchestrator.vm_orchestrator import VMOrchestrator
@@ -128,6 +129,42 @@ def main(
         Settings.TOPOLOGY_FILE = str(topology)
     if literal_api_values:
         Settings.API.LITERAL_API_VALUES = literal_api_values
+
+
+@app.command()
+def generate(
+    prompt: str = typer.Argument(
+        ..., help="Natural-language description of the desired topology."
+    ),
+    output: Path = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Path to write the generated topology file to. Defaults to "
+        "--topology/-t's current value.",
+    ),
+) -> None:
+    """
+    Generates a topology file from a natural-language prompt via the
+    Topology Generator API.
+    """
+    output_path = output if output is not None else Path(Settings.TOPOLOGY_FILE)
+
+    result = TopologyGeneratorClient.generate_topology(prompt)
+
+    for warning in result.get("warnings", []):
+        typer.secho(f"Warning: {warning}", fg=typer.colors.YELLOW, err=True)
+
+    if not result.get("valid"):
+        typer.secho(
+            "Topology generation failed; no file written.",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    output_path.write_text(result["yaml"])
+    typer.echo(f"Wrote generated topology to {output_path}")
 
 
 @app.command()

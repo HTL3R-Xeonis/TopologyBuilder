@@ -561,3 +561,60 @@ def cli_016() -> None:
     assert result.exit_code == 0, result.output
     assert "PC1" in result.output
     assert "Topology" in result.output
+
+
+@allure.title("generate-Befehl schreibt die generierte Topologie in eine Datei")
+@allure.description(
+    "Überprüft, dass der generate-Befehl TopologyGeneratorClient."
+    "generate_topology mit dem Prompt aufruft und bei einer gültigen "
+    "Antwort das generierte YAML in die --output-Datei schreibt"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.CRITICAL)
+def cli_017(tmp_path) -> None:
+    output_path = tmp_path / "generated.yaml"
+
+    with patch("src.cli.TopologyGeneratorClient.generate_topology") as generate_mock:
+        generate_mock.return_value = {
+            "yaml": "nodes: []\nedges: []\n",
+            "valid": True,
+            "warnings": [],
+        }
+
+        result = runner.invoke(
+            app,
+            ["generate", "a small lab", "--output", str(output_path)],
+        )
+
+    assert result.exit_code == 0, result.output
+    generate_mock.assert_called_once_with("a small lab")
+    assert output_path.read_text() == "nodes: []\nedges: []\n"
+
+
+@allure.title("generate-Befehl schreibt keine Datei, wenn die Generierung ungültig ist")
+@allure.description(
+    "Überprüft, dass der generate-Befehl mit Exit-Code 1 abbricht und "
+    "keine Datei schreibt, wenn die Topology-Generator-API 'valid: "
+    "false' meldet"
+)
+@allure.tag("negativ-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.CRITICAL)
+def cli_018(tmp_path) -> None:
+    output_path = tmp_path / "generated.yaml"
+
+    with patch("src.cli.TopologyGeneratorClient.generate_topology") as generate_mock:
+        generate_mock.return_value = {
+            "yaml": "",
+            "valid": False,
+            "warnings": ["could not resolve image 'foo'"],
+        }
+
+        result = runner.invoke(
+            app,
+            ["generate", "a small lab", "--output", str(output_path)],
+        )
+
+    assert result.exit_code == 1
+    assert not output_path.exists()

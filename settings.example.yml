@@ -77,8 +77,10 @@ gns3:
   # parent_interface: eth1
 
 api:
-  # Base URLs of the ESXi/NFS template-listing service and the GNS3
-  # template-listing service. Only needed if these live somewhere other
-  # than this project's own internal network default.
+  # Base URLs of the ESXi/NFS template-listing service, the GNS3
+  # template-listing service, and the Topology Generator service (used
+  # by the `generate` command). Only needed if these live somewhere
+  # other than this project's own internal network default.
   esxi_template_server_url: http://10.20.20.171:8000
   gns3_template_server_url: http://10.20.20.171:8001
+  topology_generator_url: http://10.20.20.172:8002

@@ -157,11 +157,13 @@ whichever is available in your environment.
 
 | Command | Purpose |
 |---|---|
+| `topologybuilder generate "<prompt>" [--output PATH]` | Generates a topology file from a natural-language prompt via the Topology Generator API, writing it to `--output` (defaults to `--topology`'s current value). |
 | `topologybuilder validate` | Validate the topology file without building or deploying anything. |
-| `topologybuilder visualize [--detail]` | Build the topology graph and print an ASCII visualization; `--detail` prints the full internal representation instead. |
+| `topologybuilder visualize [--detail \| --tree]` | Build the topology graph and print a force-directed ASCII diagram; `--tree` prints a colored tree of each device's exact interface-to-interface connections instead, and `--detail` prints the full internal representation. |
 | `topologybuilder deploy --address ... --esxi_username ... [--dry_run] [--incremental] [--only_on_gns3 \| --only_on_esxi]` | Validate, build, and deploy the topology to GNS3/ESXi. `--dry_run` prints what would happen without changing anything. `--incremental` reuses existing port groups/VMs/GNS3 project/nodes/links instead of recreating them - never removes anything dropped from the topology file. |
 | `topologybuilder destroy --address ... --esxi_username ...` | Tear down a previously deployed topology: deletes its ESXi-hosted VMs/port groups and its GNS3 project's nodes. |
 | `topologybuilder verify --address ... --esxi_username ...` | Structural health check against a deployed topology (GNS3 nodes started, ESXi VMs powered on with an IP, trunk NIC wiring, port groups present). Not a ping test - this project never assigns IP addresses to nodes, so there's no address to ping. |
+| `topologybuilder doctor --address ... --esxi_username ...` | Read-only preflight check against real infrastructure: vSwitch/trunk port group existence (or whether a deploy would auto-create them), which datastore would be used, GNS3 VM reachability, and Template-API reachability. Never mutates anything. No topology file needed. |
 | `topologybuilder status --address ... --esxi_username ...` | Check connectivity to the ESXi host and GNS3 VM, and list GNS3 projects with each one's node/started counts. No topology file needed. |
 | `topologybuilder templates` | List available ESXi and GNS3 template names - valid values for a node's `image` field. |
 | `topologybuilder portgroups --address ... --esxi_username ...` | List the port groups configured on the ESXi host's vSwitch. |
