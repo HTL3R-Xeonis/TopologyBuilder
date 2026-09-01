@@ -36,6 +36,17 @@ esxi:
   datastore: VNX-FC-Datastore-ESXi3
   # Name of the GNS3 VM as registered on the ESXi host.
   gns3_vm_name: GNS3-VM (1)
+  # If true (default), a non-incremental deploy automatically deletes
+  # ESXi VMs this tool previously created (identified via their
+  # 'topologybuilder-image:' annotation) that are no longer part of the
+  # current topology - cleans up leftovers from an earlier deploy of a
+  # *different* topology before resetting the vSwitch, so a stale VM's
+  # NIC can't block port-group removal. The GNS3 VM itself is always
+  # auto-detected by name (any VM whose name contains 'gns3',
+  # case-insensitive) and never deleted - it does NOT need to be listed
+  # here or match gns3_vm_name exactly. A VM without the annotation, i.e.
+  # anything this tool didn't create itself, is never touched either way.
+  delete_unused_vms: true
 
 gns3:
   username: gns3

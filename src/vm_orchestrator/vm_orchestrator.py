@@ -8,6 +8,8 @@ __date__ = "28/07/2026"
 __license__ = "GNU GPLv3"
 __status__ = "In development"
 
+import re
+
 from src.connections.esxi_connection import ESXiConnection
 from src.connections.ssh_connection import SSHConnection
 from src.connections.gns3_connection import GNS3Connection
@@ -81,13 +83,15 @@ class VMOrchestrator:
         :param graph: Graph to deploy
         :param gns3_username: Username for the GNS3 VM
         :param gns3_password: Password for the GNS3 VM. Set to  None if no password is set.
-        :param incremental: if True, skips resetting the ESXi vSwitch and
-            reuses an existing GNS3 project instead of deleting and
-            recreating it - only ESXi VMs/GNS3 nodes/links that don't
-            already exist by name/endpoint get created, everything already
-            present is left running untouched. Never removes anything
-            dropped from the graph - use a full (non-incremental) deploy or
-            destroy for that. Note: the GNS3 VM's VLAN subinterfaces are
+        :param incremental: if True, skips resetting the ESXi vSwitch,
+            deleting unused VMs (see delete_unused_vms - also skipped in
+            incremental mode, same reasoning), and reuses an existing GNS3
+            project instead of deleting and recreating it - only ESXi
+            VMs/GNS3 nodes/links that don't already exist by name/endpoint
+            get created, everything already present is left running
+            untouched. Never removes anything dropped from the graph - use
+            a full (non-incremental) deploy or destroy for that. Note: the
+            GNS3 VM's VLAN subinterfaces are
             still fully torn down and recreated even in incremental mode,
             since that script always does a full delete+recreate pass - this
             briefly interrupts traffic on already-running Cloud-node
@@ -109,6 +113,7 @@ class VMOrchestrator:
         """
         self._configure_gns3_interfaces(graph, gns3_username, gns3_password)
         if not incremental:
+            self.delete_unused_vms(graph)
             self.esxi_connection.reset_virtual_switch()
         self.esxi_connection.initialize_virtual_switch(graph)
 
@@ -134,6 +139,47 @@ class VMOrchestrator:
             self._partially_link_gns3_nodes(gns3_conn, node)
 
         gns3_conn.start_all_nodes()
+
+    def delete_unused_vms(self, graph: Graph) -> None:
+        """
+        Deletes ESXi VMs this tool previously created (identified via
+        their 'topologybuilder-image:' annotation, set on every VM this
+        tool imports) that are neither the GNS3 VM nor part of the given
+        graph's current ESXi-hosted nodes - cleans up leftovers from an
+        earlier deploy of a *different* topology, which
+        delete_stale_esxi_resources doesn't reach since it only ever
+        looks at the current graph's own node names. Runs before
+        resetting the vSwitch so a stale VM's NIC can't block port-group
+        removal. Never touches a VM without that annotation, so anything
+        not created by this tool (or created by a version of it that
+        didn't yet tag VMs) is always left alone. No-op if
+        ``Settings.ESXI.DELETE_UNUSED_VMS`` is False.
+        :param graph: the current topology - its ESXi-hosted node names
+            (and any auto-renamed-duplicate of them) are never deleted
+            even if a matching VM carries the annotation
+        :return:
+        """
+        if not Settings.ESXI.DELETE_UNUSED_VMS:
+            return
+
+        current_names = {
+            node.name
+            for node in graph.nodes.values()
+            if node.env == Environment.ON_ESXI
+        }
+        gns3_vm = self.esxi_connection.find_gns3_vm()
+        gns3_vm_name = gns3_vm.name if gns3_vm is not None else None
+
+        for vm in self.esxi_connection.get_all_vms():
+            if vm.name == gns3_vm_name:
+                continue
+            annotation = vm.config.annotation or ""
+            if not annotation.startswith("topologybuilder-image:"):
+                continue
+            base_name = re.sub(r"[ _]\(?\d+\)?$", "", vm.name)
+            if base_name in current_names:
+                continue
+            self.esxi_connection.delete_vm(vm)
 
     def delete_stale_esxi_resources(self, graph: Graph) -> None:
         """

@@ -70,6 +70,8 @@ class Settings:
             Settings.ESXI.DATASTORE = esxi["datastore"]
         if "gns3_vm_name" in esxi:
             Settings.ESXI.GNS3_VM_NAME = esxi["gns3_vm_name"]
+        if "delete_unused_vms" in esxi:
+            Settings.ESXI.DELETE_UNUSED_VMS = bool(esxi["delete_unused_vms"])
 
         if "username" in gns3:
             Settings.GNS3.USERNAME = gns3["username"]
@@ -130,6 +132,17 @@ class Settings:
         """Specifies the name of the datastore to use on the ESXi client."""
         GNS3_VM_NAME = "GNS3 (1)"
         """Name of the GNS3 VM to work on."""
+        DELETE_UNUSED_VMS: bool = True
+        """If True (default), a non-incremental deploy automatically
+        deletes ESXi VMs this tool previously created (identified via
+        their 'topologybuilder-image:' annotation, set on every VM this
+        tool imports) that are no longer part of the current topology -
+        cleans up leftovers from an earlier deploy of a *different*
+        topology before resetting the vSwitch, so a stale VM's NIC can't
+        block port-group removal. The GNS3 VM is always auto-detected
+        (see ESXiConnection.find_gns3_vm) and never deleted, regardless of
+        this setting. A VM without the annotation - i.e. anything this
+        tool didn't create itself - is never touched either way."""
 
     class GNS3:
         """Settings related to GNS3."""

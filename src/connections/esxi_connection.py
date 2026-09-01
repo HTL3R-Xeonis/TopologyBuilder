@@ -163,6 +163,53 @@ class ESXiConnection(GenericConnection):
         """
         return self._get_object_by_name(vim.VirtualMachine, vm_name)
 
+    def get_all_vms(self) -> list[vim.VirtualMachine]:
+        """
+        Returns every VM registered on the host.
+        :return: list of all VMs
+        """
+        view = self.view_manager.CreateContainerView(
+            self.content.rootFolder, [vim.VirtualMachine], True
+        )
+        try:
+            return list(view.view)
+        finally:
+            view.Destroy()
+
+    def find_gns3_vm(self) -> vim.VirtualMachine | None:
+        """
+        Searches for a VM whose name contains 'gns3' (case-insensitive) -
+        used to auto-detect the GNS3 VM without relying on
+        ``Settings.ESXI.GNS3_VM_NAME`` being exactly right, since a stale
+        or misconfigured name there must never cause the real GNS3 VM to
+        be auto-deleted as an 'unused' leftover by delete_unused_vms.
+        :return: the matching VM if exactly one was found, else None
+        :raises ValueError: Is thrown when more than one VM's name contains 'gns3', since it's then not safe to guess which one is the real GNS3 VM.
+        """
+        matches = [vm for vm in self.get_all_vms() if "gns3" in vm.name.lower()]
+        if len(matches) > 1:
+            names = [vm.name for vm in matches]
+            logger.error(
+                msg := f"Multiple VMs look like a GNS3 VM: {names}. Cannot "
+                f"safely auto-detect which one to protect from deletion."
+            )
+            raise ValueError(msg)
+        return matches[0] if matches else None
+
+    def set_vm_annotation(self, vm: vim.VirtualMachine, annotation: str) -> None:
+        """
+        Sets the VM's annotation/notes field. Used to tag every VM this
+        tool imports with 'topologybuilder-image:<image>', so
+        delete_unused_vms can later tell which VMs it's safe to clean up
+        automatically versus VMs it never created.
+        :param vm: the VM to tag
+        :param annotation: the annotation text to set
+        :return:
+        """
+        self._wait_for_task(
+            vm.ReconfigVM_Task(spec=vim.vm.ConfigSpec(annotation=annotation))
+        )
+
     def find_vms_matching(self, name: str) -> list[vim.ManagedEntity]:
         """
         Finds every VM whose name exactly matches ``name``, or looks like an
@@ -542,6 +589,7 @@ class ESXiConnection(GenericConnection):
             importer = OVAImporter(self)
             vm = importer.import_ova(ova_path, node.name, datastore, network_names)
 
+        self.set_vm_annotation(vm, f"topologybuilder-image:{node.image}")
         self.power_on_vm(vm)
 
     @staticmethod

@@ -65,6 +65,37 @@ Every value can also just be passed as a CLI flag on the command that needs
 it (see `topologybuilder <command> --help`) - `.env`/`settings.yml` exist
 purely for convenience when a value would otherwise be retyped constantly.
 
+## ESXi VM/Port Group Cleanup
+
+A non-incremental `deploy` resets the ESXi vSwitch before wiring up the new
+topology, which involves deleting port groups and (see below) VMs left over
+from earlier deploys. Two safety mechanisms keep this from ever touching
+anything this tool didn't create:
+
+- **Port groups**: `esxi.trunk_port_group` and ESXi's own built-in `VM
+  Network`/`Management Network` port groups are always protected from
+  deletion, regardless of `esxi.ignore_port_groups`. Add any other port
+  group you need preserved (e.g. a management NIC's port group) to
+  `ignore_port_groups` in `settings.yml` - see
+  [`settings.example.yml`](settings.example.yml) for a real example
+  (`PG-MGMT`).
+- **VMs**: every VM this tool imports is tagged with a
+  `topologybuilder-image:<image>` annotation on creation. When
+  `esxi.delete_unused_vms` is true (the default), a non-incremental `deploy`
+  deletes any *tagged* VM that's no longer part of the current topology -
+  cleaning up leftovers from an earlier deploy of a *different* topology,
+  which would otherwise sit there indefinitely and could even block a
+  port-group reset outright (ESXi refuses to delete a port group a VM's NIC
+  is still attached to). The GNS3 VM is always auto-detected by name (any VM
+  whose name contains `gns3`, case-insensitive) and is never deleted, no
+  matter what `esxi.gns3_vm_name` is set to. A VM without the annotation -
+  i.e. anything not created by this tool - is never touched, so this is safe
+  to run on a shared ESXi host. Set `delete_unused_vms: false` in
+  `settings.yml` to disable this cleanup entirely.
+
+Both cleanup steps (and the vSwitch reset itself) are skipped entirely in
+`--incremental` mode, which never removes anything.
+
 ## Topology Config File
 
 The topology itself (what `validate`/`visualize`/`deploy` operate on) is a
@@ -102,6 +133,15 @@ touching an ESXi-hosted node gets bridged through a GNS3 Cloud node bound to
 a VLAN subinterface on the GNS3 VM. An edge between two ESXi-hosted nodes
 needs no GNS3-side wiring at all - both VMs' vNICs are placed on the same
 VLAN-tagged port group.
+
+An ESXi-hosted node's vNICs are wired positionally to its topology
+interfaces, one port group per edge touching it. If the node's OVA template
+itself declares *more* built-in networks than the node has edges (e.g. a
+firewall appliance's OVA with a default WAN+LAN pair, deployed with only one
+edge wired up in the topology), the extra OVA-declared network(s) reuse the
+last edge's port group rather than failing the import - a warning is logged
+when this happens. If the OVA declares *fewer* networks than the node has
+edges, the remaining edges get added as new network adapters after import.
 
 ## Usage
 

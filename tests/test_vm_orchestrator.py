@@ -285,3 +285,125 @@ def vm_orchestrator_007() -> None:
         results = orchestrator.verify_graph(graph, "lab")
 
     assert any(ok and "R1:gi0/0 <-> R2:gi0/0: linked" in d for ok, d in results)
+
+
+@allure.title("delete_unused_vms löscht getaggte, nicht mehr im Graph vorkommende VMs")
+@allure.description(
+    "Überprüft, dass delete_unused_vms nur VMs löscht, die (a) eine "
+    "'topologybuilder-image:'-Annotation tragen, (b) nicht die per "
+    "find_gns3_vm gefundene GNS3-VM sind, und (c) nicht (auch nicht als "
+    "umbenanntes Duplikat) im aktuellen Graph vorkommen - Annotation-lose "
+    "VMs wie fremde, nicht von diesem Tool erstellte VMs bleiben immer "
+    "unangetastet"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_008() -> None:
+    Settings.API.LITERAL_API_VALUES = True
+    Settings.ESXI.DELETE_UNUSED_VMS = True
+    orchestrator, esxi_connection = _make_orchestrator()
+
+    current_node = GenericNode("Ubuntu-Server", "VM", "PC4")
+    graph = MagicMock()
+    graph.nodes = {"PC4": current_node}
+
+    gns3_vm = MagicMock()
+    gns3_vm.name = "GNS3-VM (1)"
+    gns3_vm.config.annotation = "topologybuilder-image:Ubuntu-Server"
+    esxi_connection.find_gns3_vm.return_value = gns3_vm
+
+    stale_vm = MagicMock()
+    stale_vm.name = "VM1"
+    stale_vm.config.annotation = "topologybuilder-image:Ubuntu-Server"
+
+    current_vm = MagicMock()
+    current_vm.name = "PC4 (1)"
+    current_vm.config.annotation = "topologybuilder-image:Ubuntu-Server"
+
+    untagged_vm = MagicMock()
+    untagged_vm.name = "U_U (1)"
+    untagged_vm.config.annotation = "user: root"
+
+    esxi_connection.get_all_vms.return_value = [
+        gns3_vm,
+        stale_vm,
+        current_vm,
+        untagged_vm,
+    ]
+
+    orchestrator.delete_unused_vms(graph)
+
+    esxi_connection.delete_vm.assert_called_once_with(stale_vm)
+
+
+@allure.title("delete_unused_vms ist ein No-Op, wenn DELETE_UNUSED_VMS deaktiviert ist")
+@allure.description(
+    "Überprüft, dass delete_unused_vms bei Settings.ESXI.DELETE_UNUSED_VMS "
+    "= False weder VMs auflistet noch löscht"
+)
+@allure.tag("negativ-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.NORMAL)
+def vm_orchestrator_009() -> None:
+    Settings.ESXI.DELETE_UNUSED_VMS = False
+    orchestrator, esxi_connection = _make_orchestrator()
+
+    graph = MagicMock()
+    graph.nodes = {}
+
+    try:
+        orchestrator.delete_unused_vms(graph)
+    finally:
+        Settings.ESXI.DELETE_UNUSED_VMS = True
+
+    esxi_connection.get_all_vms.assert_not_called()
+    esxi_connection.delete_vm.assert_not_called()
+
+
+@allure.title("deploy_graph räumt unused VMs vor dem vSwitch-Reset auf")
+@allure.description(
+    "Überprüft, dass deploy_graph im Normalbetrieb delete_unused_vms mit "
+    "dem Graph aufruft, bevor es fortfährt"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_010() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    graph = MagicMock()
+    graph.nodes = {}
+
+    with (
+        patch("src.vm_orchestrator.vm_orchestrator.SSHConnection"),
+        patch("src.vm_orchestrator.vm_orchestrator.GNS3VMInterfaceSetup"),
+        patch("src.vm_orchestrator.vm_orchestrator.GNS3Connection"),
+        patch.object(orchestrator, "delete_unused_vms") as mock_delete_unused,
+    ):
+        orchestrator.deploy_graph(graph, "gns3", "gns3pw")
+
+    mock_delete_unused.assert_called_once_with(graph)
+
+
+@allure.title("deploy_graph überspringt delete_unused_vms im incremental-Modus")
+@allure.description(
+    "Überprüft, dass deploy_graph im incremental-Modus delete_unused_vms "
+    "nicht aufruft, aus demselben Grund wie reset_virtual_switch"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.NORMAL)
+def vm_orchestrator_011() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    graph = MagicMock()
+    graph.nodes = {}
+
+    with (
+        patch("src.vm_orchestrator.vm_orchestrator.SSHConnection"),
+        patch("src.vm_orchestrator.vm_orchestrator.GNS3VMInterfaceSetup"),
+        patch("src.vm_orchestrator.vm_orchestrator.GNS3Connection"),
+        patch.object(orchestrator, "delete_unused_vms") as mock_delete_unused,
+    ):
+        orchestrator.deploy_graph(graph, "gns3", "gns3pw", incremental=True)
+
+    mock_delete_unused.assert_not_called()

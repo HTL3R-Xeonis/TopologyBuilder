@@ -323,6 +323,7 @@ def esxi_connection_012() -> None:
             "src.connections.esxi_connection.APIHandler.download_ova"
         ) as mock_download,
         patch("src.connections.esxi_connection.OVAImporter") as mock_importer_cls,
+        patch.object(conn, "set_vm_annotation") as mock_set_annotation,
         patch.object(conn, "power_on_vm") as mock_power_on,
     ):
         mock_importer_cls.return_value.import_ova.return_value = fake_vm
@@ -335,6 +336,9 @@ def esxi_connection_012() -> None:
     assert import_args[1] == "VM1"
     assert import_args[2] == "datastore1"
     assert import_args[3] == [interface.vlan.name]
+    mock_set_annotation.assert_called_once_with(
+        fake_vm, "topologybuilder-image:Ubuntu-Server"
+    )
     mock_power_on.assert_called_once_with(fake_vm)
 
 
@@ -663,3 +667,118 @@ def esxi_connection_025() -> None:
     vm.config.hardware.device = [disk, nic]
 
     assert conn.get_vm_network_names(vm) == ["PG-GNS3-TRUNK"]
+
+
+@allure.title("get_all_vms liefert jede registrierte VM")
+@allure.description(
+    "Überprüft, dass get_all_vms alle VMs aus der ContainerView zurückgibt"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def esxi_connection_026() -> None:
+    conn = _make_esxi_connection()
+    conn.content = MagicMock()
+
+    vms = [MagicMock(), MagicMock()]
+    container_view = MagicMock()
+    container_view.view = vms
+    conn.view_manager.CreateContainerView.return_value = container_view
+
+    assert conn.get_all_vms() == vms
+    container_view.Destroy.assert_called_once()
+
+
+@allure.title("find_gns3_vm findet die einzige VM mit 'gns3' im Namen")
+@allure.description(
+    "Überprüft, dass find_gns3_vm die einzige VM zurückgibt, deren Name "
+    "'gns3' enthält (Groß-/Kleinschreibung wird ignoriert), und andere VMs "
+    "ignoriert"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_027() -> None:
+    conn = _make_esxi_connection()
+    conn.content = MagicMock()
+
+    gns3_vm = MagicMock()
+    gns3_vm.name = "GNS3-VM (1)"
+    other_vm = MagicMock()
+    other_vm.name = "PC4"
+    container_view = MagicMock()
+    container_view.view = [other_vm, gns3_vm]
+    conn.view_manager.CreateContainerView.return_value = container_view
+
+    assert conn.find_gns3_vm() is gns3_vm
+
+
+@allure.title("find_gns3_vm gibt None zurück, wenn keine VM passt")
+@allure.description(
+    "Überprüft, dass find_gns3_vm None zurückgibt, wenn keine VM 'gns3' im "
+    "Namen enthält"
+)
+@allure.tag("negativ-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def esxi_connection_028() -> None:
+    conn = _make_esxi_connection()
+    conn.content = MagicMock()
+
+    other_vm = MagicMock()
+    other_vm.name = "PC4"
+    container_view = MagicMock()
+    container_view.view = [other_vm]
+    conn.view_manager.CreateContainerView.return_value = container_view
+
+    assert conn.find_gns3_vm() is None
+
+
+@allure.title("find_gns3_vm wirft einen Fehler bei mehreren passenden VMs")
+@allure.description(
+    "Überprüft, dass find_gns3_vm einen ValueError wirft, wenn mehr als "
+    "eine VM 'gns3' im Namen enthält, da dann nicht sicher geraten werden "
+    "kann, welche die echte GNS3-VM ist"
+)
+@allure.tag("negativ-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_029() -> None:
+    conn = _make_esxi_connection()
+    conn.content = MagicMock()
+
+    vm_a = MagicMock()
+    vm_a.name = "GNS3-VM (1)"
+    vm_b = MagicMock()
+    vm_b.name = "GNS3-VM-backup"
+    container_view = MagicMock()
+    container_view.view = [vm_a, vm_b]
+    conn.view_manager.CreateContainerView.return_value = container_view
+
+    with pytest.raises(ValueError, match="Multiple VMs look like a GNS3 VM"):
+        conn.find_gns3_vm()
+
+
+@allure.title("set_vm_annotation setzt das Annotation-Feld über ReconfigVM_Task")
+@allure.description(
+    "Überprüft, dass set_vm_annotation ReconfigVM_Task mit einem ConfigSpec "
+    "aufruft, dessen annotation-Feld den übergebenen Text trägt, und auf "
+    "den Task wartet"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def esxi_connection_030() -> None:
+    from pyVmomi import vim
+
+    conn = _make_esxi_connection()
+    vm = MagicMock()
+    task = MagicMock()
+    task.info.state = vim.TaskInfo.State.success
+    vm.ReconfigVM_Task.return_value = task
+
+    conn.set_vm_annotation(vm, "topologybuilder-image:Ubuntu-Server")
+
+    vm.ReconfigVM_Task.assert_called_once()
+    spec = vm.ReconfigVM_Task.call_args.kwargs["spec"]
+    assert spec.annotation == "topologybuilder-image:Ubuntu-Server"
