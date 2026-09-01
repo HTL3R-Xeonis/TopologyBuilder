@@ -1,4 +1,8 @@
 import os
+
+import yaml
+from loguru import logger
+
 from .verbosity import Verbosity
 from dotenv import load_dotenv
 
@@ -16,7 +20,73 @@ class Settings:
 
     @staticmethod
     def initialise_settings(path: str) -> None:
-        pass
+        """
+        Loads settings overrides from a YAML file (see
+        ``settings.example.yml``) and applies them onto this class and its
+        nested ESXI/GNS3/API classes. Any key not present in the file is
+        left at its current value, so the file only needs to declare what
+        it wants to override.
+
+        Passwords are deliberately not supported here - use the
+        ESXI_PASSWORD/GNS3_PASSWORD environment variables (a .env file
+        works too, see ``.env.example``) or the CLI's own
+        --esxi_password/--gns3_password options instead, so a secret never
+        ends up sitting in a settings file on disk.
+        :param path: path to the YAML settings file
+        :return:
+        :raises FileNotFoundError: is thrown when no file exists at ``path``.
+        :raises ValueError: is thrown when the file contains a 'password' key anywhere.
+        """
+        with open(path, "r") as file:
+            data = yaml.safe_load(file) or {}
+
+        esxi = data.get("esxi", {})
+        gns3 = data.get("gns3", {})
+        if "password" in esxi or "password" in gns3:
+            raise ValueError(
+                "Passwords are not supported in the settings file - use "
+                "ESXI_PASSWORD/GNS3_PASSWORD environment variables (e.g. via "
+                "a .env file) or the corresponding CLI options instead."
+            )
+
+        if "topology_file" in data:
+            Settings.TOPOLOGY_FILE = data["topology_file"]
+        if "log_file_path" in data:
+            Settings.LOG_FILE_PATH = data["log_file_path"]
+
+        if "ip" in esxi:
+            Settings.ESXI.IP = esxi["ip"]
+        if "port" in esxi:
+            Settings.ESXI.PORT = esxi["port"]
+        if "username" in esxi:
+            Settings.ESXI.USERNAME = esxi["username"]
+        if "virtual_switch" in esxi:
+            Settings.ESXI.VIRTUAL_SWITCH = esxi["virtual_switch"]
+        if "trunk_port_group" in esxi:
+            Settings.ESXI.TRUNK_PORT_GROUP = esxi["trunk_port_group"]
+        if "ignore_port_groups" in esxi:
+            Settings.ESXI.IGNORE_PORT_GROUPS = set(esxi["ignore_port_groups"])
+        if "datastore" in esxi:
+            Settings.ESXI.DATASTORE = esxi["datastore"]
+        if "gns3_vm_name" in esxi:
+            Settings.ESXI.GNS3_VM_NAME = esxi["gns3_vm_name"]
+
+        if "username" in gns3:
+            Settings.GNS3.USERNAME = gns3["username"]
+        if "project_name" in gns3:
+            Settings.GNS3.PROJECT_NAME = gns3["project_name"]
+        if "port" in gns3:
+            Settings.GNS3.PORT = gns3["port"]
+        if "parent_interface" in gns3:
+            Settings.GNS3.PARENT_INTERFACE = gns3["parent_interface"]
+
+        api = data.get("api", {})
+        if "esxi_template_server_url" in api:
+            Settings.API.ESXI_TEMPLATE_SERVER_URL = api["esxi_template_server_url"]
+        if "gns3_template_server_url" in api:
+            Settings.API.GNS3_TEMPLATE_SERVER_URL = api["gns3_template_server_url"]
+
+        logger.info(f"Loaded settings overrides from {path}")
 
     VERBOSITY_LEVEL: Verbosity = Verbosity.NORMAL
     """The verbosity level of the program."""

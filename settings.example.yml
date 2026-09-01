@@ -1,0 +1,53 @@
+# Optional settings overrides for TopologyBuilder, loaded via
+# `main.py --settings settings.yml` (or `-s settings.yml`).
+# Copy this file to settings.yml (git-ignored) and fill in your own
+# values - only the keys you actually list here get overridden, everything
+# else keeps its built-in default (see src/settings/settings.py).
+#
+# Passwords are intentionally NOT supported here - use the ESXI_PASSWORD/
+# GNS3_PASSWORD environment variables instead (a .env file works too, see
+# .env.example), or pass --esxi_password/--gns3_password on the command
+# line. initialise_settings() refuses to load a file containing a
+# 'password' key, so a secret never ends up sitting in a settings file on
+# disk.
+
+# Path to the topology YAML file, if you don't want to pass --topology
+# every time.
+topology_file: ./topology_example.yaml
+
+esxi:
+  ip: 10.20.20.202
+  username: root
+  # Name of the vSwitch to create/remove port groups on.
+  virtual_switch: internal_network
+  # Port group carrying the GNS3 VM's VLAN trunk NIC. Must accept
+  # promiscuous mode/MAC changes/forged transmits - ensure_bridging_
+  # security_policy sets this automatically on every deploy. This port
+  # group is always protected from deletion by reset_virtual_switch,
+  # regardless of ignore_port_groups below.
+  trunk_port_group: PG-GNS3-TRUNK
+  # Extra port groups (besides trunk_port_group, which is always
+  # protected) that reset_virtual_switch should never delete.
+  ignore_port_groups: []
+  # Datastore to place newly imported topology VMs on.
+  datastore: VNX-FC-Datastore-ESXi3
+  # Name of the GNS3 VM as registered on the ESXi host.
+  gns3_vm_name: GNS3-VM (1)
+
+gns3:
+  username: gns3
+  # Name of the GNS3 project to create/reuse. If it already exists, it is
+  # overwritten on a non-incremental deploy.
+  project_name: tb_gns3_project
+  port: 80
+  # Name of the GNS3 VM's own guest-OS interface for its VLAN trunk NIC
+  # (not the ESXi port group above - this is the interface name inside the
+  # GNS3 VM's guest OS).
+  parent_interface: eth1
+
+api:
+  # Base URLs of the ESXi/NFS template-listing service and the GNS3
+  # template-listing service. Only needed if these live somewhere other
+  # than this project's own internal network default.
+  esxi_template_server_url: http://10.20.20.171:8000
+  gns3_template_server_url: http://10.20.20.171:8001
