@@ -822,3 +822,43 @@ def esxi_connection_031() -> None:
         change.operation == vim.vm.device.VirtualDeviceSpec.Operation.remove
         for change in device_changes
     )
+
+
+@allure.title("deploy_virtual_machine staged die OVA in Settings.ESXI.OVA_STAGING_DIR")
+@allure.description(
+    "Überprüft, dass deploy_virtual_machine die OVA in dem via "
+    "Settings.ESXI.OVA_STAGING_DIR konfigurierten Verzeichnis statt im "
+    "OS-Standard-Temp-Verzeichnis staged (relevant wenn /tmp ein "
+    "größenbegrenztes tmpfs ist), und dieses Verzeichnis bei Bedarf anlegt"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_032(tmp_path) -> None:
+    from src.graph.blocks.generic_node import GenericNode
+    from src.graph.blocks.vlan import VirtualLan
+
+    _reset_settings()
+    Settings.API.LITERAL_API_VALUES = True
+    staging_dir = str(tmp_path / "does-not-exist-yet")
+    Settings.ESXI.OVA_STAGING_DIR = staging_dir
+    conn = _make_esxi_connection()
+
+    node = GenericNode("Ubuntu-Server", "VM", "VM1")
+    interface = node.add_interface("ens160")
+    interface.vlan = VirtualLan("VM1", "ens160")
+
+    fake_vm = MagicMock()
+    try:
+        with (
+            patch("src.connections.esxi_connection.APIHandler.download_ova"),
+            patch("src.connections.esxi_connection.OVAImporter") as mock_importer_cls,
+            patch.object(conn, "set_vm_annotation"),
+            patch.object(conn, "power_on_vm"),
+        ):
+            mock_importer_cls.return_value.import_ova.return_value = fake_vm
+            conn.deploy_virtual_machine(node, "datastore1")
+    finally:
+        Settings.ESXI.OVA_STAGING_DIR = None
+
+    assert (tmp_path / "does-not-exist-yet").is_dir()

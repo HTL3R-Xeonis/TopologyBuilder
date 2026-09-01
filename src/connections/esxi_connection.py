@@ -582,7 +582,12 @@ class ESXiConnection(GenericConnection):
                 raise ValueError(msg)
             network_names.append(interface.vlan.name)
 
-        with tempfile.TemporaryDirectory(prefix="topologybuilder-ova-") as tmp_dir:
+        staging_dir = Settings.ESXI.OVA_STAGING_DIR
+        if staging_dir is not None:
+            Path(staging_dir).mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(
+            prefix="topologybuilder-ova-", dir=staging_dir
+        ) as tmp_dir:
             ova_path = str(Path(tmp_dir) / f"{node.name}.ova")
             APIHandler.download_ova(node.image, ova_path)
 

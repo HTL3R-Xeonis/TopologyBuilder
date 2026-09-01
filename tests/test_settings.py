@@ -26,6 +26,8 @@ def _reset_esxi_gns3_defaults() -> None:
     Settings.ESXI.IGNORE_PORT_GROUPS = {"PG_GNS3_TRUNK"}
     Settings.ESXI.DATASTORE = "datastore1 (2)"
     Settings.ESXI.GNS3_VM_NAME = "GNS3 (1)"
+    Settings.ESXI.DELETE_UNUSED_VMS = True
+    Settings.ESXI.OVA_STAGING_DIR = None
     Settings.GNS3.USERNAME = "gns3"
     Settings.GNS3.PROJECT_NAME = "tb_gns3_project"
     Settings.GNS3.PORT = 80
@@ -56,6 +58,8 @@ def settings_000(tmp_path) -> None:
                 "ignore_port_groups": ["PG-GNS3-TRUNK", "PG-MGMT"],
                 "datastore": "VNX-FC-Datastore-ESXi3",
                 "gns3_vm_name": "GNS3-VM (1)",
+                "delete_unused_vms": False,
+                "ova_staging_dir": "./tmp_ova",
             },
             "gns3": {
                 "username": "gns3user",
@@ -81,6 +85,8 @@ def settings_000(tmp_path) -> None:
         assert Settings.ESXI.IGNORE_PORT_GROUPS == {"PG-GNS3-TRUNK", "PG-MGMT"}
         assert Settings.ESXI.DATASTORE == "VNX-FC-Datastore-ESXi3"
         assert Settings.ESXI.GNS3_VM_NAME == "GNS3-VM (1)"
+        assert Settings.ESXI.DELETE_UNUSED_VMS is False
+        assert Settings.ESXI.OVA_STAGING_DIR == "./tmp_ova"
         assert Settings.GNS3.USERNAME == "gns3user"
         assert Settings.GNS3.PROJECT_NAME == "my_lab"
         assert Settings.GNS3.PORT == 8080
