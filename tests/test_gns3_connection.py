@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import allure
 import pytest
+import requests
 
 from src.connections.gns3_connection import GNS3Connection
 from src.settings import Settings
@@ -457,3 +458,84 @@ def gns3_connection_017() -> None:
     node_info = _make_node_info("R1", ["Ethernet0", "Ethernet1"])
     with pytest.raises(ValueError, match="gi0/5"):
         GNS3Connection._get_adapter(node_info, _make_interface("gi0/5"))
+
+
+@allure.title("start_all_nodes versucht jeden Node, auch nach einem fehlgeschlagenen")
+@allure.description(
+    "Überprüft, dass start_all_nodes bei einem fehlschlagenden Node "
+    "trotzdem weiterhin versucht, jeden übrigen Node zu starten, statt "
+    "beim ersten Fehler komplett abzubrechen, und am Ende einen "
+    "RuntimeError mit genau den fehlgeschlagenen Namen wirft"
+)
+@allure.tag("negativ-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_018() -> None:
+    _reset_settings()
+    with (
+        patch.object(GNS3Connection, "get", return_value=[]),
+        patch.object(GNS3Connection, "post"),
+    ):
+        conn = GNS3Connection("10.20.20.231", 80, "lab")
+        conn.project = {"project_id": "p1"}
+
+    nodes = [
+        {"node_id": "n1", "name": "R1"},
+        {"node_id": "n2", "name": "R2"},
+        {"node_id": "n3", "name": "R3"},
+    ]
+
+    def fake_post(url, *args, **kwargs):
+        if "n2" in url:
+            raise requests.exceptions.HTTPError("500 server error")
+        return {}
+
+    with (
+        patch.object(GNS3Connection, "get", return_value=nodes),
+        patch.object(GNS3Connection, "post", side_effect=fake_post) as mock_post,
+    ):
+        with pytest.raises(RuntimeError, match=r"Failed to start 1/3 node\(s\)"):
+            conn.start_all_nodes()
+
+    assert mock_post.call_count == 3
+    started_urls = {call.args[0] for call in mock_post.call_args_list}
+    assert started_urls == {
+        f"{conn.url}/v2/projects/p1/nodes/n1/start",
+        f"{conn.url}/v2/projects/p1/nodes/n2/start",
+        f"{conn.url}/v2/projects/p1/nodes/n3/start",
+    }
+
+
+@allure.title(
+    "start_all_nodes wiederholt einen Node-Start nach einer Console-Port-Kollision"
+)
+@allure.description(
+    "Überprüft, dass start_all_nodes bei einem Fehler, der wie eine "
+    "Console-Port-Kollision aussieht (z.B. 'address already in use'), "
+    "den Node-Start einmal nach kurzer Wartezeit wiederholt, und den "
+    "Node bei Erfolg des zweiten Versuchs NICHT als fehlgeschlagen zählt"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_019() -> None:
+    _reset_settings()
+    with (
+        patch.object(GNS3Connection, "get", return_value=[]),
+        patch.object(GNS3Connection, "post"),
+    ):
+        conn = GNS3Connection("10.20.20.231", 80, "lab")
+        conn.project = {"project_id": "p1"}
+
+    nodes = [{"node_id": "n1", "name": "R1"}]
+    responses = [requests.exceptions.HTTPError("address already in use"), {}]
+
+    with (
+        patch.object(GNS3Connection, "get", return_value=nodes),
+        patch.object(GNS3Connection, "post", side_effect=responses) as mock_post,
+        patch("src.connections.gns3_connection.time.sleep") as mock_sleep,
+    ):
+        conn.start_all_nodes()
+
+    assert mock_post.call_count == 2
+    mock_sleep.assert_called_once()

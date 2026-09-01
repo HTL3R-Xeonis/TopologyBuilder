@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 from typing import Any
 from typing import TYPE_CHECKING
 
@@ -16,6 +17,13 @@ from .api_handler import APIHandler
 from src.graph.layout import compute_node_positions
 from loguru import logger
 
+# Matches the error GNS3 raises when a node's console TCP port is already
+# bound by another process - most likely an orphaned QEMU process from an
+# earlier delete not yet finished releasing the port. Retried once in
+# start_all_nodes since the port often frees itself within a few seconds.
+_CONSOLE_PORT_COLLISION_PATTERN = re.compile(r"already in use|errno 98", re.IGNORECASE)
+_CONSOLE_PORT_COLLISION_RETRY_BACKOFF_SECONDS = 5
+
 
 # @TODO shortform and longform / better name dedection
 class GNS3Connection(APIHandler):
@@ -23,20 +31,32 @@ class GNS3Connection(APIHandler):
     Object which provides methods regarding the GNS3 API
     """
 
+    _LAYOUT_WIDTH = 2000.0
+    _LAYOUT_HEIGHT = 1000.0
+
     def set_node_positions(self, graph: Graph) -> None:
         """
         Precomputes a force-directed canvas layout for every node in the
         graph, so create_node/_create_builtin_nodes can place each node
         sensibly relative to its neighbours instead of everything landing
         on the same hardcoded coordinate and piling up in the GNS3 Web UI.
-        Call this once, right after construction, before creating any
-        nodes.
+        Positions are shifted so the layout is centered on GNS3's own
+        canvas origin (0, 0) rather than starting at it - GNS3's default
+        view is centered on the origin, so an uncentered [0, width] x
+        [0, height] layout renders shifted entirely into one corner
+        instead of filling the visible canvas. Call this once, right
+        after construction, before creating any nodes.
         :param graph: the topology about to be deployed
         :return:
         """
+        raw_positions = compute_node_positions(
+            graph.nodes, self._LAYOUT_WIDTH, self._LAYOUT_HEIGHT
+        )
+        x_offset = int(self._LAYOUT_WIDTH / 2)
+        y_offset = int(self._LAYOUT_HEIGHT / 2)
         self._positions = {
-            name: (int(x), int(y))
-            for name, (x, y) in compute_node_positions(graph.nodes).items()
+            name: (int(x) - x_offset, int(y) - y_offset)
+            for name, (x, y) in raw_positions.items()
         }
 
     def _position_for(self, node_name: str) -> tuple[int, int]:
@@ -562,13 +582,22 @@ class GNS3Connection(APIHandler):
 
     def start_all_nodes(self) -> None:
         """
-        Starts every node currently in this GNS3 project. GNS3 does not
-        start a node automatically when it's created via the API - without
-        this, deploy_graph would create and link every node but leave the
-        whole topology powered off.
+        Starts every node currently in this GNS3 project, one at a time.
+        GNS3 does not start a node automatically when it's created via
+        the API - without this, deploy_graph would create and link every
+        node but leave the whole topology powered off.
+
+        Every node is attempted, even after an earlier one fails, so a
+        single bad node doesn't leave the rest of an otherwise-successful
+        topology unstarted. A failure matching the known console-port-
+        collision signature (a leftover QEMU process from an earlier
+        delete not yet finished releasing the port) gets one retry after
+        a short backoff before being counted as failed. Any still-failing
+        nodes are reported together at the end; nodes that did start are
+        left running.
         :return: Returns ``None`` if the ``Settings.ONLY_ON_ESXI``/``Settings.IS_DRY_RUN`` options are True.
         :raises TimeoutError: Is thrown when it takes too long to receive a response.
-        :raises RuntimeError: Is thrown when it fails to collect the project's nodes, or when starting a node fails.
+        :raises RuntimeError: Is thrown when it fails to collect the project's nodes, or when starting one or more nodes fails.
         """
         if Settings.ONLY_ON_ESXI:
             return
@@ -586,14 +615,36 @@ class GNS3Connection(APIHandler):
             logger.error(msg := "Failed to collect GNS3 node information.")
             raise RuntimeError(msg) from exc
 
+        failed_names = []
         for node in nodes:
             Verbosity.volumatic_print(
                 Verbosity.NORMAL, f"Starts GNS3 node {node['name']}"
             )
+            start_url = f"{self.url}/v2/projects/{self.project['project_id']}/nodes/{node['node_id']}/start"
             try:
-                self.post(
-                    f"{self.url}/v2/projects/{self.project['project_id']}/nodes/{node['node_id']}/start"
-                )
-            except requests.exceptions.HTTPError as exc:
-                logger.error(msg := f"Failed to start GNS3 node {node['name']}")
-                raise RuntimeError(msg) from exc
+                self.post(start_url)
+                continue
+            except requests.exceptions.HTTPError as error:
+                if _CONSOLE_PORT_COLLISION_PATTERN.search(str(error)):
+                    logger.warning(
+                        f"Node '{node['name']}' hit a console port collision "
+                        f"on start, retrying once after "
+                        f"{_CONSOLE_PORT_COLLISION_RETRY_BACKOFF_SECONDS}s"
+                    )
+                    time.sleep(_CONSOLE_PORT_COLLISION_RETRY_BACKOFF_SECONDS)
+                    try:
+                        self.post(start_url)
+                        continue
+                    except requests.exceptions.HTTPError as retry_error:
+                        error = retry_error
+
+                failed_names.append(node["name"])
+                logger.error(f"Failed to start GNS3 node '{node['name']}': {error}")
+
+        if failed_names:
+            raise RuntimeError(
+                f"Failed to start {len(failed_names)}/{len(nodes)} node(s): "
+                f"{failed_names}. The rest started successfully; check the "
+                f"GNS3 Web UI, then rerun deploy if needed (redeploys are "
+                f"idempotent)."
+            )
