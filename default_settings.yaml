@@ -1,0 +1,46 @@
+verbosity_level: "n"
+topology_file: "./topology_example.yaml"
+is_dry_run: false
+esxi:
+  ip: "10.20.20.200"
+  port: 443
+  username: "root"
+  password:
+  virtual_switch: "internal_network"
+  ignore_port_groups:
+  - "PG_GNS3_TRUNK"
+  datastore: "datastore1 (2)"
+  gns3_vm_name: "GNS3 (1)"
+
+gns3:
+  username: "gns3"
+  password:
+  project_name: "tb_gns3_project"
+  port: 80
+  parent_interface: "eth1"
+
+api:
+  gns3_template_server_url: "http://10.20.20.171:8001"
+  esxi_template_server_url: "http://10.20.20.171:8000"
+  literal_api_values:
+  literal_esxi_templates:
+  - "pfSense"
+  - "mint21"
+  - "debian"
+  - "OPNsense"
+  - "Ubuntu-Server"
+  - "Windows 11 Pro Education"
+  - "Windows 10 Pro Education"
+  - "Windows Server 2022 Standard"
+  - "Rocky 9.2"
+
+  literal_gns3_templates:
+  - "VPCS"
+  - "Frame Relay switch"
+  - "Ethernet switch"
+  - "Cisco IOSv 15.6(1)T"
+  - "Ethernet hub"
+  - "NAT"
+  - "Cisco IOSvL2 15.2.1"
+  - "Cloud"
+  - "ATM switch"

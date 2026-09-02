@@ -49,8 +49,7 @@ def main(
         help="Use literal api values defined in the settings. If not set API requests will be made.",
     ),
 ) -> None:
-    if settings is not None:
-        Settings.initialise_settings(str(settings))
+    Settings.initialise_settings(custom_settings=settings)
     if verbosity is not None:
         Settings.VERBOSITY_LEVEL = verbosity
     if topology is not None:

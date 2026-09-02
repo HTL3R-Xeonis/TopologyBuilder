@@ -11,6 +11,19 @@ class Verbosity(str, Enum):
     VERBOSE = "v"
     DEBUG = "d"
 
+    @staticmethod
+    def get_verbosity_equivalent(value: str) -> Verbosity | None:
+        """
+        Get verbosity by the verbosity value.
+        :param value: Verbosity value.
+        :return: Corresponding verbosity object.
+        """
+        for v in Verbosity:
+            if v.value == value:
+                return v
+        else:
+            return None
+
     @property
     def level(self) -> int:
         """

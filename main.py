@@ -32,7 +32,6 @@ def main():
 
     logger.add("./logs/app.log", format=file_format, level="WARNING", rotation="10MB")
     logger.add(sys.stdout, format=print_format)
-
     try:
         app()
     except Exception as e:

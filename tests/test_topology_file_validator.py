@@ -10,7 +10,9 @@ __status__ = "In development"
 import allure
 import pytest
 from src.topology_file_validation import TopologyFileValidation
+from src.settings import Settings
 
+Settings.initialise_settings()
 TEST_FILE_FOLDER = "./tests/files/"
 
 
