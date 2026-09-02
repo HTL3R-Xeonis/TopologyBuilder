@@ -24,10 +24,6 @@ class Settings:
     """Path to the YAML file which represents the topology."""
     IS_DRY_RUN: bool = False
     """If True, only prints what would happen. May still execute API requests."""
-    ONLY_ON_GNS3: bool = False
-    """If True, only deploys nodes which are in the GNS3 environment."""
-    ONLY_ON_ESXI: bool = False
-    """"Only deploys nodes which are in the ESXi environment. Still creates Cloud-nodes on GNS3 to ensure possible connections between the ESXi-VMs."""
 
     class ESXI:
         """Settings related to ESXi."""
@@ -71,8 +67,7 @@ class Settings:
         ESXI_TEMPLATE_SERVER_URL = "http://10.20.20.171:8000"
         """URL to the ESXi template API server."""
 
-        # @TODO Remove always True. Is currently set for convenience
-        LITERAL_API_VALUES: bool = True or (
+        LITERAL_API_VALUES: bool = (
             os.getenv("LITERAL_API_VALUES", "false").lower() == "true"
         )
         """Specifies whether to use literal API values instead of using API calls to get the existing templates."""

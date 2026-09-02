@@ -33,16 +33,15 @@ class GNS3Connection(APIHandler):
         self.project_name = project_name
         self.project = self._init_project(project_name)
 
-    def _init_project(self, name: str) -> dict[str, Any] | None:
+    def _init_project(self, name: str) -> dict[str, Any]:
         """
         Create a new GNS3 project. If project already exists, it is deleted first.
         :param name: Name of the GNS3 project.
-        :return: Returns the newly generated GNS3 project information. Returns ``None`` if the ``Settings.ONLY_ON_ESXI`` is ``True``.
+        :return: Returns the newly generated GNS3 project information.
         :raises TimeoutError: Is thrown when it takes too long to receive a response.
         :raises RuntimeError: Is thrown when the creation or deletion of an existing project fails. May also be thrown if it fails to collect project information.
         """
-        if Settings.ONLY_ON_ESXI:
-            return None
+
         try:
             projects = self.get(f"{self.url}/v2/projects")
         except requests.exceptions.HTTPError as exc:
@@ -129,15 +128,12 @@ class GNS3Connection(APIHandler):
         """
         Creates a new GNS3 node on the GNS3 project.
         :param node: Node to be generated.
-        :return: Returns the newly generated GNS3 node information. ``None`` is returned, if the ``Settings.IS_DRY_RUN`` or ``Settings.ONLY_ON_ESXI`` options are True.
+        :return: Returns the newly generated GNS3 node information. ``None`` is returned, if the ``Settings.IS_DRY_RUN`` value is True.
         :raises ValueError: Is thrown when the image of the node does not exist on the GNS3 instance.
         :raises TimeoutError: Is thrown when it takes too long to receive a response.
         :raises RuntimeError: Is thrown when it fails to collect GNS3 template information. May also be thrown when it fails to create the node.
         """
         from src.graph import Environment
-
-        if Settings.ONLY_ON_ESXI:
-            return None
 
         if node.env == Environment.ON_ESXI:
             ports_mapping = self._create_ports_mapping(node)
@@ -282,14 +278,13 @@ class GNS3Connection(APIHandler):
         Connects two GNS3 nodes from the same GNS3 project together.
         :param node_1: Node to connect to ``node_2``.
         :param node_2: Node to connect to ``node_1``.
-        :return: Returns the newly generated GNS3 link information. `None`` is returned, if the ``Settings.IS_DRY_RUN`` or ``Settings.ONLY_ON_ESXI`` options are True.
+        :return: Returns the newly generated GNS3 link information. `None`` is returned, if the ``Settings.IS_DRY_RUN`` value is True.
         :raises ValueError: Is thrown when no adapter can be associated with the given interface.
         This may happen because the names are not the same.
         :raises RuntimeError: Is thrown when both nodes have no connection in the graph to each other.
         May also be thrown when one of the nodes does not exist in GNS3.
         """
-        if Settings.ONLY_ON_ESXI:
-            return None
+
         intf_1 = node_1.get_interface(node_2)
         intf_2 = node_2.get_interface(node_1)
 

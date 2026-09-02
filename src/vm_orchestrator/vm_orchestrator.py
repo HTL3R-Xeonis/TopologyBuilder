@@ -81,7 +81,6 @@ class VMOrchestrator:
         :raises ConnectionError: Is thrown when something on the connection buildup fails.
         :raises ValueError: Is thrown when the IPv4 address is not a public, private or loopback address.
             Is also thrown when the credentials are not valid.
-            May also be thrown when no virtual Switch was found.
             May also be thrown when the image of the node does not exist on the GNS3 instance.
             May also be thrown when no adapter can be associated with the given interface.
         :raises RuntimeError: Is thrown when it fails to collect GNS3 template information. May also be thrown when it fails to create the node.
@@ -139,9 +138,6 @@ class VMOrchestrator:
         :raises ConnectionError: Is thrown when the connection fails.
         :raises RuntimeError: Is thrown when an error occurs while trying to get subinterface information or when the execution of the script fails.
         """
-        if Settings.ONLY_ON_ESXI:
-            return
-
         port = 22
 
         gns3_connection = SSHConnection(

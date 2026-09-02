@@ -1,12 +1,13 @@
 import atexit
 import ssl
-from typing import Optional, List, TypeVar
+from typing import Optional, List, TypeVar, Any
 from typing import TYPE_CHECKING
 
 import pyVmomi
 from loguru import logger
 from pyVim.connect import SmartConnect, Disconnect
 from pyVmomi import vim, vmodl
+
 
 from .api_handler import APIHandler
 from .generic_connection import GenericConnection
@@ -134,11 +135,10 @@ class ESXiConnection(GenericConnection):
                     return address
         return None
 
-    def _get_virtual_switch(self) -> vim.host.VirtualSwitch:
+    def _get_virtual_switch(self) -> Any | None:
         """
         Looks for a virtual Switch with the name, specified in ``Settings.Esxi.VIRTUAL_SWITCH``, on the ESXi Host.
-        :return: Returns the virtual Switch if found.
-        :raises ValueError: Is thrown when no fitting virtual Switch was found.
+        :return: Returns the virtual Switch if found, else ``None``.
         """
         host = self._get_object_by_name(vim.HostSystem)
         config = getattr(host, "config", vim.host.ConfigInfo)
@@ -147,12 +147,76 @@ class ESXiConnection(GenericConnection):
         for vswitch in vswitch:
             if vswitch.name == Settings.ESXI.VIRTUAL_SWITCH:
                 return vswitch
+        return None
 
-        logger.error(
-            msg
-            := f"virtual switch {Settings.ESXI.VIRTUAL_SWITCH} not found on host: {self.ip}"
+    def _create_virtual_switch(self) -> vim.host.VirtualSwitch | None:
+        """
+        Creates a new virtual switch on the ESXi Host.
+        :return:
+        :raises RuntimeError: Is thrown when the virtual switch already exists on the ESXi host. May also be thrown when no host-system or network-system was found.
+        :raises ValueError: Is thrown when the name length of the vswitch exceeds the character limit of 32.
+        """
+        # --------------------------------------------------------------------------------------------------------------
+        if Settings.IS_DRY_RUN:
+            Verbosity.volumatic_print(
+                Verbosity.NORMAL,
+                f"Would create virtual switch: {Settings.ESXI.VIRTUAL_SWITCH}",
+            )
+            return None
+        Verbosity.volumatic_print(
+            Verbosity.NORMAL, f"Creates virtual switch: {Settings.ESXI.VIRTUAL_SWITCH}"
         )
-        raise ValueError(msg)
+        # --------------------------------------------------------------------------------------------------------------
+
+        # Subpolicy group
+        security_policy_spec = vim.host.NetworkPolicy.SecurityPolicy()
+        security_policy_spec.allowPromiscuous = True
+        security_policy_spec.forgedTransmits = True
+        security_policy_spec.macChanges = True
+
+        # Collect different policies
+        policy_spec = vim.host.NetworkPolicy()
+        policy_spec.security = security_policy_spec
+
+        # vswitch specs
+        spec = vim.host.VirtualSwitch.Specification()
+        spec.mtu = 1500
+        spec.policy = policy_spec
+
+        host = self._get_object_by_name(vim.HostSystem)
+        if host is None:
+            logger.error(msg := f"Hostsystem not found on ESXi host: {self.ip}")
+            raise RuntimeError(msg)
+
+        network_system = host.configManager.networkSystem
+        if network_system is None:
+            logger.error(msg := f"NetworkSystem not found on ESXi host: {self.ip}")
+            raise RuntimeError(msg)
+
+        if len(Settings.ESXI.VIRTUAL_SWITCH) > 32:
+            logger.error(
+                msg
+                := f"Virtual Switch name is limited to 32 characters. ({len(Settings.ESXI.VIRTUAL_SWITCH)} characters)"
+            )
+            raise ValueError(msg)
+        try:
+            network_system.AddVirtualSwitch(
+                vswitchName=Settings.ESXI.VIRTUAL_SWITCH, spec=spec
+            )
+        except vim.fault.AlreadyExists:
+            logger.error(
+                msg := f"Virtual Switch already exists on ESXi host: {self.ip}"
+            )
+            raise RuntimeError(msg)
+
+        vswitch = self._get_virtual_switch()
+        if vswitch is None:
+            logger.error(
+                msg
+                := f"Created Virtual switch not found on ESXi host: {self.ip} - vswitch name: {Settings.ESXI.VIRTUAL_SWITCH}"
+            )
+            raise RuntimeError(msg)
+        return vswitch
 
     def _add_port_group(self, vlan: VirtualLan) -> None:
         """
@@ -163,8 +227,6 @@ class ESXiConnection(GenericConnection):
         :raises RuntimeError: Is thrown when a portgroup already exists  on the ESXi host.
         May also be thrown when no host-system or network-system was found on the ESXi host.
         """
-        if Settings.ONLY_ON_GNS3:
-            return
         # ----------------------------------------------------------------------------------------------------------
         if Settings.IS_DRY_RUN:
             Verbosity.volumatic_print(
@@ -203,9 +265,11 @@ class ESXiConnection(GenericConnection):
         """
         Returns a list of all port groups connected to the virtual switch.
         :return: A list of port groups or empty list.
-        :raises ValueError: Is thrown when no virtual Switch was found.
         """
         virtual_switch = self._get_virtual_switch()
+        if virtual_switch is None:
+            virtual_switch = self._create_virtual_switch()
+
         host = self._get_object_by_name(vim.HostSystem)
 
         return [
@@ -221,8 +285,6 @@ class ESXiConnection(GenericConnection):
         :return:
         :raises RuntimeError: Is thrown when the portgroup does not exist, is currently in use or some other Exception occurs.
         """
-        if Settings.ONLY_ON_GNS3:
-            return
         # ----------------------------------------------------------------------------------------------------------
         if Settings.IS_DRY_RUN:
             Verbosity.volumatic_print(
@@ -257,7 +319,6 @@ class ESXiConnection(GenericConnection):
         """
         Deletes all port groups from the virtual switch, except for those specified in ``Settings.Esxi.IGNORE_PORT_GROUPS``.
         :return:
-        :raises ValueError: Is thrown when no virtual Switch was found.
         :raises RuntimeError: Is thrown when there are issues with removing the port group, like it does not exist, or it is currently in use.
         """
         port_groups = self._get_port_groups()
@@ -271,7 +332,6 @@ class ESXiConnection(GenericConnection):
         """
         Removes the necessary assets from the virtual switch to reduce the number of problems which could occur.
         :return:
-        :raises ValueError: Is thrown when no virtual Switch was found.
         :raises RuntimeError: Is thrown when there are issues with removing the port group, like it does not exist, or it is currently in use.
         """
         self._remove_port_groups()
@@ -319,8 +379,6 @@ class ESXiConnection(GenericConnection):
         :return:
         :raises TimeoutError: Is thrown when it took too long to receive a response.
         """
-        if Settings.ONLY_ON_GNS3:
-            return
         # --------------------------------------------------------------------------------------------------------------
         if Settings.IS_DRY_RUN:
             Verbosity.volumatic_print(

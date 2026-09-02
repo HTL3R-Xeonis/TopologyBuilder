@@ -125,30 +125,8 @@ def deploy(
     is_dry_run: bool = typer.Option(
         False, "--dry_run", "-d", help="Prints what would have been deployed."
     ),
-    only_on_gns3: bool = typer.Option(
-        False,
-        "--only_on_gns3",
-        "-g",
-        help="Only deploys nodes which are in the GNS3 environment.",
-    ),
-    only_on_esxi: bool = typer.Option(
-        False,
-        "--only_on_esxi",
-        "-e",
-        help="Only deploys nodes which are in the ESXi environment."
-        "Still creates Cloud-nodes on GNS3 to ensure possible connections between the ESXi-VMs.",
-    ),
 ):
     """Deploys the nodes from the topology on ESXi and GNS3."""
-    if only_on_gns3:
-        Settings.ONLY_ON_GNS3 = only_on_gns3
-    if only_on_esxi:
-        Settings.ONLY_ON_ESXI = only_on_esxi
-    if only_on_gns3 and only_on_esxi:
-        raise ValueError(
-            "Only deploying in both environments does not make sense, if there are only these two environments."
-        )
-
     if gns3_username is not None:
         Settings.GNS3.USERNAME = gns3_username
     if gns3_password is not None:
