@@ -73,6 +73,7 @@ def cli_001() -> None:
         orchestrator_cls.return_value.deploy_graph.call_args.kwargs["incremental"]
         is False
     )
+    assert "Deployment complete." in result.output
 
 
 @allure.title("deploy-Befehl mit --incremental leitet incremental=True weiter")
@@ -709,3 +710,127 @@ def cli_020(tmp_path) -> None:
     assert result.exit_code == 1
     assert not output_path.exists()
     assert generate_mock.call_count == Settings.GENERATE_MAX_RETRIES + 1
+
+
+@allure.title("generate-deploy generiert eine Topologie und deployt sie anschließend")
+@allure.description(
+    "Überprüft, dass generate-deploy bei einer gültigen Generierung die "
+    "Datei schreibt, validiert, den Graphen anzeigt und anschließend "
+    "VMOrchestrator.deploy_graph mit genau diesem Graph aufruft"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.CRITICAL)
+def cli_021(tmp_path) -> None:
+    output_path = tmp_path / "generated.yaml"
+
+    with (
+        patch("src.cli.TopologyGeneratorClient.generate_topology") as generate_mock,
+        patch("src.cli.TopologyFileValidation") as validator_cls,
+        patch("src.cli.Graph") as graph_cls,
+        patch("src.cli.VMOrchestrator") as orchestrator_cls,
+    ):
+        generate_mock.return_value = {
+            "yaml": "nodes: []\nedges: []\n",
+            "valid": True,
+            "warnings": [],
+        }
+        validator_cls.return_value.nodes = []
+        validator_cls.return_value.edges = []
+
+        result = runner.invoke(
+            app,
+            [
+                "generate-deploy",
+                "a small lab",
+                "--output",
+                str(output_path),
+                "--address",
+                "10.20.20.202",
+                "--esxi_username",
+                "root",
+                "--esxi_password",
+                "pw",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    generate_mock.assert_called_once_with("a small lab")
+    assert output_path.read_text() == "nodes: []\nedges: []\n"
+    orchestrator_cls.return_value.deploy_graph.assert_called_once()
+    assert (
+        orchestrator_cls.return_value.deploy_graph.call_args.kwargs["graph"]
+        is graph_cls.return_value
+    )
+    assert "Deployment complete." in result.output
+
+
+@allure.title("generate-deploy deployt nicht, wenn die Generierung fehlschlägt")
+@allure.description(
+    "Überprüft, dass generate-deploy mit Exit-Code 1 abbricht und "
+    "VMOrchestrator.deploy_graph nie aufruft, wenn die Topologie nach "
+    "allen Wiederholungen nie gültig generiert werden konnte"
+)
+@allure.tag("negativ-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.CRITICAL)
+def cli_022(tmp_path) -> None:
+    output_path = tmp_path / "generated.yaml"
+
+    with (
+        patch("src.cli.TopologyGeneratorClient.generate_topology") as generate_mock,
+        patch("src.cli.VMOrchestrator") as orchestrator_cls,
+    ):
+        generate_mock.return_value = {"yaml": "", "valid": False, "warnings": []}
+
+        result = runner.invoke(
+            app,
+            ["generate-deploy", "a small lab", "--output", str(output_path)],
+        )
+
+    assert result.exit_code == 1
+    assert not output_path.exists()
+    orchestrator_cls.return_value.deploy_graph.assert_not_called()
+
+
+@allure.title("generate-deploy leitet --incremental an deploy_graph weiter")
+@allure.description(
+    "Überprüft, dass generate-deploy seine Deploy-Optionen (--incremental) "
+    "genauso an VMOrchestrator.deploy_graph durchreicht wie der deploy-Befehl"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.NORMAL)
+def cli_023(tmp_path) -> None:
+    output_path = tmp_path / "generated.yaml"
+
+    with (
+        patch("src.cli.TopologyGeneratorClient.generate_topology") as generate_mock,
+        patch("src.cli.TopologyFileValidation") as validator_cls,
+        patch("src.cli.Graph"),
+        patch("src.cli.VMOrchestrator") as orchestrator_cls,
+    ):
+        generate_mock.return_value = {
+            "yaml": "nodes: []\nedges: []\n",
+            "valid": True,
+            "warnings": [],
+        }
+        validator_cls.return_value.nodes = []
+        validator_cls.return_value.edges = []
+
+        result = runner.invoke(
+            app,
+            [
+                "generate-deploy",
+                "a small lab",
+                "--output",
+                str(output_path),
+                "--incremental",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert (
+        orchestrator_cls.return_value.deploy_graph.call_args.kwargs["incremental"]
+        is True
+    )

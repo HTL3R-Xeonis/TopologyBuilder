@@ -132,3 +132,45 @@ def api_handler_004() -> None:
             APIHandler.deploy_ova(
                 "10.20.20.202", 443, "PC1", "ubuntu-server.ova", "datastore1", {}
             )
+
+
+@allure.title(
+    "post verwendet einen Timeout von 30 Sekunden, wenn keiner angegeben wird"
+)
+@allure.description(
+    "Überprüft, dass APIHandler.post standardmäßig mit timeout=30 an "
+    "requests.post übergibt, statt ganz ohne Timeout zu laufen"
+)
+@allure.tag("positiv-test", "api-handler")
+@allure.feature("api_handler")
+@allure.severity(allure.severity_level.CRITICAL)
+def api_handler_005() -> None:
+    response = MagicMock()
+    response.raise_for_status = MagicMock()
+
+    with patch(
+        "src.connections.api_handler.requests.post", return_value=response
+    ) as mock_post:
+        APIHandler.post("http://example.com/thing")
+
+    assert mock_post.call_args.kwargs["timeout"] == 30
+
+
+@allure.title("post gibt einen expliziten Timeout an requests.post weiter")
+@allure.description(
+    "Überprüft, dass ein explizit übergebener timeout-Parameter den "
+    "30-Sekunden-Standardwert von APIHandler.post überschreibt"
+)
+@allure.tag("positiv-test", "api-handler")
+@allure.feature("api_handler")
+@allure.severity(allure.severity_level.NORMAL)
+def api_handler_006() -> None:
+    response = MagicMock()
+    response.raise_for_status = MagicMock()
+
+    with patch(
+        "src.connections.api_handler.requests.post", return_value=response
+    ) as mock_post:
+        APIHandler.post("http://example.com/thing", timeout=300)
+
+    assert mock_post.call_args.kwargs["timeout"] == 300

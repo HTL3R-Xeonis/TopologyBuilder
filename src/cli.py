@@ -95,6 +95,99 @@ def _make_orchestrator() -> VMOrchestrator:
     )
 
 
+def _apply_deploy_options(
+    only_on_gns3: bool,
+    only_on_esxi: bool,
+    gns3_username: str | None,
+    gns3_password: str | None,
+    is_dry_run: bool,
+) -> None:
+    """
+    Applies the given deploy-behaviour options to Settings, shared by
+    `deploy` and `generate-deploy`.
+    :raises ValueError: if both only_on_gns3 and only_on_esxi are True.
+    :return:
+    """
+    if only_on_gns3:
+        Settings.ONLY_ON_GNS3 = only_on_gns3
+    if only_on_esxi:
+        Settings.ONLY_ON_ESXI = only_on_esxi
+    if only_on_gns3 and only_on_esxi:
+        raise ValueError(
+            "Only deploying in both environments does not make sense, if there are only these two environments."
+        )
+
+    if gns3_username is not None:
+        Settings.GNS3.USERNAME = gns3_username
+    if gns3_password is not None:
+        Settings.GNS3.PASSWORD = gns3_password
+    if is_dry_run:
+        Settings.IS_DRY_RUN = is_dry_run
+
+
+def _generate_topology(prompt: str, output_path: Path) -> Graph:
+    """
+    Requests a topology from the Topology Generator API, retrying up to
+    Settings.GENERATE_MAX_RETRIES times if a result fails validation.
+    Writes the valid result to output_path, prints the resulting graph,
+    and returns it. Shared by `generate` and `generate-deploy`.
+    :param prompt: natural-language description of the desired topology
+    :param output_path: path to write the generated topology file to
+    :return: the validated Graph built from the generated topology
+    :raises typer.Exit: if no valid topology was generated after all retries
+    """
+    for attempt in range(1, Settings.GENERATE_MAX_RETRIES + 2):
+        result = TopologyGeneratorClient.generate_topology(prompt)
+
+        for warning in result.get("warnings", []):
+            typer.secho(f"Warning: {warning}", fg=typer.colors.YELLOW, err=True)
+
+        if not result.get("valid"):
+            typer.secho(
+                f"Attempt {attempt}: topology generation reported invalid, retrying...",
+                fg=typer.colors.YELLOW,
+                err=True,
+            )
+            continue
+
+        tmp_path = Path(
+            tempfile.mkstemp(
+                suffix=".yml",
+                prefix="generated_topology_",
+                dir=output_path.resolve().parent,
+            )[1]
+        )
+        tmp_path.write_text(result["yaml"])
+
+        try:
+            validator = TopologyFileValidation(str(tmp_path))
+            validator.validate_file()
+        except Exception as exc:
+            typer.secho(
+                f"Attempt {attempt}: generated topology failed validation "
+                f"({type(exc).__name__}: {exc}), retrying...",
+                fg=typer.colors.YELLOW,
+                err=True,
+            )
+            tmp_path.unlink(missing_ok=True)
+            continue
+
+        tmp_path.replace(output_path)
+        typer.secho(f"Wrote generated topology to {output_path}", fg=typer.colors.GREEN)
+
+        graph = Graph(validator.nodes, validator.edges)
+        graph.visualize()
+        return graph
+
+    typer.secho(
+        f"Topology generation failed validation after "
+        f"{Settings.GENERATE_MAX_RETRIES} retries; no file written.",
+        fg=typer.colors.RED,
+        err=True,
+    )
+    raise typer.Exit(code=1)
+
+
 @app.callback()
 def main(
     verbosity: Verbosity = typer.Option(
@@ -149,60 +242,11 @@ def generate(
     Generates a topology file from a natural-language prompt via the
     Topology Generator API, validates it, and prints the resulting graph.
     Retries generation up to Settings.GENERATE_MAX_RETRIES times if the
-    result doesn't validate. Does not deploy the generated topology.
+    result doesn't validate. Does not deploy the generated topology - see
+    `generate-deploy` for that.
     """
     output_path = output if output is not None else Path(Settings.TOPOLOGY_FILE)
-
-    for attempt in range(1, Settings.GENERATE_MAX_RETRIES + 2):
-        result = TopologyGeneratorClient.generate_topology(prompt)
-
-        for warning in result.get("warnings", []):
-            typer.secho(f"Warning: {warning}", fg=typer.colors.YELLOW, err=True)
-
-        if not result.get("valid"):
-            typer.secho(
-                f"Attempt {attempt}: topology generation reported invalid, retrying...",
-                fg=typer.colors.YELLOW,
-                err=True,
-            )
-            continue
-
-        tmp_path = Path(
-            tempfile.mkstemp(
-                suffix=".yml",
-                prefix="generated_topology_",
-                dir=output_path.resolve().parent,
-            )[1]
-        )
-        tmp_path.write_text(result["yaml"])
-
-        try:
-            validator = TopologyFileValidation(str(tmp_path))
-            validator.validate_file()
-        except Exception as exc:
-            typer.secho(
-                f"Attempt {attempt}: generated topology failed validation "
-                f"({type(exc).__name__}: {exc}), retrying...",
-                fg=typer.colors.YELLOW,
-                err=True,
-            )
-            tmp_path.unlink(missing_ok=True)
-            continue
-
-        tmp_path.replace(output_path)
-        typer.secho(f"Wrote generated topology to {output_path}", fg=typer.colors.GREEN)
-
-        graph = Graph(validator.nodes, validator.edges)
-        graph.visualize()
-        return
-
-    typer.secho(
-        f"Topology generation failed validation after "
-        f"{Settings.GENERATE_MAX_RETRIES} retries; no file written.",
-        fg=typer.colors.RED,
-        err=True,
-    )
-    raise typer.Exit(code=1)
+    _generate_topology(prompt, output_path)
 
 
 @app.command()
@@ -296,21 +340,9 @@ def deploy(
         trunk_port_group,
     )
 
-    if only_on_gns3:
-        Settings.ONLY_ON_GNS3 = only_on_gns3
-    if only_on_esxi:
-        Settings.ONLY_ON_ESXI = only_on_esxi
-    if only_on_gns3 and only_on_esxi:
-        raise ValueError(
-            "Only deploying in both environments does not make sense, if there are only these two environments."
-        )
-
-    if gns3_username is not None:
-        Settings.GNS3.USERNAME = gns3_username
-    if gns3_password is not None:
-        Settings.GNS3.PASSWORD = gns3_password
-    if is_dry_run:
-        Settings.IS_DRY_RUN = is_dry_run
+    _apply_deploy_options(
+        only_on_gns3, only_on_esxi, gns3_username, gns3_password, is_dry_run
+    )
 
     validator = TopologyFileValidation(Settings.TOPOLOGY_FILE)
     validator.validate_file()
@@ -325,6 +357,90 @@ def deploy(
         gns3_password=Settings.GNS3.PASSWORD,
         incremental=incremental,
     )
+    typer.secho("Deployment complete.", fg=typer.colors.GREEN)
+
+
+@app.command(name="generate-deploy")
+def generate_deploy(
+    prompt: str = typer.Argument(
+        ..., help="Natural-language description of the desired topology."
+    ),
+    output: Path = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Path to write the generated topology file to. Defaults to "
+        "--topology/-t's current value.",
+    ),
+    address: str = ESXI_ADDRESS_OPTION,
+    esxi_username: str = ESXI_USERNAME_OPTION,
+    esxi_password: str = ESXI_PASSWORD_OPTION,
+    gns3_vm_name: str = GNS3_VM_NAME_OPTION,
+    datastore: str = ESXI_DATASTORE_OPTION,
+    virtual_switch: str = ESXI_VIRTUAL_SWITCH_OPTION,
+    trunk_port_group: str = ESXI_TRUNK_PORT_GROUP_OPTION,
+    gns3_username: str = typer.Option(
+        None, "--gns3_username", "-u", help="A username of the GNS3 server."
+    ),
+    gns3_password: str = typer.Option(
+        None, "--gns3_password", "-p", help="The password for the GNS3 user."
+    ),
+    is_dry_run: bool = typer.Option(
+        False, "--dry_run", "-d", help="Prints what would have been deployed."
+    ),
+    only_on_gns3: bool = typer.Option(
+        False,
+        "--only_on_gns3",
+        "-g",
+        help="Only deploys nodes which are in the GNS3 environment.",
+    ),
+    only_on_esxi: bool = typer.Option(
+        False,
+        "--only_on_esxi",
+        "-e",
+        help="Only deploys nodes which are in the ESXi environment."
+        "Still creates Cloud-nodes on GNS3 to ensure possible connections between the ESXi-VMs.",
+    ),
+    incremental: bool = typer.Option(
+        False,
+        "--incremental",
+        "-i",
+        help="Skip resetting the ESXi vSwitch and recreating the GNS3 "
+        "project - only create what's missing by name/endpoint, leaving "
+        "already-running VMs/nodes/links untouched.",
+    ),
+) -> None:
+    """
+    Generates a topology from a natural-language prompt (see `generate`),
+    then immediately deploys it to ESXi/GNS3 (see `deploy`). Generation
+    is retried and validated exactly as `generate` does; deployment only
+    runs once a valid topology has been generated.
+    """
+    output_path = output if output is not None else Path(Settings.TOPOLOGY_FILE)
+    graph = _generate_topology(prompt, output_path)
+
+    _apply_esxi_options(
+        address,
+        esxi_username,
+        esxi_password,
+        gns3_vm_name,
+        datastore,
+        virtual_switch,
+        trunk_port_group,
+    )
+    _apply_deploy_options(
+        only_on_gns3, only_on_esxi, gns3_username, gns3_password, is_dry_run
+    )
+
+    orchestrator = _make_orchestrator()
+
+    orchestrator.deploy_graph(
+        graph=graph,
+        gns3_username=Settings.GNS3.USERNAME,
+        gns3_password=Settings.GNS3.PASSWORD,
+        incremental=incremental,
+    )
+    typer.secho("Deployment complete.", fg=typer.colors.GREEN)
 
 
 @app.command()

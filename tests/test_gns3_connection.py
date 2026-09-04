@@ -139,6 +139,11 @@ def gns3_connection_003() -> None:
         f"{conn.url}/v2/projects/p1/nodes/n1/start",
         f"{conn.url}/v2/projects/p1/nodes/n2/start",
     }
+    assert all(
+        call.kwargs.get("timeout") == 300 for call in mock_post.call_args_list
+    ), (
+        "node start must use a longer timeout than ordinary metadata POSTs - GNS3 blocks until the node has actually booted"
+    )
 
 
 @allure.title("start_all_nodes überspringt alles im Dry-Run-Modus")
@@ -669,3 +674,50 @@ def gns3_connection_023() -> None:
 
     mock_post.assert_not_called()
     assert result is None
+
+
+@allure.title(
+    "_get_template findet ein Template trotz Groß-/Kleinschreibung und Leerzeichen"
+)
+@allure.description(
+    "Überprüft, dass _get_template Templates case- und whitespace-"
+    "unabhängig matcht (siehe normalize_template_name) - genauso wie "
+    "Environment.get_environment es bereits bei der Validierung tut, "
+    "damit ein Image, das die Validierung passiert hat, hier nicht an "
+    "einem exakten String-Vergleich scheitert"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_024() -> None:
+    conn = GNS3Connection.__new__(GNS3Connection)
+    conn.url = "http://10.20.20.231:80"
+    conn.ip = "10.20.20.231"
+
+    templates = [
+        {"name": "Cisco IOSv 15.6(1) T", "template_id": "t1", "builtin": False}
+    ]
+    with patch.object(GNS3Connection, "get", return_value=templates):
+        result = conn._get_template("Cisco IOSv 15.6(1)T")
+
+    assert result["template_id"] == "t1"
+
+
+@allure.title("_get_template wirft ValueError, wenn kein Template passt")
+@allure.description(
+    "Überprüft, dass _get_template weiterhin einen ValueError wirft, "
+    "wenn selbst nach der whitespace/case-toleranten Normalisierung kein "
+    "Template-Name übereinstimmt"
+)
+@allure.tag("negativ-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_025() -> None:
+    conn = GNS3Connection.__new__(GNS3Connection)
+    conn.url = "http://10.20.20.231:80"
+    conn.ip = "10.20.20.231"
+
+    templates = [{"name": "VPCS", "template_id": "t1", "builtin": True}]
+    with patch.object(GNS3Connection, "get", return_value=templates):
+        with pytest.raises(ValueError):
+            conn._get_template("Nonexistent Template")

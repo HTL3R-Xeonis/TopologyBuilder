@@ -54,11 +54,17 @@ class APIHandler:
             raise
 
     @staticmethod
-    def post(url: str, parsing_method: str = "json", **kwargs) -> dict | None:
+    def post(
+        url: str, parsing_method: str = "json", timeout: int = 30, **kwargs
+    ) -> dict | None:
         """
         General method to make an API POST request
         :param url: url to the API endpoint
         :param parsing_method: Method of parsing the response.
+        :param timeout: seconds to wait for a response before raising
+            TimeoutError. Defaults to 30 - pass a larger value for a call
+            expected to legitimately take longer (e.g. GNS3 node start,
+            which blocks until the node has booted).
         :param kwargs: Keyword arguments for the post request.
         :return: The parsed response from the POST request.
         :raises HTTPError: Is thrown when something went wrong with the API call.
@@ -66,8 +72,7 @@ class APIHandler:
         :raises RuntimeError: Is thrown when the response is not parseable to JSON.
         """
         try:
-            # @TODO ADD TIMEOUT. CURRENTLY RUNS INTO ERROR WHILST DEPLOYING VM. PERIODICALL RESPONSES FROM API SERVER ARE MISSING.
-            response = requests.post(url, **kwargs)
+            response = requests.post(url, timeout=timeout, **kwargs)
             response.raise_for_status()
             return APIHandler.parse_response(response, parsing_method)
         except requests.Timeout:

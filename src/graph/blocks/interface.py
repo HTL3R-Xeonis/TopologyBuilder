@@ -14,9 +14,6 @@ __license__ = "GNU GPLv3"
 __status__ = "In development"
 
 
-# @TODO ExceptionHandling
-# @TODO Logging
-# @TODO Complete and recursive Exception Documentation.
 class Interface:
     """
     Object which represents an interface of a Node,
@@ -27,8 +24,6 @@ class Interface:
         """
         :param if_name: name of the interface
         :param node: Node which owns this interface
-
-        :raises ValueError: Is thrown when too many interfaces are created, which have a vlan object. i <= 4093
         """
         self._name: str = if_name
         self._parent: GenericNode = node

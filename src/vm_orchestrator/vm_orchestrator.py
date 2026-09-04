@@ -23,9 +23,6 @@ from src.vm_orchestrator.gns3_vm_interface_setup import GNS3VMInterfaceSetup
 from loguru import logger
 
 
-# @TODO ExceptionHandling
-# @TODO Complete and recursive Exception Documentation.
-# @TODO upgrade Logging
 class VMOrchestrator:
     """
     Object which controls the process of the VMs provisioning.
@@ -118,6 +115,10 @@ class VMOrchestrator:
             May also be thrown when there are issues with removing the port group, like it does not exist, or it is currently in use.
             May also be thrown when a portgroup already exists on the ESXi host. May also be thrown when no host-system or network-system was found on the ESXi host.
         """
+        logger.info(
+            f"Deploying {len(graph.nodes)} node(s) to project "
+            f"'{Settings.GNS3.PROJECT_NAME}' (incremental={incremental})"
+        )
         self._configure_gns3_interfaces(graph, gns3_username, gns3_password)
         self.esxi_connection.ensure_virtual_switch_exists()
         if not incremental:
@@ -168,6 +169,8 @@ class VMOrchestrator:
                     gns3_username, gns3_password
                 )
             raise
+
+        logger.info(f"Deployment complete: project '{Settings.GNS3.PROJECT_NAME}'")
 
     def delete_unused_vms(self, graph: Graph) -> None:
         """
@@ -248,8 +251,10 @@ class VMOrchestrator:
         :param project_name: name of the GNS3 project to clear
         :return:
         """
+        logger.info(f"Destroying project '{project_name}'")
         self.delete_stale_esxi_resources(graph)
         GNS3Connection(self.gns3_vm_ip, Settings.GNS3.PORT, project_name)
+        logger.info(f"Destroy complete: project '{project_name}'")
 
     def check_prerequisites(self) -> list[tuple[bool, str]]:
         """

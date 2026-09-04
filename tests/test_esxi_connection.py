@@ -1058,3 +1058,52 @@ def esxi_connection_042() -> None:
     conn.initialize_virtual_switch(graph)
 
     conn._add_port_group.assert_called_once_with(shared_vlan)
+
+
+@allure.title(
+    "reset_virtual_switch schützt Trunk-, Ignore- und reservierte Port-Groups"
+)
+@allure.description(
+    "Überprüft, dass reset_virtual_switch (via _remove_port_groups) den "
+    "konfigurierten Trunk-Port-Group, alles in IGNORE_PORT_GROUPS und "
+    "ESXis eigene reservierte Port-Groups (RESERVED_PORT_GROUPS) niemals "
+    "löscht, aber jede andere Port-Group entfernt - deckt die real "
+    "gefundene Regression ab, bei der ein falsch benannter Trunk-Port-"
+    "Group nicht vor der Löschung geschützt war"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_043() -> None:
+    _reset_settings()
+    original_trunk = Settings.ESXI.TRUNK_PORT_GROUP
+    original_ignore = Settings.ESXI.IGNORE_PORT_GROUPS
+    original_reserved = Settings.ESXI.RESERVED_PORT_GROUPS
+    try:
+        Settings.ESXI.TRUNK_PORT_GROUP = "PG-GNS3-TRUNK"
+        Settings.ESXI.IGNORE_PORT_GROUPS = {"PG-MGMT"}
+
+        conn = _make_esxi_connection()
+
+        def _pg(name: str) -> MagicMock:
+            pg = MagicMock()
+            pg.spec.name = name
+            return pg
+
+        port_groups = [
+            _pg("PG-GNS3-TRUNK"),  # configured trunk group - protected
+            _pg("PG-MGMT"),  # explicitly ignored - protected
+            _pg("VM Network"),  # ESXi built-in - always protected
+            _pg("Management Network"),  # ESXi built-in - always protected
+            _pg("PG-VLAN-10"),  # a topology port group - should be removed
+        ]
+        conn._get_port_groups = MagicMock(return_value=port_groups)
+        conn._remove_port_group = MagicMock()
+
+        conn.reset_virtual_switch()
+
+        conn._remove_port_group.assert_called_once_with("PG-VLAN-10")
+    finally:
+        Settings.ESXI.TRUNK_PORT_GROUP = original_trunk
+        Settings.ESXI.IGNORE_PORT_GROUPS = original_ignore
+        Settings.ESXI.RESERVED_PORT_GROUPS = original_reserved

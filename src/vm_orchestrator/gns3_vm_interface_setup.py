@@ -9,7 +9,6 @@ from src.settings import Settings, Verbosity
 from loguru import logger
 
 
-# TODO upgrade ExceptionHandling
 class GNS3VMInterfaceSetup:
     """
     Object to handle the interface configuration of the GNS3 VM to ensure, that only the dedicated GNS3 device can communicate with the VM on the ESXi host.

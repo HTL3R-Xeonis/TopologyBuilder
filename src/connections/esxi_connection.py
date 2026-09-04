@@ -25,7 +25,6 @@ from src.settings import Settings, Verbosity
 T = TypeVar("T")
 
 
-# @TODO upgrade resetting vSwitch
 class ESXiConnection(GenericConnection):
     """
     Object which manages the communication between APIs regarding ESXi.
@@ -557,10 +556,14 @@ class ESXiConnection(GenericConnection):
                 continue
             self._remove_port_group(pg.spec.name)
 
-    # @TODO upgrade resetting vSwitch
     def reset_virtual_switch(self) -> None:
         """
-        Removes the necessary assets from the virtual switch to reduce the number of problems which could occur.
+        Removes every port group on the configured vSwitch except the
+        trunk port group, ESXi's own built-in port groups, and anything
+        listed in ``Settings.ESXI.IGNORE_PORT_GROUPS`` (see
+        ``_remove_port_groups``) - a clean slate for a non-incremental
+        deploy to recreate the topology's port groups on, without
+        touching the GNS3 VM's own bridge or the host's management NIC.
         :return:
         :raises ValueError: Is thrown when no virtual Switch was found.
         :raises RuntimeError: Is thrown when there are issues with removing the port group, like it does not exist, or it is currently in use.

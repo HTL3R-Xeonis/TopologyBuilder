@@ -14,8 +14,17 @@ if TYPE_CHECKING:
     from src.graph.blocks import GenericNode, Interface
 
 from .api_handler import APIHandler
+from src.graph.environment import normalize_template_name
 from src.graph.layout import compute_node_positions
 from loguru import logger
+
+# GNS3 itself waits for the node to actually finish booting before this
+# call returns - well beyond the 30s default APIHandler.post uses for
+# ordinary metadata calls (project/node/link creation). Comfortably above
+# GNS3's own ~240s internal per-node timeout (see the "GNS3 node-start
+# batch timeout" project notes) so a legitimately slow QEMU boot doesn't
+# get mistaken for a hang.
+_NODE_START_TIMEOUT_SECONDS = 300
 
 # Matches the error GNS3 raises when a node's console TCP port is already
 # bound by another process - most likely an orphaned QEMU process from an
@@ -38,7 +47,6 @@ def is_console_port_collision_error(error: BaseException) -> bool:
     return bool(_CONSOLE_PORT_COLLISION_PATTERN.search(str(error)))
 
 
-# @TODO shortform and longform / better name dedection
 class GNS3Connection(APIHandler):
     """
     Object which provides methods regarding the GNS3 API
@@ -446,7 +454,22 @@ class GNS3Connection(APIHandler):
             )
             raise RuntimeError(msg) from exc
 
-        template = next((t for t in response if t["name"] == template_name), None)
+        # Matches leniently (case/whitespace-insensitive, see
+        # normalize_template_name) for the same reason Environment.
+        # get_environment does: real-world template names have been
+        # observed to disagree with a topology config's image name on
+        # whitespace, and a node's image already passed that same lenient
+        # check during validation - an exact-match lookup here would
+        # reject it again for no real reason.
+        normalized_target = normalize_template_name(template_name)
+        template = next(
+            (
+                t
+                for t in response
+                if normalize_template_name(t["name"]) == normalized_target
+            ),
+            None,
+        )
 
         if template is None:
             raise ValueError(f"Template {template_name} does not exist on GNS3 VM")
@@ -651,7 +674,7 @@ class GNS3Connection(APIHandler):
             )
             start_url = f"{self.url}/v2/projects/{self.project['project_id']}/nodes/{node['node_id']}/start"
             try:
-                self.post(start_url)
+                self.post(start_url, timeout=_NODE_START_TIMEOUT_SECONDS)
                 continue
             except requests.exceptions.HTTPError as error:
                 if is_console_port_collision_error(error):
@@ -662,7 +685,7 @@ class GNS3Connection(APIHandler):
                     )
                     time.sleep(_CONSOLE_PORT_COLLISION_RETRY_BACKOFF_SECONDS)
                     try:
-                        self.post(start_url)
+                        self.post(start_url, timeout=_NODE_START_TIMEOUT_SECONDS)
                         continue
                     except requests.exceptions.HTTPError as retry_error:
                         error = retry_error
