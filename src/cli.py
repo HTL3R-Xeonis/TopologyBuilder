@@ -132,9 +132,6 @@ def main(
         Settings.API.LITERAL_API_VALUES = literal_api_values
 
 
-GENERATE_MAX_RETRIES = 3
-
-
 @app.command()
 def generate(
     prompt: str = typer.Argument(
@@ -151,12 +148,12 @@ def generate(
     """
     Generates a topology file from a natural-language prompt via the
     Topology Generator API, validates it, and prints the resulting graph.
-    Retries generation up to GENERATE_MAX_RETRIES times if the result
-    doesn't validate. Does not deploy the generated topology.
+    Retries generation up to Settings.GENERATE_MAX_RETRIES times if the
+    result doesn't validate. Does not deploy the generated topology.
     """
     output_path = output if output is not None else Path(Settings.TOPOLOGY_FILE)
 
-    for attempt in range(1, GENERATE_MAX_RETRIES + 2):
+    for attempt in range(1, Settings.GENERATE_MAX_RETRIES + 2):
         result = TopologyGeneratorClient.generate_topology(prompt)
 
         for warning in result.get("warnings", []):
@@ -200,8 +197,8 @@ def generate(
         return
 
     typer.secho(
-        f"Topology generation failed validation after {GENERATE_MAX_RETRIES} "
-        "retries; no file written.",
+        f"Topology generation failed validation after "
+        f"{Settings.GENERATE_MAX_RETRIES} retries; no file written.",
         fg=typer.colors.RED,
         err=True,
     )

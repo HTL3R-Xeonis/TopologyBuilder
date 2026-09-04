@@ -31,7 +31,7 @@ def main():
     )
 
     logger.add(
-        Settings.LOG_FILE_PATH, format=file_format, level="WARNING", rotation="10MB"
+        Settings.LOG_FILE_PATH, format=file_format, level="INFO", rotation="10MB"
     )
     logger.add(sys.stdout, format=print_format)
 

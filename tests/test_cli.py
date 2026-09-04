@@ -10,7 +10,7 @@ import allure
 
 from typer.testing import CliRunner
 
-from src.cli import GENERATE_MAX_RETRIES, app
+from src.cli import app
 from src.settings import Settings
 
 runner = CliRunner(env={"COLUMNS": "200", "NO_COLOR": "1", "TERM": "dumb"})
@@ -671,7 +671,7 @@ def cli_018(tmp_path) -> None:
 
     assert result.exit_code == 1
     assert not output_path.exists()
-    assert generate_mock.call_count == GENERATE_MAX_RETRIES + 1
+    assert generate_mock.call_count == Settings.GENERATE_MAX_RETRIES + 1
 
 
 @allure.title(
@@ -708,4 +708,4 @@ def cli_020(tmp_path) -> None:
 
     assert result.exit_code == 1
     assert not output_path.exists()
-    assert generate_mock.call_count == GENERATE_MAX_RETRIES + 1
+    assert generate_mock.call_count == Settings.GENERATE_MAX_RETRIES + 1

@@ -152,7 +152,7 @@ whichever is available in your environment.
 
 | Command | Purpose |
 |---|---|
-| `topologybuilder generate "<prompt>" [--output PATH]` | Generates a topology file from a natural-language prompt via the Topology Generator API, writing it to `--output` (defaults to `--topology`'s current value). |
+| `topologybuilder generate "<prompt>" [--output PATH]` | Generates a topology file from a natural-language prompt via the Topology Generator API, writes it to `--output` (defaults to `--topology`'s current value), validates it, and prints the resulting graph. Retries generation up to `generate_max_retries` (settings.yml, default 3) times if a result fails validation, then errors out. Does not deploy. |
 | `topologybuilder validate` | Validate the topology file without building or deploying anything. |
 | `topologybuilder visualize [--detail \| --tree]` | Build the topology graph and print a force-directed ASCII diagram; `--tree` prints a colored tree of each device's exact interface-to-interface connections instead, and `--detail` prints the full internal representation. |
 | `topologybuilder deploy --address ... --esxi_username ... [--dry_run] [--incremental] [--only_on_gns3 \| --only_on_esxi]` | Validate, build, and deploy the topology to GNS3/ESXi. `--dry_run` prints what would happen without changing anything. `--incremental` reuses existing port groups/VMs/GNS3 project/nodes/links instead of recreating them - never removes anything dropped from the topology file. |

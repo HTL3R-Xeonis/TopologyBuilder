@@ -53,6 +53,8 @@ class Settings:
             Settings.TOPOLOGY_FILE = data["topology_file"]
         if "log_file_path" in data:
             Settings.LOG_FILE_PATH = data["log_file_path"]
+        if "generate_max_retries" in data:
+            Settings.GENERATE_MAX_RETRIES = int(data["generate_max_retries"])
 
         if "ip" in esxi:
             Settings.ESXI.IP = esxi["ip"]
@@ -106,6 +108,10 @@ class Settings:
     """If True, only deploys nodes which are in the GNS3 environment."""
     ONLY_ON_ESXI: bool = False
     """"Only deploys nodes which are in the ESXi environment. Still creates Cloud-nodes on GNS3 to ensure possible connections between the ESXi-VMs."""
+    GENERATE_MAX_RETRIES: int = 3
+    """How many times the `generate` command retries requesting a new
+    topology from the Topology Generator API after one fails validation,
+    before giving up."""
 
     class ESXI:
         """Settings related to ESXi."""

@@ -15,6 +15,11 @@
 # every time.
 topology_file: ./topology_example.yaml
 
+# How many times the `generate` command retries requesting a new topology
+# from the Topology Generator API after one fails validation, before
+# giving up.
+generate_max_retries: 3
+
 esxi:
   ip: 10.20.20.202
   username: root

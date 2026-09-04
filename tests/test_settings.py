@@ -32,6 +32,7 @@ def _reset_esxi_gns3_defaults() -> None:
     Settings.GNS3.PORT = 80
     Settings.GNS3.PARENT_INTERFACE = None
     Settings.TOPOLOGY_FILE = "./topology_example.yaml"
+    Settings.GENERATE_MAX_RETRIES = 3
 
 
 @allure.title("initialise_settings wendet jeden unterstützten Schlüssel an")
@@ -49,6 +50,7 @@ def settings_000(tmp_path) -> None:
         tmp_path,
         {
             "topology_file": "./my_topology.yaml",
+            "generate_max_retries": 5,
             "esxi": {
                 "ip": "10.20.20.202",
                 "username": "admin",
@@ -77,6 +79,7 @@ def settings_000(tmp_path) -> None:
         Settings.initialise_settings(path)
 
         assert Settings.TOPOLOGY_FILE == "./my_topology.yaml"
+        assert Settings.GENERATE_MAX_RETRIES == 5
         assert Settings.ESXI.IP == "10.20.20.202"
         assert Settings.ESXI.USERNAME == "admin"
         assert Settings.ESXI.VIRTUAL_SWITCH == "vSwitch1"
@@ -166,6 +169,7 @@ def settings_004(tmp_path) -> None:
     try:
         Settings.initialise_settings(str(path))
         assert Settings.ESXI.IP == "10.20.20.200"
+        assert Settings.GENERATE_MAX_RETRIES == 3
     finally:
         _reset_esxi_gns3_defaults()
 
