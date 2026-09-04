@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 _ITERATIONS = 200
 _SEED = 42
 _CHAR_ASPECT_RATIO = 2.0  # terminal character cells are roughly twice as tall as wide
+_GRAVITY = 0.05  # mild pull toward the canvas center, proportional to distance
 
 
 def _build_adjacency(nodes: dict[str, GenericNode]) -> dict[str, set[str]]:
@@ -93,6 +94,7 @@ def _layout(
     }
 
     k = spread / math.sqrt(len(names))
+    center = spread / 2
 
     for iteration in range(_ITERATIONS):
         temperature = max(width, height) * 0.1 * (1 - iteration / _ITERATIONS)
@@ -129,6 +131,17 @@ def _layout(
                 displacement[name_a][1] -= fy
                 displacement[name_b][0] += fx
                 displacement[name_b][1] += fy
+
+        # Pulls every node toward the canvas center in proportion to its
+        # distance from it. Without this, isolated or loosely-connected
+        # nodes drift arbitrarily far away under pure repulsion, and the
+        # final rescale then fits that whole (mostly empty) bounding box
+        # into the canvas - crushing the actually-connected cluster into a
+        # tiny, unreadable corner.
+        for name in names:
+            x, y = positions[name]
+            displacement[name][0] += (center - x) * _GRAVITY
+            displacement[name][1] += (center - y) * _GRAVITY
 
         for name in names:
             dx, dy = displacement[name]
