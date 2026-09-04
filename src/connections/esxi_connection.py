@@ -575,17 +575,24 @@ class ESXiConnection(GenericConnection):
         forged transmits - required for GNS3's Cloud nodes to bridge in
         topology devices' own MACs through it. ESXi's default security
         policy silently drops that traffic otherwise, with no error on
-        either side.
+        either side. Deduped by VLAN ID so a direct ESXi-to-ESXi link's two
+        interfaces - which share the exact same VirtualLan object, see
+        Graph._assign_vlans - only get one ``_add_port_group`` call
+        instead of two (harmless in a real deploy since that call is
+        idempotent, but a dry run would otherwise print the same "would
+        add" line twice for what is really one port group).
         :param graph: Port groups are based of the VLANs on each ``Interface`` of each ``Node`` in given ``graph``.
         :return:
         :raises RuntimeError: Is thrown when a portgroup already exists  on the ESXi host.
         May also be thrown when no host-system or network-system was found on the ESXi host.
         """
+        seen_vlan_ids: set[int] = set()
         for node in graph.nodes.values():
             for interface in node.interfaces.values():
                 vlan = interface.vlan
-                if vlan is None:
+                if vlan is None or vlan.id in seen_vlan_ids:
                     continue
+                seen_vlan_ids.add(vlan.id)
                 self._add_port_group(vlan)
 
         self.ensure_trunk_port_group_exists()

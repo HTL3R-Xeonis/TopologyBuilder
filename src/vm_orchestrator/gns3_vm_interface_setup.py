@@ -75,14 +75,22 @@ class GNS3VMInterfaceSetup:
         here, the same subinterface name would be created twice - the
         second ``ip link add`` fails since the name already exists, and
         since the script runs with ``set -e``, that aborts every
-        remaining subinterface command in the whole script.
+        remaining subinterface command in the whole script. Such a VLAN
+        also needs no subinterface at all - both vNICs already share the
+        port group directly at the ESXi layer, so nothing on this VLAN
+        ever needs to reach the GNS3 VM's trunk NIC.
         :return:
         """
+        from src.graph import Environment
+
         seen_vlan_ids: set[int] = set()
         for node in graph.nodes.values():
             for interface in node.interfaces.values():
                 vlan = interface.vlan
                 if vlan is None or vlan.id in seen_vlan_ids:
+                    continue
+                neighbour = interface.neighbour
+                if neighbour is not None and neighbour.env == Environment.ON_ESXI:
                     continue
                 seen_vlan_ids.add(vlan.id)
 

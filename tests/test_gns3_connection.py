@@ -556,3 +556,116 @@ def gns3_connection_020() -> None:
     assert is_console_port_collision_error(Exception("Address already in use"))
     assert is_console_port_collision_error(Exception("[Errno 98] ..."))
     assert not is_console_port_collision_error(Exception("500 server error"))
+
+
+@allure.title(
+    "_create_ports_mapping schließt Interfaces auf einem direkten ESXi-ESXi-Link aus"
+)
+@allure.description(
+    "Überprüft, dass _create_ports_mapping ein Interface, dessen Nachbar "
+    "ebenfalls auf ESXi läuft (direkter ESXi-zu-ESXi-Link, siehe "
+    "Graph._assign_vlans), nicht in die Ports-Mapping aufnimmt - diese "
+    "VLAN wird nie über die GNS3-VM geroutet, braucht also keinen Port auf "
+    "dem Cloud-Node"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_021() -> None:
+    from src.graph.blocks.generic_node import GenericNode
+    from src.graph.blocks.vlan import VirtualLan
+
+    Settings.API.LITERAL_API_VALUES = True
+
+    node_a = GenericNode("Ubuntu-Server", "VM", "VM_A")
+    interface_a = node_a.add_interface("ens160")
+    shared_vlan = VirtualLan("VM_A", "ens160")
+    interface_a.vlan = shared_vlan
+
+    node_b = GenericNode("Ubuntu-Server", "VM", "VM_B")
+    interface_b = node_b.add_interface("ens160")
+    interface_b.vlan = shared_vlan
+
+    interface_a.connect_to(node_b)
+    interface_b.connect_to(node_a)
+
+    assert GNS3Connection._create_ports_mapping(node_a) == []
+
+
+@allure.title(
+    "_create_ports_mapping behält Interfaces auf einem ESXi-GNS3-Link, auch bei gemischten Nodes"
+)
+@allure.description(
+    "Überprüft, dass ein ESXi-Node mit zwei Interfaces - eines auf einem "
+    "direkten ESXi-ESXi-Link, eines auf einem Link zu einem GNS3-Node - nur "
+    "das zweite Interface in die Ports-Mapping aufnimmt, statt beide oder "
+    "keines"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_connection_022() -> None:
+    from src.graph.blocks.generic_node import GenericNode
+    from src.graph.blocks.vlan import VirtualLan
+
+    Settings.API.LITERAL_API_VALUES = True
+
+    esxi_node = GenericNode("Ubuntu-Server", "VM", "PC4")
+    direct_interface = esxi_node.add_interface("gi0/0")
+    direct_vlan = VirtualLan("PC4", "gi0/0")
+    direct_interface.vlan = direct_vlan
+
+    other_esxi_node = GenericNode("Ubuntu-Server", "VM", "PC5")
+    other_interface = other_esxi_node.add_interface("gi0/0")
+    other_interface.vlan = direct_vlan
+    direct_interface.connect_to(other_esxi_node)
+    other_interface.connect_to(esxi_node)
+
+    bridged_interface = esxi_node.add_interface("gi0/1")
+    bridged_interface.vlan = VirtualLan("PC4", "gi0/1")
+    gns3_node = GenericNode("Cisco IOSv 15.6(1)T", "ROUTER", "R1")
+    bridged_interface.connect_to(gns3_node)
+
+    ports_mapping = GNS3Connection._create_ports_mapping(esxi_node)
+
+    assert [port["name"] for port in ports_mapping] == ["gi0/1"]
+    assert ports_mapping[0]["port_number"] == 0
+
+
+@allure.title(
+    "create_node erstellt keinen Cloud-Node, wenn alle Edges eines ESXi-Nodes direkte ESXi-ESXi-Links sind"
+)
+@allure.description(
+    "Überprüft, dass create_node None zurückgibt und keinen POST-Request "
+    "schickt, wenn ein ESXi-Node ausschließlich direkte ESXi-ESXi-Links "
+    "hat - er braucht dann gar keinen Cloud-Node in GNS3"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_023() -> None:
+    from src.graph.blocks.generic_node import GenericNode
+    from src.graph.blocks.vlan import VirtualLan
+
+    _reset_settings()
+    Settings.API.LITERAL_API_VALUES = True
+
+    node_a = GenericNode("Ubuntu-Server", "VM", "VM_A")
+    interface_a = node_a.add_interface("ens160")
+    shared_vlan = VirtualLan("VM_A", "ens160")
+    interface_a.vlan = shared_vlan
+
+    node_b = GenericNode("Ubuntu-Server", "VM", "VM_B")
+    interface_b = node_b.add_interface("ens160")
+    interface_b.vlan = shared_vlan
+    interface_a.connect_to(node_b)
+    interface_b.connect_to(node_a)
+
+    conn = GNS3Connection.__new__(GNS3Connection)
+    conn.incremental = False
+
+    with patch.object(GNS3Connection, "post") as mock_post:
+        result = conn.create_node(node_a)
+
+    mock_post.assert_not_called()
+    assert result is None

@@ -109,3 +109,40 @@ def gns3_vm_interface_setup_002() -> None:
     setup._create_subinterface_creation_commands(graph)
 
     assert "type vlan" not in setup.script
+
+
+@allure.title(
+    "_create_subinterface_creation_commands erzeugt gar keinen Befehl für einen direkten ESXi-ESXi-Link"
+)
+@allure.description(
+    "Überprüft, dass ein direkter ESXi-zu-ESXi-Link (beide Interfaces via "
+    "connect_to auf den jeweils anderen Node verweisend, beide Nodes mit "
+    "einem ESXi-Image) überhaupt kein 'ip link add' erzeugt - die VLAN "
+    "existiert rein an der ESXi-Seite, es gibt nichts, das über die GNS3-VM "
+    "geroutet werden müsste"
+)
+@allure.tag("positiv-test", "gns3-vm-interface-setup")
+@allure.feature("gns3_vm_interface_setup")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_vm_interface_setup_003() -> None:
+    _reset_settings()
+
+    node_a = GenericNode("Ubuntu-Server", "VM", "VM_A")
+    interface_a = node_a.add_interface("ens160")
+    shared_vlan = VirtualLan("VM_A", "ens160")
+    interface_a.vlan = shared_vlan
+
+    node_b = GenericNode("Ubuntu-Server", "VM", "VM_B")
+    interface_b = node_b.add_interface("ens160")
+    interface_b.vlan = shared_vlan
+
+    interface_a.connect_to(node_b)
+    interface_b.connect_to(node_a)
+
+    graph = MagicMock()
+    graph.nodes = {"VM_A": node_a, "VM_B": node_b}
+
+    setup = GNS3VMInterfaceSetup(MagicMock(), "eth1")
+    setup._create_subinterface_creation_commands(graph)
+
+    assert "type vlan" not in setup.script

@@ -1022,3 +1022,39 @@ def esxi_connection_041() -> None:
     vm.config.hardware.device = [nic]
 
     assert conn.find_vm_nic_mac_by_port_group(vm, "PG-GNS3-TRUNK") is None
+
+
+@allure.title("initialize_virtual_switch dedupliziert geteilte VLAN-Objekte")
+@allure.description(
+    "Überprüft, dass initialize_virtual_switch _add_port_group nur einmal "
+    "pro eindeutiger VLAN-ID aufruft - ein direkter ESXi-zu-ESXi-Link teilt "
+    "sich dasselbe VirtualLan-Objekt zwischen beiden Interfaces (siehe "
+    "Graph._assign_vlans), und ohne diese Deduplizierung würde ein Dry-Run "
+    "dieselbe 'would add portgroup'-Zeile zweimal ausgeben"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def esxi_connection_042() -> None:
+    from src.graph.blocks.generic_node import GenericNode
+    from src.graph.blocks.vlan import VirtualLan
+
+    conn = _make_esxi_connection()
+    conn._add_port_group = MagicMock()
+    conn.ensure_trunk_port_group_exists = MagicMock()
+
+    node_a = GenericNode("Ubuntu-Server", "VM", "VM_A")
+    interface_a = node_a.add_interface("ens160")
+    shared_vlan = VirtualLan("VM_A", "ens160")
+    interface_a.vlan = shared_vlan
+
+    node_b = GenericNode("Ubuntu-Server", "VM", "VM_B")
+    interface_b = node_b.add_interface("ens160")
+    interface_b.vlan = shared_vlan
+
+    graph = MagicMock()
+    graph.nodes = {"VM_A": node_a, "VM_B": node_b}
+
+    conn.initialize_virtual_switch(graph)
+
+    conn._add_port_group.assert_called_once_with(shared_vlan)

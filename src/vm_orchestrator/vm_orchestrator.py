@@ -215,10 +215,15 @@ class VMOrchestrator:
         Deletes VMs and port groups left over from an earlier deploy of the
         graph's ESXi-hosted nodes, so redeploying doesn't accumulate
         duplicate/renamed VMs or leave a port group behind under the same
-        name but a stale VLAN ID from a previous topology layout.
+        name but a stale VLAN ID from a previous topology layout. Port
+        group names are deduped across all ESXi nodes, not just within
+        one - a direct ESXi-to-ESXi link's two interfaces share the exact
+        same VirtualLan object (see Graph._assign_vlans), so without this
+        the shared port group would get a redundant second delete call.
         :param graph: Graph whose ESXi-hosted nodes' stale resources to delete
         :return:
         """
+        deleted_port_group_names: set[str] = set()
         for node in graph.nodes.values():
             if node.env != Environment.ON_ESXI:
                 continue
@@ -227,8 +232,11 @@ class VMOrchestrator:
                 self.esxi_connection.delete_vm(vm)
 
             for interface in node.interfaces.values():
-                if interface.vlan is not None:
-                    self.esxi_connection.delete_port_group(interface.vlan.name)
+                vlan = interface.vlan
+                if vlan is None or vlan.name in deleted_port_group_names:
+                    continue
+                deleted_port_group_names.add(vlan.name)
+                self.esxi_connection.delete_port_group(vlan.name)
 
     def destroy_graph(self, graph: Graph, project_name: str) -> None:
         """
@@ -551,11 +559,14 @@ class VMOrchestrator:
         Links only those nodes to this node who already exist on GNS3. An
         edge between two ESXi-hosted nodes is skipped - both VMs' vNICs
         already share one port group directly at the ESXi layer (see
-        Graph._assign_vlans), so no GNS3-side link is needed or wanted;
-        both nodes still have their own Cloud node in GNS3 (for their
-        *other* edges, if any), but linking those two Cloud nodes
-        together would be redundant and GNS3 rejects it outright (409
-        Conflict).
+        Graph._assign_vlans), so no GNS3-side link is needed or wanted.
+        Each node still gets its own Cloud node in GNS3 for any *other*
+        edges it has; linking two Cloud nodes together for a direct
+        ESXi-ESXi edge would be redundant and GNS3 rejects it outright
+        (409 Conflict) - and if a node's edges are *all* direct ESXi-ESXi
+        links, it has no Cloud node at all (see GNS3Connection.create_node),
+        so this loop's neighbour.gns3_node_info check naturally skips it
+        too.
         :param gns3_connection: GNS3 API connection
         :param node: Node to connect to the other existing nodes.
         :return:

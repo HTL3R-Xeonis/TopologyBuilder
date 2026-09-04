@@ -269,13 +269,23 @@ class GNS3Connection(APIHandler):
     @staticmethod
     def _create_ports_mapping(node: GenericNode) -> list[dict[str, str]]:
         """
-        Creates a ports mapping for GNS3 to specify the ports for the Cloud node.
+        Creates a ports mapping for GNS3 to specify the ports for the Cloud
+        node. Interfaces on a direct ESXi-to-ESXi edge are excluded - both
+        VMs' vNICs already share one port group directly at the ESXi layer
+        (see Graph._assign_vlans), so that VLAN needs no presence on the
+        GNS3 VM's trunk NIC/Cloud-node bridge at all.
         :param node: Node to create this mapping for.
         :return: Returns a list of dictionaries where each dictionary represents an interface on the Cloud.
         :raises RuntimeError: Is thrown when a vlan, which should exist, does not exist on the corresponding interface in the graph.
         """
+        from src.graph import Environment
+
         ports_mapping = []
-        for port_number, interface in enumerate(node.interfaces.values()):
+        for interface in node.interfaces.values():
+            neighbour = interface.neighbour
+            if neighbour is not None and neighbour.env == Environment.ON_ESXI:
+                continue
+
             vlan = interface.vlan
             if vlan is None:
                 logger.error(
@@ -288,7 +298,7 @@ class GNS3Connection(APIHandler):
                 {
                     "interface": f"{vlan.name}",
                     "name": interface.name,
-                    "port_number": port_number,
+                    "port_number": len(ports_mapping),
                     "type": "ethernet",
                 }
             )
@@ -320,6 +330,11 @@ class GNS3Connection(APIHandler):
 
         if node.env == Environment.ON_ESXI:
             ports_mapping = self._create_ports_mapping(node)
+            if not ports_mapping:
+                # Every edge of this node is a direct ESXi-to-ESXi link -
+                # nothing needs bridging through GNS3 at all, so it gets
+                # no Cloud node.
+                return None
             return self._create_builtin_nodes(node, "Cloud", ports_mapping)
 
         template = self._get_template(node.image)

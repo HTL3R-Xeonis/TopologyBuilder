@@ -1014,3 +1014,38 @@ def vm_orchestrator_030() -> None:
     assert len(results) == 5
     passed = [ok for ok, _ in results]
     assert passed == [True, False, True, False, True]
+
+
+@allure.title(
+    "delete_stale_esxi_resources dedupliziert eine geteilte Port-Group über mehrere Nodes hinweg"
+)
+@allure.description(
+    "Überprüft, dass delete_stale_esxi_resources delete_port_group nur "
+    "einmal aufruft, wenn zwei ESXi-Nodes über einen direkten ESXi-ESXi-"
+    "Link dieselbe Port-Group (dasselbe VirtualLan-Objekt, siehe "
+    "Graph._assign_vlans) teilen, statt sie zweimal - einmal pro Node - "
+    "zum Löschen anzufragen"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.NORMAL)
+def vm_orchestrator_031() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+
+    vm_a = GenericNode("Ubuntu-Server", "VM", "VM_A")
+    interface_a = vm_a.add_interface("ens160")
+    shared_vlan = VirtualLan("VM_A", "ens160")
+    interface_a.vlan = shared_vlan
+
+    vm_b = GenericNode("Ubuntu-Server", "VM", "VM_B")
+    interface_b = vm_b.add_interface("ens160")
+    interface_b.vlan = shared_vlan
+
+    graph = MagicMock()
+    graph.nodes = {"VM_A": vm_a, "VM_B": vm_b}
+
+    esxi_connection.find_vms_matching.return_value = []
+
+    orchestrator.delete_stale_esxi_resources(graph)
+
+    esxi_connection.delete_port_group.assert_called_once_with(shared_vlan.name)
