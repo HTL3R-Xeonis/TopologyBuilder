@@ -171,7 +171,11 @@ def generate(
             continue
 
         tmp_path = Path(
-            tempfile.mkstemp(suffix=".yml", prefix="generated_topology_")[1]
+            tempfile.mkstemp(
+                suffix=".yml",
+                prefix="generated_topology_",
+                dir=output_path.resolve().parent,
+            )[1]
         )
         tmp_path.write_text(result["yaml"])
 
