@@ -244,16 +244,15 @@ class VMOrchestrator:
     def destroy_graph(self, graph: Graph, project_name: str) -> None:
         """
         Tears down a previously deployed topology: deletes its ESXi-hosted
-        VMs/port groups, and its GNS3 project's nodes (GNS3Connection's own
-        constructor already deletes and recreates an existing project by
-        name, which is exactly what's needed here too).
+        VMs/port groups, and deletes its GNS3 project entirely - the
+        project itself no longer exists afterwards, not just its nodes.
         :param graph: Graph whose deployed resources to tear down
-        :param project_name: name of the GNS3 project to clear
+        :param project_name: name of the GNS3 project to delete
         :return:
         """
         logger.info(f"Destroying project '{project_name}'")
         self.delete_stale_esxi_resources(graph)
-        GNS3Connection(self.gns3_vm_ip, Settings.GNS3.PORT, project_name)
+        GNS3Connection.delete_project(self.gns3_vm_ip, Settings.GNS3.PORT, project_name)
         logger.info(f"Destroy complete: project '{project_name}'")
 
     def check_prerequisites(self) -> list[tuple[bool, str]]:

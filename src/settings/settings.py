@@ -163,8 +163,13 @@ class Settings:
         """Username to use for the GNS3 connections."""
         PASSWORD: str | None = os.getenv("GNS3_PASSWORD", None)
         """Password to use for the GNS3 connections."""
-        PROJECT_NAME: str = "tb_gns3_project"
-        """Name of the GNS3 project to work on. If this project already exists on the GNS3 server, it is going to be overwritten."""
+        PROJECT_NAME: str | None = None
+        """Name of the GNS3 project to work on. If this project already
+        exists on the GNS3 server, it is going to be overwritten. None
+        (default) uses the topology file's own stem instead (e.g.
+        'my_lab.yaml' -> project 'my_lab') - see
+        src.cli._resolve_project_name. Set explicitly to use a fixed
+        name regardless of which topology file is active."""
         PORT: int = 80
         """Port of the GNS3 client, where the API requests are expected."""
         PARENT_INTERFACE: str | None = None

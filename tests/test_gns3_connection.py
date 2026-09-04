@@ -721,3 +721,71 @@ def gns3_connection_025() -> None:
     with patch.object(GNS3Connection, "get", return_value=templates):
         with pytest.raises(ValueError):
             conn._get_template("Nonexistent Template")
+
+
+@allure.title("delete_project löscht ein existierendes Projekt")
+@allure.description(
+    "Überprüft, dass delete_project das Projekt per Namen findet und "
+    "einen DELETE-Request an dessen project_id schickt, statt es (wie "
+    "GNS3Connection's Konstruktor) nur zu leeren und neu anzulegen"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_026() -> None:
+    _reset_settings()
+    projects = [{"name": "lab", "project_id": "p1"}]
+    with (
+        patch.object(GNS3Connection, "get", return_value=projects),
+        patch.object(GNS3Connection, "delete") as mock_delete,
+    ):
+        result = GNS3Connection.delete_project("10.20.20.231", 80, "lab")
+
+    mock_delete.assert_called_once_with("http://10.20.20.231:80/v2/projects/p1")
+    assert result is True
+
+
+@allure.title("delete_project ist ein No-Op, wenn kein Projekt mit dem Namen existiert")
+@allure.description(
+    "Überprüft, dass delete_project False zurückgibt und keinen "
+    "DELETE-Request schickt, wenn kein Projekt mit dem gesuchten Namen "
+    "existiert"
+)
+@allure.tag("negativ-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_connection_027() -> None:
+    _reset_settings()
+    with (
+        patch.object(GNS3Connection, "get", return_value=[]),
+        patch.object(GNS3Connection, "delete") as mock_delete,
+    ):
+        result = GNS3Connection.delete_project("10.20.20.231", 80, "lab")
+
+    mock_delete.assert_not_called()
+    assert result is False
+
+
+@allure.title("delete_project löscht nichts im Dry-Run-Modus")
+@allure.description(
+    "Überprüft, dass delete_project im Dry-Run-Modus keinen DELETE-Request "
+    "schickt, obwohl ein passendes Projekt existiert"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_connection_028() -> None:
+    _reset_settings()
+    Settings.IS_DRY_RUN = True
+    projects = [{"name": "lab", "project_id": "p1"}]
+    try:
+        with (
+            patch.object(GNS3Connection, "get", return_value=projects),
+            patch.object(GNS3Connection, "delete") as mock_delete,
+        ):
+            result = GNS3Connection.delete_project("10.20.20.231", 80, "lab")
+    finally:
+        _reset_settings()
+
+    mock_delete.assert_not_called()
+    assert result is True

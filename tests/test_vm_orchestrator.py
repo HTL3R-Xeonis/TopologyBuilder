@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import allure
 import pytest
 
+from src.connections.gns3_connection import GNS3Connection
 from src.graph import Graph
 from src.graph.blocks.generic_node import GenericNode
 from src.graph.blocks.vlan import VirtualLan
@@ -60,14 +61,12 @@ def vm_orchestrator_000() -> None:
     esxi_connection.delete_port_group.assert_called_once_with(interface.vlan.name)
 
 
-@allure.title(
-    "destroy_graph löscht ESXi-Ressourcen und lässt GNS3Connection das Projekt zurücksetzen"
-)
+@allure.title("destroy_graph löscht ESXi-Ressourcen und das GNS3-Projekt selbst")
 @allure.description(
     "Überprüft, dass destroy_graph zuerst delete_stale_esxi_resources "
-    "aufruft und dann eine GNS3Connection mit dem Projektnamen konstruiert "
-    "- deren Konstruktor löscht und erstellt ein bestehendes Projekt bereits "
-    "selbst neu, was für 'destroy' genau das Richtige ist"
+    "aufruft und dann GNS3Connection.delete_project mit dem Projektnamen "
+    "- das Projekt existiert danach nicht mehr, statt nur geleert und neu "
+    "angelegt zu werden"
 )
 @allure.tag("positiv-test", "vm-orchestrator")
 @allure.feature("vm_orchestrator")
@@ -79,12 +78,10 @@ def vm_orchestrator_001() -> None:
     graph = MagicMock()
     graph.nodes = {}
 
-    with patch(
-        "src.vm_orchestrator.vm_orchestrator.GNS3Connection"
-    ) as gns3_connection_cls:
+    with patch.object(GNS3Connection, "delete_project") as mock_delete_project:
         orchestrator.destroy_graph(graph, "lab")
 
-    gns3_connection_cls.assert_called_once_with(
+    mock_delete_project.assert_called_once_with(
         orchestrator.gns3_vm_ip, Settings.GNS3.PORT, "lab"
     )
 

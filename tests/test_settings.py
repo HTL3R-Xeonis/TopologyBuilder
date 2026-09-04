@@ -28,7 +28,7 @@ def _reset_esxi_gns3_defaults() -> None:
     Settings.ESXI.GNS3_VM_NAME = "GNS3 (1)"
     Settings.ESXI.DELETE_UNUSED_VMS = True
     Settings.GNS3.USERNAME = "gns3"
-    Settings.GNS3.PROJECT_NAME = "tb_gns3_project"
+    Settings.GNS3.PROJECT_NAME = None
     Settings.GNS3.PORT = 80
     Settings.GNS3.PARENT_INTERFACE = None
     Settings.TOPOLOGY_FILE = "./topology_example.yaml"

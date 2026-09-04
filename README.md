@@ -156,7 +156,8 @@ whichever is available in your environment.
 | `topologybuilder validate` | Validate the topology file without building or deploying anything. |
 | `topologybuilder visualize [--detail \| --tree]` | Build the topology graph and print a force-directed ASCII diagram; `--tree` prints a colored tree of each device's exact interface-to-interface connections instead, and `--detail` prints the full internal representation. |
 | `topologybuilder deploy --address ... --esxi_username ... [--dry_run] [--incremental] [--only_on_gns3 \| --only_on_esxi]` | Validate, build, and deploy the topology to GNS3/ESXi. `--dry_run` prints what would happen without changing anything. `--incremental` reuses existing port groups/VMs/GNS3 project/nodes/links instead of recreating them - never removes anything dropped from the topology file. |
-| `topologybuilder destroy --address ... --esxi_username ...` | Tear down a previously deployed topology: deletes its ESXi-hosted VMs/port groups and its GNS3 project's nodes. |
+| `topologybuilder generate-deploy "<prompt>" --address ... --esxi_username ... [--output PATH] [same deploy options as above]` | Generates a topology from a prompt exactly like `generate` (including its retry/validation behaviour), then immediately deploys it exactly like `deploy` - only if a valid topology was generated. |
+| `topologybuilder destroy --address ... --esxi_username ...` | Tear down a previously deployed topology: deletes its ESXi-hosted VMs/port groups and its GNS3 project entirely (not just its nodes). |
 | `topologybuilder verify --address ... --esxi_username ...` | Structural health check against a deployed topology (GNS3 nodes started, ESXi VMs powered on with an IP, trunk NIC wiring, port groups present). Not a ping test - this project never assigns IP addresses to nodes, so there's no address to ping. |
 | `topologybuilder doctor --address ... --esxi_username ...` | Read-only preflight check against real infrastructure: vSwitch/trunk port group existence (or whether a deploy would auto-create them), which datastore would be used, GNS3 VM reachability, and Template-API reachability. Never mutates anything. No topology file needed. |
 | `topologybuilder status --address ... --esxi_username ...` | Check connectivity to the ESXi host and GNS3 VM, and list GNS3 projects with each one's node/started counts. No topology file needed. |
@@ -168,6 +169,12 @@ Global options (`--verbosity`/`-v`, `--settings`/`-s`, `--topology`/`-t`,
 `--literal_api_values`/`-l`) go **before** the subcommand name:
 `topologybuilder -v d -t ./my_topology.yaml deploy ...`. Run
 `topologybuilder <command> --help` for a command's full option list.
+
+By default, the GNS3 project a `deploy`/`destroy`/`verify`/`generate-deploy`
+works on is named after the topology file's own stem (e.g.
+`my_lab.yaml` -> project `my_lab`; `generate-deploy` uses its `--output`
+file for this, not `--topology`) - set `gns3.project_name` in
+`settings.yml` for a fixed name instead.
 
 A typical first deploy, with nothing set in `.env`/`settings.yml`:
 

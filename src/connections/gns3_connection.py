@@ -179,6 +179,55 @@ class GNS3Connection(APIHandler):
         """
         return GNS3Connection.get(f"http://{ip}:{port}/v2/projects/{project_id}/links")
 
+    @staticmethod
+    def delete_project(ip: str, port: int, project_name: str) -> bool:
+        """
+        Deletes the named GNS3 project entirely if it exists. Unlike
+        constructing a GNS3Connection for it (which deletes an existing
+        project only to immediately recreate an empty one with the same
+        name), this leaves nothing behind - used by destroy_graph so a
+        destroyed topology's project doesn't linger as an empty shell on
+        the GNS3 server.
+        :param ip: GNS3 IP address
+        :param port: GNS3 API port
+        :param project_name: name of the project to delete
+        :return: True if a matching project was found and deleted, False
+            if no project with that name existed
+        :raises TimeoutError: Is thrown when it takes too long to receive a response.
+        :raises RuntimeError: Is thrown when it fails to collect project information, or when deletion fails.
+        """
+        project = next(
+            (
+                p
+                for p in GNS3Connection.list_all_projects(ip, port)
+                if p.get("name") == project_name
+            ),
+            None,
+        )
+        if project is None:
+            return False
+
+        if Settings.IS_DRY_RUN:
+            Verbosity.volumatic_print(
+                Verbosity.NORMAL, f"Would delete GNS3 project {project_name}"
+            )
+            return True
+        Verbosity.volumatic_print(
+            Verbosity.NORMAL, f"Deletes GNS3 project {project_name}"
+        )
+
+        try:
+            GNS3Connection.delete(
+                f"http://{ip}:{port}/v2/projects/{project['project_id']}"
+            )
+        except requests.exceptions.HTTPError as exc:
+            logger.error(
+                msg
+                := f"Something went wrong with the deletion of GNS3 project '{project_name}' on {ip}"
+            )
+            raise RuntimeError(msg) from exc
+        return True
+
     def _init_project(self, name: str) -> dict[str, Any] | None:
         """
         Create a new GNS3 project. If project already exists, it is deleted

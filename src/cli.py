@@ -95,6 +95,25 @@ def _make_orchestrator() -> VMOrchestrator:
     )
 
 
+def _resolve_project_name(topology_path: Path | str | None = None) -> str:
+    """
+    Returns the GNS3 project name to use: Settings.GNS3.PROJECT_NAME if
+    explicitly set (e.g. via settings.yml's gns3.project_name), otherwise
+    the topology file's own stem (e.g. 'my_lab.yaml' -> 'my_lab') - so a
+    topology's project is always named after its config file unless a
+    fixed name was asked for.
+    :param topology_path: path of the topology file to derive the name
+        from. Defaults to Settings.TOPOLOGY_FILE - pass the actual output
+        path explicitly for a topology just written elsewhere (e.g.
+        generate-deploy's --output).
+    :return: the resolved project name
+    """
+    if Settings.GNS3.PROJECT_NAME is not None:
+        return Settings.GNS3.PROJECT_NAME
+    path = topology_path if topology_path is not None else Settings.TOPOLOGY_FILE
+    return Path(path).stem
+
+
 def _apply_deploy_options(
     only_on_gns3: bool,
     only_on_esxi: bool,
@@ -343,6 +362,7 @@ def deploy(
     _apply_deploy_options(
         only_on_gns3, only_on_esxi, gns3_username, gns3_password, is_dry_run
     )
+    Settings.GNS3.PROJECT_NAME = _resolve_project_name()
 
     validator = TopologyFileValidation(Settings.TOPOLOGY_FILE)
     validator.validate_file()
@@ -431,6 +451,7 @@ def generate_deploy(
     _apply_deploy_options(
         only_on_gns3, only_on_esxi, gns3_username, gns3_password, is_dry_run
     )
+    Settings.GNS3.PROJECT_NAME = _resolve_project_name(output_path)
 
     orchestrator = _make_orchestrator()
 
@@ -473,7 +494,7 @@ def destroy(
     graph = Graph(validator.nodes, validator.edges)
 
     orchestrator = _make_orchestrator()
-    orchestrator.destroy_graph(graph, Settings.GNS3.PROJECT_NAME)
+    orchestrator.destroy_graph(graph, _resolve_project_name())
     typer.secho("Destroy complete.", fg=typer.colors.GREEN)
 
 
@@ -511,7 +532,7 @@ def verify(
     graph = Graph(validator.nodes, validator.edges)
 
     orchestrator = _make_orchestrator()
-    results = orchestrator.verify_graph(graph, Settings.GNS3.PROJECT_NAME)
+    results = orchestrator.verify_graph(graph, _resolve_project_name())
 
     passed = 0
     for ok, description in results:

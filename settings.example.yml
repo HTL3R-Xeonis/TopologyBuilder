@@ -61,8 +61,10 @@ esxi:
 gns3:
   username: gns3
   # Name of the GNS3 project to create/reuse. If it already exists, it is
-  # overwritten on a non-incremental deploy.
-  project_name: tb_gns3_project
+  # overwritten on a non-incremental deploy. Omit this key (or comment it
+  # out) to name the project after the topology file's own stem instead
+  # (e.g. 'my_lab.yaml' -> project 'my_lab') - the default.
+  # project_name: tb_gns3_project
   port: 80
   # Name of the GNS3 VM's own guest-OS interface for its VLAN trunk NIC
   # (not the ESXi port group above - this is the interface name inside the

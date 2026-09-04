@@ -834,3 +834,179 @@ def cli_023(tmp_path) -> None:
         orchestrator_cls.return_value.deploy_graph.call_args.kwargs["incremental"]
         is True
     )
+
+
+@allure.title("deploy-Befehl benennt das GNS3-Projekt nach der Topologie-Datei")
+@allure.description(
+    "Überprüft, dass der deploy-Befehl Settings.GNS3.PROJECT_NAME auf den "
+    "Stem der aktuellen --topology-Datei setzt, wenn kein fester "
+    "project_name konfiguriert ist"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.CRITICAL)
+def cli_024(tmp_path) -> None:
+    topology_path = tmp_path / "my_lab.yaml"
+    topology_path.write_text("nodes: []\nedges: []\n")
+    Settings.GNS3.PROJECT_NAME = None
+    try:
+        with (
+            patch("src.cli.TopologyFileValidation") as validator_cls,
+            patch("src.cli.Graph"),
+            patch("src.cli.VMOrchestrator"),
+        ):
+            validator_cls.return_value.nodes = []
+            validator_cls.return_value.edges = []
+
+            result = runner.invoke(
+                app,
+                [
+                    "-t",
+                    str(topology_path),
+                    "deploy",
+                    "--address",
+                    "10.20.20.202",
+                    "--esxi_username",
+                    "root",
+                    "--esxi_password",
+                    "pw",
+                ],
+            )
+            project_name_during_run = Settings.GNS3.PROJECT_NAME
+    finally:
+        Settings.GNS3.PROJECT_NAME = None
+        Settings.TOPOLOGY_FILE = "./topology_example.yaml"
+
+    assert result.exit_code == 0, result.output
+    assert project_name_during_run == "my_lab"
+
+
+@allure.title("deploy-Befehl respektiert einen explizit konfigurierten Projektnamen")
+@allure.description(
+    "Überprüft, dass der deploy-Befehl einen bereits gesetzten "
+    "Settings.GNS3.PROJECT_NAME nicht durch den Topologie-Datei-Stem "
+    "überschreibt"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.NORMAL)
+def cli_025(tmp_path) -> None:
+    topology_path = tmp_path / "my_lab.yaml"
+    topology_path.write_text("nodes: []\nedges: []\n")
+    Settings.GNS3.PROJECT_NAME = "fixed_name"
+    try:
+        with (
+            patch("src.cli.TopologyFileValidation") as validator_cls,
+            patch("src.cli.Graph"),
+            patch("src.cli.VMOrchestrator"),
+        ):
+            validator_cls.return_value.nodes = []
+            validator_cls.return_value.edges = []
+
+            result = runner.invoke(
+                app,
+                [
+                    "-t",
+                    str(topology_path),
+                    "deploy",
+                    "--address",
+                    "10.20.20.202",
+                    "--esxi_username",
+                    "root",
+                    "--esxi_password",
+                    "pw",
+                ],
+            )
+            project_name_during_run = Settings.GNS3.PROJECT_NAME
+    finally:
+        Settings.GNS3.PROJECT_NAME = None
+        Settings.TOPOLOGY_FILE = "./topology_example.yaml"
+
+    assert result.exit_code == 0, result.output
+    assert project_name_during_run == "fixed_name"
+
+
+@allure.title(
+    "destroy-Befehl übergibt den von der Topologie-Datei abgeleiteten Projektnamen"
+)
+@allure.description(
+    "Überprüft, dass der destroy-Befehl destroy_graph mit dem Stem der "
+    "aktuellen --topology-Datei als Projektnamen aufruft"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.CRITICAL)
+def cli_026(tmp_path) -> None:
+    topology_path = tmp_path / "my_lab.yaml"
+    topology_path.write_text("nodes: []\nedges: []\n")
+    Settings.GNS3.PROJECT_NAME = None
+    try:
+        with (
+            patch("src.cli.TopologyFileValidation"),
+            patch("src.cli.Graph") as graph_cls,
+            patch("src.cli.VMOrchestrator") as orchestrator_cls,
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "-t",
+                    str(topology_path),
+                    "destroy",
+                    "--address",
+                    "10.20.20.202",
+                    "--esxi_username",
+                    "root",
+                    "--esxi_password",
+                    "pw",
+                ],
+            )
+    finally:
+        Settings.GNS3.PROJECT_NAME = None
+        Settings.TOPOLOGY_FILE = "./topology_example.yaml"
+
+    assert result.exit_code == 0, result.output
+    orchestrator_cls.return_value.destroy_graph.assert_called_once_with(
+        graph_cls.return_value, "my_lab"
+    )
+
+
+@allure.title(
+    "generate-deploy benennt das GNS3-Projekt nach der --output-Datei, nicht --topology"
+)
+@allure.description(
+    "Überprüft, dass generate-deploy Settings.GNS3.PROJECT_NAME vom Stem "
+    "der --output-Datei ableitet, in die die generierte Topologie "
+    "geschrieben wird - nicht vom Stem der (möglicherweise andersnamigen) "
+    "--topology-Datei"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.CRITICAL)
+def cli_027(tmp_path) -> None:
+    output_path = tmp_path / "generated_lab.yaml"
+    Settings.GNS3.PROJECT_NAME = None
+    try:
+        with (
+            patch("src.cli.TopologyGeneratorClient.generate_topology") as generate_mock,
+            patch("src.cli.TopologyFileValidation") as validator_cls,
+            patch("src.cli.Graph"),
+            patch("src.cli.VMOrchestrator"),
+        ):
+            generate_mock.return_value = {
+                "yaml": "nodes: []\nedges: []\n",
+                "valid": True,
+                "warnings": [],
+            }
+            validator_cls.return_value.nodes = []
+            validator_cls.return_value.edges = []
+
+            result = runner.invoke(
+                app,
+                ["generate-deploy", "a small lab", "--output", str(output_path)],
+            )
+            project_name_during_run = Settings.GNS3.PROJECT_NAME
+    finally:
+        Settings.GNS3.PROJECT_NAME = None
+
+    assert result.exit_code == 0, result.output
+    assert project_name_during_run == "generated_lab"
