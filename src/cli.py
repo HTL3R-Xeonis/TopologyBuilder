@@ -1,3 +1,4 @@
+import tempfile
 from pathlib import Path
 
 import typer
@@ -131,6 +132,9 @@ def main(
         Settings.API.LITERAL_API_VALUES = literal_api_values
 
 
+GENERATE_MAX_RETRIES = 3
+
+
 @app.command()
 def generate(
     prompt: str = typer.Argument(
@@ -146,25 +150,58 @@ def generate(
 ) -> None:
     """
     Generates a topology file from a natural-language prompt via the
-    Topology Generator API.
+    Topology Generator API, validates it, and prints the resulting graph.
+    Retries generation up to GENERATE_MAX_RETRIES times if the result
+    doesn't validate. Does not deploy the generated topology.
     """
     output_path = output if output is not None else Path(Settings.TOPOLOGY_FILE)
 
-    result = TopologyGeneratorClient.generate_topology(prompt)
+    for attempt in range(1, GENERATE_MAX_RETRIES + 2):
+        result = TopologyGeneratorClient.generate_topology(prompt)
 
-    for warning in result.get("warnings", []):
-        typer.secho(f"Warning: {warning}", fg=typer.colors.YELLOW, err=True)
+        for warning in result.get("warnings", []):
+            typer.secho(f"Warning: {warning}", fg=typer.colors.YELLOW, err=True)
 
-    if not result.get("valid"):
-        typer.secho(
-            "Topology generation failed; no file written.",
-            fg=typer.colors.RED,
-            err=True,
+        if not result.get("valid"):
+            typer.secho(
+                f"Attempt {attempt}: topology generation reported invalid, retrying...",
+                fg=typer.colors.YELLOW,
+                err=True,
+            )
+            continue
+
+        tmp_path = Path(
+            tempfile.mkstemp(suffix=".yml", prefix="generated_topology_")[1]
         )
-        raise typer.Exit(code=1)
+        tmp_path.write_text(result["yaml"])
 
-    output_path.write_text(result["yaml"])
-    typer.echo(f"Wrote generated topology to {output_path}")
+        try:
+            validator = TopologyFileValidation(str(tmp_path))
+            validator.validate_file()
+        except Exception as exc:
+            typer.secho(
+                f"Attempt {attempt}: generated topology failed validation "
+                f"({type(exc).__name__}: {exc}), retrying...",
+                fg=typer.colors.YELLOW,
+                err=True,
+            )
+            tmp_path.unlink(missing_ok=True)
+            continue
+
+        tmp_path.replace(output_path)
+        typer.secho(f"Wrote generated topology to {output_path}", fg=typer.colors.GREEN)
+
+        graph = Graph(validator.nodes, validator.edges)
+        graph.visualize()
+        return
+
+    typer.secho(
+        f"Topology generation failed validation after {GENERATE_MAX_RETRIES} "
+        "retries; no file written.",
+        fg=typer.colors.RED,
+        err=True,
+    )
+    raise typer.Exit(code=1)
 
 
 @app.command()

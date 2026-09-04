@@ -10,7 +10,7 @@ import allure
 
 from typer.testing import CliRunner
 
-from src.cli import app
+from src.cli import GENERATE_MAX_RETRIES, app
 from src.settings import Settings
 
 runner = CliRunner(env={"COLUMNS": "200", "NO_COLOR": "1", "TERM": "dumb"})
@@ -563,11 +563,14 @@ def cli_016() -> None:
     assert "Topology" in result.output
 
 
-@allure.title("generate-Befehl schreibt die generierte Topologie in eine Datei")
+@allure.title(
+    "generate-Befehl validiert die generierte Topologie und zeigt den Graphen"
+)
 @allure.description(
     "Überprüft, dass der generate-Befehl TopologyGeneratorClient."
-    "generate_topology mit dem Prompt aufruft und bei einer gültigen "
-    "Antwort das generierte YAML in die --output-Datei schreibt"
+    "generate_topology mit dem Prompt aufruft, bei einer gültigen Antwort "
+    "das generierte YAML in die --output-Datei schreibt, gegen "
+    "TopologyFileValidation validiert und den resultierenden Graphen anzeigt"
 )
 @allure.tag("positiv-test", "cli")
 @allure.feature("cli")
@@ -575,12 +578,18 @@ def cli_016() -> None:
 def cli_017(tmp_path) -> None:
     output_path = tmp_path / "generated.yaml"
 
-    with patch("src.cli.TopologyGeneratorClient.generate_topology") as generate_mock:
+    with (
+        patch("src.cli.TopologyGeneratorClient.generate_topology") as generate_mock,
+        patch("src.cli.TopologyFileValidation") as validator_cls,
+        patch("src.cli.Graph") as graph_cls,
+    ):
         generate_mock.return_value = {
             "yaml": "nodes: []\nedges: []\n",
             "valid": True,
             "warnings": [],
         }
+        validator_cls.return_value.nodes = []
+        validator_cls.return_value.edges = []
 
         result = runner.invoke(
             app,
@@ -590,13 +599,57 @@ def cli_017(tmp_path) -> None:
     assert result.exit_code == 0, result.output
     generate_mock.assert_called_once_with("a small lab")
     assert output_path.read_text() == "nodes: []\nedges: []\n"
+    validator_cls.return_value.validate_file.assert_called_once()
+    graph_cls.return_value.visualize.assert_called_once()
+
+
+@allure.title(
+    "generate-Befehl fordert bei ungültiger Validierung eine neue Generierung an"
+)
+@allure.description(
+    "Überprüft, dass der generate-Befehl bei einer strukturell ungültigen "
+    "generierten Topologie eine neue Generierung anfordert und bei Erfolg "
+    "im zweiten Versuch die Datei schreibt und den Graphen anzeigt"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.CRITICAL)
+def cli_019(tmp_path) -> None:
+    output_path = tmp_path / "generated.yaml"
+
+    with (
+        patch("src.cli.TopologyGeneratorClient.generate_topology") as generate_mock,
+        patch("src.cli.TopologyFileValidation") as validator_cls,
+        patch("src.cli.Graph") as graph_cls,
+    ):
+        generate_mock.return_value = {
+            "yaml": "nodes: []\nedges: []\n",
+            "valid": True,
+            "warnings": [],
+        }
+        validator_cls.return_value.validate_file.side_effect = [
+            ValueError("image not found"),
+            None,
+        ]
+        validator_cls.return_value.nodes = []
+        validator_cls.return_value.edges = []
+
+        result = runner.invoke(
+            app,
+            ["generate", "a small lab", "--output", str(output_path)],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert generate_mock.call_count == 2
+    assert output_path.read_text() == "nodes: []\nedges: []\n"
+    graph_cls.return_value.visualize.assert_called_once()
 
 
 @allure.title("generate-Befehl schreibt keine Datei, wenn die Generierung ungültig ist")
 @allure.description(
     "Überprüft, dass der generate-Befehl mit Exit-Code 1 abbricht und "
-    "keine Datei schreibt, wenn die Topology-Generator-API 'valid: "
-    "false' meldet"
+    "keine Datei schreibt, wenn die Topology-Generator-API wiederholt "
+    "'valid: false' meldet"
 )
 @allure.tag("negativ-test", "cli")
 @allure.feature("cli")
@@ -618,3 +671,41 @@ def cli_018(tmp_path) -> None:
 
     assert result.exit_code == 1
     assert not output_path.exists()
+    assert generate_mock.call_count == GENERATE_MAX_RETRIES + 1
+
+
+@allure.title(
+    "generate-Befehl schreibt keine Datei, wenn die Validierung nie erfolgreich ist"
+)
+@allure.description(
+    "Überprüft, dass der generate-Befehl nach GENERATE_MAX_RETRIES "
+    "Wiederholungen mit Exit-Code 1 abbricht und keine Datei schreibt, "
+    "wenn die generierte Topologie jedes Mal strukturell ungültig ist"
+)
+@allure.tag("negativ-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.CRITICAL)
+def cli_020(tmp_path) -> None:
+    output_path = tmp_path / "generated.yaml"
+
+    with (
+        patch("src.cli.TopologyGeneratorClient.generate_topology") as generate_mock,
+        patch("src.cli.TopologyFileValidation") as validator_cls,
+    ):
+        generate_mock.return_value = {
+            "yaml": "nodes: []\nedges: []\n",
+            "valid": True,
+            "warnings": [],
+        }
+        validator_cls.return_value.validate_file.side_effect = ValueError(
+            "image not found"
+        )
+
+        result = runner.invoke(
+            app,
+            ["generate", "a small lab", "--output", str(output_path)],
+        )
+
+    assert result.exit_code == 1
+    assert not output_path.exists()
+    assert generate_mock.call_count == GENERATE_MAX_RETRIES + 1
