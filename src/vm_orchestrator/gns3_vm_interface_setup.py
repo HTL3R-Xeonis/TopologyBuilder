@@ -97,18 +97,18 @@ class GNS3VMInterfaceSetup:
                 if Settings.IS_DRY_RUN:
                     Verbosity.volumatic_print(
                         Verbosity.NORMAL,
-                        f"Would create subinterface {vlan.name} with vlan {vlan.id}",
+                        f"Would create subinterface {vlan.subinterface_name} with vlan {vlan.id}",
                     )
                     continue
                 Verbosity.volumatic_print(
                     Verbosity.NORMAL,
-                    f"Creates subinterface {vlan.name} with vlan {vlan.id}",
+                    f"Creates subinterface {vlan.subinterface_name} with vlan {vlan.id}",
                 )
                 # ----------------------------------------------------------------------------------------------------------
 
                 self.script += (
-                    f"ip link add link {self.parent_interface} name {vlan.name} type vlan id {vlan.id}\n"
-                    + f"ip link set {vlan.name} up\n"
+                    f"ip link add link {self.parent_interface} name {vlan.subinterface_name} type vlan id {vlan.id}\n"
+                    + f"ip link set {vlan.subinterface_name} up\n"
                 )
 
     def initialize_commands(self, graph: Graph) -> None:

@@ -51,7 +51,7 @@ def gns3_vm_interface_setup_000() -> None:
     setup = GNS3VMInterfaceSetup(MagicMock(), "eth1")
     setup._create_subinterface_creation_commands(graph)
 
-    assert setup.script.count(f"name {shared_vlan.name} type vlan") == 1
+    assert setup.script.count(f"name {shared_vlan.subinterface_name} type vlan") == 1
 
 
 @allure.title(
@@ -84,8 +84,8 @@ def gns3_vm_interface_setup_001() -> None:
     setup._create_subinterface_creation_commands(graph)
 
     assert setup.script.count("type vlan") == 2
-    assert f"name {interface_a.vlan.name} type vlan" in setup.script
-    assert f"name {interface_b.vlan.name} type vlan" in setup.script
+    assert f"name {interface_a.vlan.subinterface_name} type vlan" in setup.script
+    assert f"name {interface_b.vlan.subinterface_name} type vlan" in setup.script
 
 
 @allure.title("_create_subinterface_creation_commands überspringt Interfaces ohne VLAN")
@@ -146,3 +146,38 @@ def gns3_vm_interface_setup_003() -> None:
     setup._create_subinterface_creation_commands(graph)
 
     assert "type vlan" not in setup.script
+
+
+@allure.title(
+    "_create_subinterface_creation_commands bleibt unter dem Linux-ifname-Limit"
+)
+@allure.description(
+    "Überprüft, dass ein langer Node-/Interface-Name (z.B. 'SERVER-VM1' + "
+    "'gi0/1', zusammen 16 Zeichen als 'SERVER-VM1_gi0-1' - länger als "
+    "Linux' 15-Zeichen-IFNAMSIZ-Limit) keinen zu langen Subinterface-Namen "
+    "erzeugt. Reale 'ip link add' schlug live mit 'not a valid ifname' "
+    "fehl, bevor VirtualLan.subinterface_name eingeführt wurde"
+)
+@allure.tag("negativ-test", "gns3-vm-interface-setup")
+@allure.feature("gns3_vm_interface_setup")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_vm_interface_setup_004() -> None:
+    _reset_settings()
+    VirtualLan.reset()
+
+    node = GenericNode("Ubuntu-Server", "VM", "SERVER-VM1")
+    interface = node.add_interface("gi0/1")
+    vlan = VirtualLan("SERVER-VM1", "gi0/1")
+    interface.vlan = vlan
+
+    assert len(vlan.name) > 15, "test setup should reproduce a too-long name"
+    assert len(vlan.subinterface_name) <= 15
+
+    graph = MagicMock()
+    graph.nodes = {"SERVER-VM1": node}
+
+    setup = GNS3VMInterfaceSetup(MagicMock(), "eth1")
+    setup._create_subinterface_creation_commands(graph)
+
+    assert f"name {vlan.subinterface_name} type vlan" in setup.script
+    assert vlan.name not in setup.script

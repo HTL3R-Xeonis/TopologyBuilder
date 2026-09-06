@@ -353,7 +353,7 @@ class GNS3Connection(APIHandler):
 
             ports_mapping.append(
                 {
-                    "interface": f"{vlan.name}",
+                    "interface": vlan.subinterface_name,
                     "name": interface.name,
                     "port_number": len(ports_mapping),
                     "type": "ethernet",

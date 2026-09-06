@@ -51,9 +51,28 @@ class VirtualLan:
         """
         Name of this vlan object.
         It is the result of the node_name and interface_name attributes passed at the creation of this object.
+        Used as the ESXi port group name - vSphere allows long names, so
+        no length constraint applies here. For the GNS3 VM's own Linux
+        subinterface, use `subinterface_name` instead.
         :return: Returns this attribute
         """
         return self._name
+
+    @property
+    def subinterface_name(self) -> str:
+        """
+        Name for this VLAN's subinterface on the GNS3 VM's own guest OS -
+        deliberately distinct from `name` (the ESXi port group name).
+        Linux interface names are capped at 15 characters (IFNAMSIZ), so
+        `name` (built from node_name + interface_name, unbounded length)
+        is not safe to use here - a long node/interface name combination
+        makes `ip link add ... name <name>` fail with "not a valid
+        ifname". Derived from `id` alone instead, which is always a short
+        (2-4093) integer, so this stays short and unique regardless of
+        how long the node/interface names are.
+        :return: a short, Linux-ifname-safe subinterface name
+        """
+        return f"vlan{self.id}"
 
     def __str__(self) -> str:
         """
