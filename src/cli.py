@@ -510,11 +510,12 @@ def verify(
 ) -> None:
     """
     Runs a structural health check against a deployed topology: confirms
-    every GNS3 node is started, every ESXi VM is powered on and reports an
-    IP, the trunk NIC is wired correctly, and both sides of a link agree
-    on VLAN ID. This is NOT a connectivity/ping test - this project never
-    assigns an IP address to any node from its own config, so there is no
-    address to ping.
+    every GNS3 node is started, every ESXi VM is powered on, the trunk NIC
+    is wired correctly, and both sides of a link agree on VLAN ID. This is
+    NOT a connectivity/ping test - this project never assigns an IP address
+    to any node from its own config, so there is no address to ping; an
+    ESXi VM's IP (if VMware Tools reports one) is shown for information
+    only and never fails the check.
     """
     _apply_esxi_options(
         address,

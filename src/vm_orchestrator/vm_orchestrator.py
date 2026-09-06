@@ -380,8 +380,10 @@ class VMOrchestrator:
         address to any node from its own config, so there is no address to
         ping for either side of an edge. Checks: the GNS3 VM's trunk NIC is
         wired to ``Settings.ESXI.TRUNK_PORT_GROUP``; every GNS3-hosted node
-        is 'started'; every ESXi-hosted VM is powered on and reports an IP
-        via VMware Tools; both sides of a direct ESXi-ESXi link agree on
+        is 'started'; every ESXi-hosted VM is powered on (its IP via VMware
+        Tools, if any, is reported for information only - a topology's VLAN
+        has no DHCP server, so a VM not reporting one is normal, not a
+        failure); both sides of a direct ESXi-ESXi link agree on
         VLAN ID; an ESXi<->GNS3 bridge's Cloud node exists (named after the
         ESXi node, per create_node's own convention); and a GNS3-internal
         link actually exists between the two node IDs.
@@ -461,12 +463,17 @@ class VMOrchestrator:
                 elif not self.esxi_connection.is_vm_powered_on(vm):
                     results.append((False, f"ESXi VM '{name}': not powered on"))
                 else:
+                    # A VM not reporting an IP is expected, not a failure -
+                    # topology VLANs have no DHCP server, so most VMs never
+                    # get one unless their OVA template has a static IP
+                    # baked in. Reported for information only.
                     ip_address = self.esxi_connection.get_vm_ip_address(name)
                     if ip_address is None:
                         results.append(
                             (
-                                False,
-                                f"ESXi VM '{name}': powered on, but no IP reported yet",
+                                True,
+                                f"ESXi VM '{name}': powered on, no IP reported "
+                                "(expected - topology VLANs have no DHCP)",
                             )
                         )
                     else:
