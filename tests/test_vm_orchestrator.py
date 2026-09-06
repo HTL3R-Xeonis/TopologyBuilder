@@ -177,33 +177,6 @@ def vm_orchestrator_004() -> None:
     assert any(not ok and "VM1" in d and "not found" in d for ok, d in results)
 
 
-@allure.title("verify_graph meldet eine fehlende IP als bestanden, nicht als Fehler")
-@allure.description(
-    "Überprüft, dass verify_graph eine powered-on ESXi-VM ohne gemeldete "
-    "IP als bestandenen (informativen) Check meldet statt als Fehler - "
-    "Topologie-VLANs haben keinen DHCP-Server, daher ist eine fehlende IP "
-    "der Normalfall, kein Anzeichen für ein Deploy-Problem"
-)
-@allure.tag("positiv-test", "vm-orchestrator")
-@allure.feature("vm_orchestrator")
-@allure.severity(allure.severity_level.NORMAL)
-def vm_orchestrator_004b() -> None:
-    Settings.API.LITERAL_API_VALUES = True
-    orchestrator, esxi_connection = _make_orchestrator()
-    esxi_connection.list_port_groups.return_value = []
-    esxi_connection.get_vm.return_value = MagicMock()
-    esxi_connection.is_vm_powered_on.return_value = True
-    esxi_connection.get_vm_ip_address.return_value = None
-
-    graph = Graph([{"image": "Ubuntu-Server", "role": "VM", "names": ["VM1"]}], [])
-
-    with patch("src.vm_orchestrator.vm_orchestrator.GNS3Connection") as gns3_cls:
-        gns3_cls.list_all_projects.return_value = []
-        results = orchestrator.verify_graph(graph, "lab")
-
-    assert any(ok and "VM1" in d and "no IP reported" in d for ok, d in results)
-
-
 @allure.title(
     "verify_graph erkennt eine fehlende Port-Group bei einem direkten ESXi-Link"
 )
@@ -1073,3 +1046,30 @@ def vm_orchestrator_031() -> None:
     orchestrator.delete_stale_esxi_resources(graph)
 
     esxi_connection.delete_port_group.assert_called_once_with(shared_vlan.name)
+
+
+@allure.title("verify_graph meldet eine fehlende IP als bestanden, nicht als Fehler")
+@allure.description(
+    "Überprüft, dass verify_graph eine powered-on ESXi-VM ohne gemeldete "
+    "IP als bestandenen (informativen) Check meldet statt als Fehler - "
+    "Topologie-VLANs haben keinen DHCP-Server, daher ist eine fehlende IP "
+    "der Normalfall, kein Anzeichen für ein Deploy-Problem"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.NORMAL)
+def vm_orchestrator_032() -> None:
+    Settings.API.LITERAL_API_VALUES = True
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.list_port_groups.return_value = []
+    esxi_connection.get_vm.return_value = MagicMock()
+    esxi_connection.is_vm_powered_on.return_value = True
+    esxi_connection.get_vm_ip_address.return_value = None
+
+    graph = Graph([{"image": "Ubuntu-Server", "role": "VM", "names": ["VM1"]}], [])
+
+    with patch("src.vm_orchestrator.vm_orchestrator.GNS3Connection") as gns3_cls:
+        gns3_cls.list_all_projects.return_value = []
+        results = orchestrator.verify_graph(graph, "lab")
+
+    assert any(ok and "VM1" in d and "no IP reported" in d for ok, d in results)
