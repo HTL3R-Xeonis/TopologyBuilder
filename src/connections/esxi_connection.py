@@ -1,13 +1,14 @@
 import atexit
 import ssl
-from typing import Optional, TypeVar
+from typing import TypeVar
 
 import pyVmomi
 from loguru import logger
-from pyVim.connect import SmartConnect, Disconnect
+from pyVim.connect import Disconnect, SmartConnect
 from pyVmomi import vim, vmodl
 
 from src.settings import Settings, Verbosity
+
 from .generic_connection import GenericConnection
 
 T = TypeVar("T")
@@ -79,7 +80,7 @@ class ESXiConnection(GenericConnection):
         return instance
 
     def get_object_by_name(
-        self, vim_type: type[T], name: str = None, get_all: bool = False
+        self, vim_type: type[T], name: str | None = None, get_all: bool = False
     ) -> T | None | list[T]:
         """
         Finds the object on the ServiceInstance by type and name.
@@ -119,9 +120,9 @@ class ESXiConnection(GenericConnection):
         """
         host = self.get_object_by_name(vim.HostSystem)
         config = getattr(host, "config", vim.host.ConfigInfo)
-        vswitch = getattr(config.network, "vswitch", [])
+        virtual_switches = getattr(config.network, "vswitch", [])
 
-        for vswitch in vswitch:
+        for vswitch in virtual_switches:
             if (
                 isinstance(vswitch, vim.host.VirtualSwitch)
                 and vswitch.name == virtual_switch_name
@@ -308,7 +309,7 @@ class ESXiConnection(GenericConnection):
         """
         return self.get_object_by_name(vim.VirtualMachine, vm_name)
 
-    def get_vm_ip_address(self, vm_name: str) -> Optional[str]:
+    def get_vm_ip_address(self, vm_name: str) -> str | None:
         """
         Returns the first IPv4 Address it finds on the VM with given name.
         Ignores loopback, link locals and multicast addresses.

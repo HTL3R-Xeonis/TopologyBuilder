@@ -3,11 +3,12 @@ __date__ = "17/07/2026"
 __license__ = "GNU GPLv3"
 __status__ = "In development"
 
+import networkx as nx
+from loguru import logger
+from phart import ASCIIRenderer, LayoutOptions, NodeStyle
+
 from src.graph.blocks import GenericNode
 from src.graph.blocks.formatter import nested_formatter
-from loguru import logger
-import networkx as nx
-from phart import ASCIIRenderer, LayoutOptions, NodeStyle
 
 
 class Graph:

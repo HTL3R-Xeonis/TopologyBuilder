@@ -2,11 +2,10 @@ from pathlib import Path
 
 import typer
 
-from src.settings import Settings, Verbosity
 from src.graph import Graph
-from src.topology_file_validation import TopologyFileValidation
 from src.orchestrator.graph_orchestrator import GraphOrchestrator
-
+from src.settings import Settings, Verbosity
+from src.topology_file_validation import TopologyFileValidation
 
 app = typer.Typer(
     name="TopologyBuilder",

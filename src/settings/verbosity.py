@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from enum import Enum
 
 
@@ -21,8 +23,7 @@ class Verbosity(str, Enum):
         for v in Verbosity:
             if v.value == value:
                 return v
-        else:
-            return None
+        return None
 
     @property
     def level(self) -> int:

@@ -1,8 +1,8 @@
 from typing import Any
 
 from loguru import logger
-from pyVmomi import vim
 from pyVim.task import WaitForTasks
+from pyVmomi import vim
 
 from src.connections import APIHandler
 from src.connections.esxi_connection import ESXiConnection
@@ -218,8 +218,7 @@ class ESXiOrchestrator:
                     backing, vim.vm.device.VirtualEthernetCard.NetworkBackingInfo
                 ):
                     continue
-                print(backing.deviceName)
-                if not backing.deviceName == port_group_name:
+                if backing.deviceName != port_group_name:
                     continue
                 tasks.append(vm.Destroy_Task())
 

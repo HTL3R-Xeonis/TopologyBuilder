@@ -8,9 +8,12 @@ __license__ = "GNU GPLv3"
 __status__ = "In development"
 
 from pathlib import Path
+from typing import ClassVar
+
 import yaml
-from src.connections.api_handler import APIHandler
 from loguru import logger
+
+from src.connections.api_handler import APIHandler
 
 
 class TopologyFileValidation:
@@ -18,7 +21,7 @@ class TopologyFileValidation:
     Class to handle and validate the contents of the config file
     """
 
-    __VALID_ROLES = ["PC", "VM", "ROUTER", "SWITCH", "FW"]
+    __VALID_ROLES: ClassVar[tuple[str, ...]] = ("PC", "VM", "ROUTER", "SWITCH", "FW")
 
     def __init__(self, path: str) -> None:
         """
@@ -37,9 +40,7 @@ class TopologyFileValidation:
         if not Path(path).exists():
             logger.error(msg := f"File does not exists. Current path: {path}")
             raise FileNotFoundError(msg)
-        if not Path(path).is_file() and not (
-            path.endswith(".yml") or path.endswith(".yaml")
-        ):
+        if not Path(path).is_file() and not path.endswith((".yml", ".yaml")):
             logger.error(
                 msg
                 := f"Path does not link to *.yaml or *.yml file. Current path: {path}"
@@ -151,12 +152,14 @@ class TopologyFileValidation:
                 := f"Image must be of type string. Current type: {type(node_group['image'])}"
             )
             raise TypeError(msg)
-        if self._available_templates is not None:
-            if node_group["image"] not in self._available_templates:
-                logger.error(
-                    msg := f"Image {node_group['image']} not found on ESXi or GNS3"
-                )
-                raise ValueError(msg)
+        if (
+            self._available_templates is not None
+            and node_group["image"] not in self._available_templates
+        ):
+            logger.error(
+                msg := f"Image {node_group['image']} not found on ESXi or GNS3"
+            )
+            raise ValueError(msg)
 
         if not isinstance(node_group["role"], str):
             logger.error(
@@ -187,10 +190,10 @@ class TopologyFileValidation:
                     := f"Entries of 'names' must be of type str. Current type: {type(name)}"
                 )
                 raise TypeError(msg)
-        if not len(names) == len(set(names)):
+        if len(names) != len(set(names)):
             logger.error(
                 msg
-                := f"Node names must be distinct. Not unique names: {set([n for n in names if names.count(n) > 1])}"
+                := f"Node names must be distinct. Not unique names: { {n for n in names if names.count(n) > 1} }"
             )
             raise ValueError(msg)
         if set(names) & self.__node_names:

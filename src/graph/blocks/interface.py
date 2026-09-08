@@ -6,8 +6,9 @@ if TYPE_CHECKING:
     from .generic_node import GenericNode
 
 from src.graph.environment import Environment
-from .vlan import VirtualLan
+
 from .formatter import nested_formatter
+from .vlan import VirtualLan
 
 __autor__ = "Leon Eiböck"
 __date__ = "17/07/2026"

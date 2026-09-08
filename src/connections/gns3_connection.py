@@ -1,15 +1,17 @@
-from typing import Any
-from typing import TYPE_CHECKING
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 import requests
 
-from ..settings import Verbosity, Settings
+from src.settings import Settings, Verbosity
 
 if TYPE_CHECKING:
     from src.graph.blocks import GenericNode, Interface
 
-from .api_handler import APIHandler
 from loguru import logger
+
+from .api_handler import APIHandler
 
 
 # @TODO shortform and longform / better name dedection
@@ -176,7 +178,7 @@ class GNS3Connection(APIHandler):
         self,
         node: GenericNode,
         template: str | dict[str, Any],
-        ports_mapping: list = None,
+        ports_mapping: list | None = None,
     ) -> dict[str, Any] | None:
         """
         Creates new GNS3 built-in nodes in the GNS3 project.

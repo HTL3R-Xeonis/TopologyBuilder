@@ -1,10 +1,10 @@
 import json
-from typing import Set
 
 import requests
 from loguru import logger
 
 from src.settings import Settings
+
 from .generic_connection import GenericConnection
 
 
@@ -124,7 +124,7 @@ class APIHandler:
             raise
 
     @staticmethod
-    def get_esxi_template_names() -> Set[str]:
+    def get_esxi_template_names() -> set[str]:
         """
         Returns a set of available template names for ESXi.
         :return: The set containing received template names.
@@ -146,10 +146,10 @@ class APIHandler:
         data = APIHandler.get(
             f"{Settings.API.ESXI_TEMPLATE_SERVER_URL}/api/search?name={template_name}"
         )
-        return next((r for r in data["results"]))["template"]["file"]
+        return next(r for r in data["results"])["template"]["file"]
 
     @staticmethod
-    def get_gns3_template_names() -> Set[str]:
+    def get_gns3_template_names() -> set[str]:
         """
         Returns a set of available template names for GNS3
         :return: The set containing received template names.

@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 from enum import Enum
 from functools import lru_cache
-from typing import Tuple, Literal
+from typing import Literal
 
 from src.connections.api_handler import APIHandler
 
@@ -16,7 +18,7 @@ class Environment(Enum):
 
     @staticmethod
     @lru_cache(maxsize=1)
-    def _get_templates() -> Tuple[frozenset, frozenset]:
+    def _get_templates() -> tuple[frozenset, frozenset]:
         """
         Returns a tuple Frozen-sets with the available template names on GNS3 and ESXi
         :return: Tupel with two Frozen-sets. First index is for GNS3, second is for ESXi

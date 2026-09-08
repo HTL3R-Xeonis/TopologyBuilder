@@ -1,6 +1,7 @@
-from src.connections.generic_connection import GenericConnection
 import paramiko
 from loguru import logger
+
+from src.connections.generic_connection import GenericConnection
 
 
 class SSHConnection(GenericConnection, paramiko.SSHClient):

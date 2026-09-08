@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any
 
 import yaml
 from dotenv import load_dotenv
@@ -9,10 +9,9 @@ from loguru import logger
 from .verbosity import Verbosity
 
 load_dotenv()
-T = TypeVar("T")
 
 
-def check_value_type(value: Any, value_type: type[T] | tuple[type[T], ...]) -> T:
+def check_value_type[T](value: Any, value_type: type[T] | tuple[type[T], ...]) -> T:
     """
     Checks given value type and returns the value.
     :param value: Value to check.
@@ -25,7 +24,7 @@ def check_value_type(value: Any, value_type: type[T] | tuple[type[T], ...]) -> T
             msg
             := f"Setting value {value} is of wrong type {type(value)}. Should be of type {value_type}."
         )
-        raise ValueError(msg)
+        raise TypeError(msg)
     return value
 
 
@@ -39,16 +38,16 @@ class Settings:
         Settings.initialise_settings()
 
     @staticmethod
-    def is_fully_initialised(cls, class_path="") -> bool:
+    def is_fully_initialised(cls_object: Any, class_path="") -> bool:
         """
         Checks recursively whether the class attributes are all initialized, meaning not None.
-        :param cls: Class to check.
+        :param cls_object: Class to check.
         :param class_path: Classpath of the nested class.
         :return: True if all attributes are initialized, False otherwise.
         """
         is_it = True
-        class_path = f"{class_path}.{cls.__name__}".lstrip(".")
-        for key, value in vars(cls).items():
+        class_path = f"{class_path}.{cls_object.__name__}".lstrip(".")
+        for key, value in vars(cls_object).items():
             if key.startswith("_"):
                 continue
 
@@ -56,7 +55,7 @@ class Settings:
                 is_it = is_it & Settings.is_fully_initialised(value, class_path)
                 continue
 
-            if value is None and not key.lower() == "password":
+            if value is None and key.lower() != "password":
                 logger.warning(f"{class_path}.{key} is None. May lead to errors.")
 
         return is_it
