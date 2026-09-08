@@ -1,2 +1,11 @@
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = ["typer.Option"]
+
+[tool.pytest.ini_options]
+python_functions = "*_[0-9][0-9][0-9]"
+testpaths = [
+    "tests"
+]
+markers = [
+    "testlink: Custom metadata for TestLink-testcases"
+]

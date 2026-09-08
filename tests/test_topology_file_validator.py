@@ -7,7 +7,6 @@ __date__ = "19/07/2026"
 __license__ = "GNU GPLv3"
 __status__ = "In development"
 
-import allure
 import pytest
 
 from src.settings import Settings
@@ -26,13 +25,13 @@ def add_folder_path(path: str) -> str:
     return TEST_FILE_FOLDER + path
 
 
-@allure.title("Falscher Pfad Datentyp")
-@allure.description(
-    "Überprüft, ob TopologyFileValidation() erkennt, path von typ str ist"
+@pytest.mark.testlink(
+    title="Falscher Pfad Datentyp",
+    description="Überprüft, ob TopologyFileValidation() erkennt, path von typ str ist",
+    tag=["user-input", "negativ-test", "config-file"],
+    feature="config_file",
+    severity="MINOR",
 )
-@allure.tag("user-input", "negativ-test", "config-file")
-@allure.feature("config_file")
-@allure.severity(allure.severity_level.MINOR)
 def conf_file_000() -> None:
     with pytest.raises(
         TypeError,
@@ -41,13 +40,13 @@ def conf_file_000() -> None:
         TopologyFileValidation(5)
 
 
-@allure.title("Datei exestiert nicht")
-@allure.description(
-    "Überprüft, ob TopologyFileValidation() erkennt, ob Datei überhaupt exestiert"
+@pytest.mark.testlink(
+    title="Datei exestiert nicht",
+    description="Überprüft, ob TopologyFileValidation() erkennt, ob Datei überhaupt exestiert",
+    tag=["user-input", "negativ-test", "config-file"],
+    feature="config_file",
+    severity="MINOR",
 )
-@allure.tag("user-input", "negativ-test", "config-file")
-@allure.feature("config_file")
-@allure.severity(allure.severity_level.MINOR)
 def conf_file_001() -> None:
     with pytest.raises(
         FileNotFoundError,
@@ -56,13 +55,13 @@ def conf_file_001() -> None:
         TopologyFileValidation("./not_existing_file")
 
 
-@allure.title("Pfad zu Directory angeben")
-@allure.description(
-    "Überprüft, ob TopologyFileValidation() erkennt, ob der Pfad nicht auf eine Datei zeigt."
+@pytest.mark.testlink(
+    title="Pfad zu Directory angeben",
+    description="Überprüft, ob TopologyFileValidation() erkennt, ob der Pfad nicht auf eine Datei zeigt.",
+    tag=["user-input", "negativ-test", "config-file"],
+    feature="config_file",
+    severity="MINOR",
 )
-@allure.tag("user-input", "negativ-test", "config-file")
-@allure.feature("config_file")
-@allure.severity(allure.severity_level.MINOR)
 def conf_file_002() -> None:
     with pytest.raises(
         ValueError,
@@ -71,25 +70,25 @@ def conf_file_002() -> None:
         TopologyFileValidation("./tests")
 
 
-@allure.title("Richtiges Format validieren")
-@allure.description(
-    "Überprüft, ob TopologyFileValidation.validate_file() die richtige Configurations Datei richtig validiert"
+@pytest.mark.testlink(
+    title="Richtiges Format validieren",
+    description="Überprüft, ob TopologyFileValidation.validate_file() die richtige Configurations Datei richtig validiert",
+    tag=["user-input", "positiv-test", "config-file"],
+    feature="config_file",
+    severity="CRITICAL",
 )
-@allure.tag("user-input", "positiv-test", "config-file")
-@allure.feature("config_file")
-@allure.severity(allure.severity_level.CRITICAL)
 def conf_file_003() -> None:
     c = TopologyFileValidation(add_folder_path("config_file_003.yml"))
     c.validate_file()
 
 
-@allure.title("'nodes' key fehlt")
-@allure.description(
-    "Überprüft, ob TopologyFileValidation.validate_file() erkennt, ob der Dictionary Key 'nodes' fehlt"
+@pytest.mark.testlink(
+    title="'nodes' key fehlt",
+    description="Überprüft, ob TopologyFileValidation.validate_file() erkennt, ob der Dictionary Key 'nodes' fehlt",
+    tag=["user-input", "negativ-test", "config-file"],
+    feature="config_file",
+    severity="MINOR",
 )
-@allure.tag("user-input", "negativ-test", "config-file")
-@allure.feature("config_file")
-@allure.severity(allure.severity_level.MINOR)
 def conf_file_004() -> None:
     c = TopologyFileValidation(add_folder_path("config_file_004.yml"))
     with pytest.raises(
@@ -99,13 +98,13 @@ def conf_file_004() -> None:
         c.validate_file()
 
 
-@allure.title("'edges' key fehlt")
-@allure.description(
-    "Überprüft, ob TopologyFileValidation.validate_file() erkennt, ob der Dictionary Key 'edges' fehlt"
+@pytest.mark.testlink(
+    title="'edges' key fehlt",
+    description="Überprüft, ob TopologyFileValidation.validate_file() erkennt, ob der Dictionary Key 'edges' fehlt",
+    tag=["user-input", "negativ-test", "config-file"],
+    feature="config_file",
+    severity="MINOR",
 )
-@allure.tag("user-input", "negativ-test", "config-file")
-@allure.feature("config_file")
-@allure.severity(allure.severity_level.MINOR)
 def conf_file_005() -> None:
     c = TopologyFileValidation(add_folder_path("config_file_005.yml"))
     with pytest.raises(
@@ -115,11 +114,13 @@ def conf_file_005() -> None:
         c.validate_file()
 
 
-@allure.title("'nodes' value typ falsch")
-@allure.description("Testet ob erkannt wird, dass 'nodes' keine Liste als Value hat")
-@allure.tag("user-input", "negativ-test", "config-file")
-@allure.feature("config_file")
-@allure.severity(allure.severity_level.MINOR)
+@pytest.mark.testlink(
+    title="'nodes' value typ falsch",
+    description="Testet ob erkannt wird, dass 'nodes' keine Liste als Value hat",
+    tag=["user-input", "negativ-test", "config-file"],
+    feature="config_file",
+    severity="MINOR",
+)
 def conf_file_006() -> None:
     c = TopologyFileValidation(add_folder_path("config_file_006.yml"))
     with pytest.raises(
@@ -129,11 +130,13 @@ def conf_file_006() -> None:
         c.validate_file()
 
 
-@allure.title("'edges' value typ falsch")
-@allure.description("Testet ob erkannt wird, dass 'edges' keine Liste als Value hat")
-@allure.tag("user-input", "negativ-test", "config-file")
-@allure.feature("config_file")
-@allure.severity(allure.severity_level.MINOR)
+@pytest.mark.testlink(
+    title="'edges' value typ falsch",
+    description="Testet ob erkannt wird, dass 'edges' keine Liste als Value hat",
+    tag=["user-input", "negativ-test", "config-file"],
+    feature="config_file",
+    severity="MINOR",
+)
 def conf_file_007() -> None:
     c = TopologyFileValidation(add_folder_path("config_file_007.yml"))
     with pytest.raises(
@@ -143,11 +146,13 @@ def conf_file_007() -> None:
         c.validate_file()
 
 
-@allure.title("node_group typ falsch")
-@allure.description("Testet ob erkannt wird, ob node_group den falschen typ hat")
-@allure.tag("user-input", "negativ-test", "config-file")
-@allure.feature("config_file")
-@allure.severity(allure.severity_level.MINOR)
+@pytest.mark.testlink(
+    title="node_group typ falsch",
+    description="Testet ob erkannt wird, ob node_group den falschen typ hat",
+    tag=["user-input", "negativ-test", "config-file"],
+    feature="config_file",
+    severity="MINOR",
+)
 def conf_file_008() -> None:
     c = TopologyFileValidation(add_folder_path("config_file_008.yml"))
     with pytest.raises(
@@ -157,13 +162,13 @@ def conf_file_008() -> None:
         c.validate_file()
 
 
-@allure.title("'image' key nicht in node_group")
-@allure.description(
-    "Testet ob erkannt wird, dass der 'image' key nicht  in node_group ist"
+@pytest.mark.testlink(
+    title="'image' key nicht in node_group",
+    description="Testet ob erkannt wird, dass der 'image' key nicht  in node_group ist",
+    tag=["user-input", "negativ-test", "config-file"],
+    feature="config_file",
+    severity="MINOR",
 )
-@allure.tag("user-input", "negativ-test", "config-file")
-@allure.feature("config_file")
-@allure.severity(allure.severity_level.MINOR)
 def conf_file_009() -> None:
     c = TopologyFileValidation(add_folder_path("config_file_009.yml"))
     with pytest.raises(
@@ -173,13 +178,13 @@ def conf_file_009() -> None:
         c.validate_file()
 
 
-@allure.title("'role' key nicht in node_group")
-@allure.description(
-    "Testet ob erkannt wird, dass der 'role' key nicht  in node_group ist"
+@pytest.mark.testlink(
+    title="'role' key nicht in node_group",
+    description="Testet ob erkannt wird, dass der 'role' key nicht  in node_group ist",
+    tag=["user-input", "negativ-test", "config-file"],
+    feature="config_file",
+    severity="MINOR",
 )
-@allure.tag("user-input", "negativ-test", "config-file")
-@allure.feature("config_file")
-@allure.severity(allure.severity_level.MINOR)
 def conf_file_010() -> None:
     c = TopologyFileValidation(add_folder_path("config_file_010.yml"))
     with pytest.raises(
@@ -189,13 +194,13 @@ def conf_file_010() -> None:
         c.validate_file()
 
 
-@allure.title("'names' key nicht in node_group")
-@allure.description(
-    "Testet ob erkannt wird, dass der 'names' key nicht  in node_group ist"
+@pytest.mark.testlink(
+    title="'names' key nicht in node_group",
+    description="Testet ob erkannt wird, dass der 'names' key nicht  in node_group ist",
+    tag=["user-input", "negativ-test", "config-file"],
+    feature="config_file",
+    severity="MINOR",
 )
-@allure.tag("user-input", "negativ-test", "config-file")
-@allure.feature("config_file")
-@allure.severity(allure.severity_level.MINOR)
 def conf_file_011() -> None:
     c = TopologyFileValidation(add_folder_path("config_file_011.yml"))
     with pytest.raises(
@@ -205,11 +210,13 @@ def conf_file_011() -> None:
         c.validate_file()
 
 
-@allure.title("'image' value typ falsch")
-@allure.description("Testet ob erkannt wird, ob der 'image' value typ falsch ist")
-@allure.tag("user-input", "negativ-test", "config-file")
-@allure.feature("config_file")
-@allure.severity(allure.severity_level.MINOR)
+@pytest.mark.testlink(
+    title="'image' value typ falsch",
+    description="Testet ob erkannt wird, ob der 'image' value typ falsch ist",
+    tag=["user-input", "negativ-test", "config-file"],
+    feature="config_file",
+    severity="MINOR",
+)
 def conf_file_012() -> None:
     c = TopologyFileValidation(add_folder_path("config_file_012.yml"))
     with pytest.raises(
@@ -219,11 +226,13 @@ def conf_file_012() -> None:
         c.validate_file()
 
 
-@allure.title("'role' value typ ist falsch")
-@allure.description("Testet ob erkannt wird, ob der 'role' value typ falsch ist")
-@allure.tag("user-input", "negativ-test", "config-file")
-@allure.feature("config_file")
-@allure.severity(allure.severity_level.MINOR)
+@pytest.mark.testlink(
+    title="'role' value typ ist falsch",
+    description="Testet ob erkannt wird, ob der 'role' value typ falsch ist",
+    tag=["user-input", "negativ-test", "config-file"],
+    feature="config_file",
+    severity="MINOR",
+)
 def conf_file_013() -> None:
     c = TopologyFileValidation(add_folder_path("config_file_013.yml"))
     with pytest.raises(
@@ -233,11 +242,13 @@ def conf_file_013() -> None:
         c.validate_file()
 
 
-@allure.title("'role' value ungültig")
-@allure.description("Testet ob erkannt wird, ob der 'role' value ungültig ist")
-@allure.tag("user-input", "negativ-test", "config-file")
-@allure.feature("config_file")
-@allure.severity(allure.severity_level.MINOR)
+@pytest.mark.testlink(
+    title="'role' value ungültig",
+    description="Testet ob erkannt wird, ob der 'role' value ungültig ist",
+    tag=["user-input", "negativ-test", "config-file"],
+    feature="config_file",
+    severity="MINOR",
+)
 def conf_file_014() -> None:
     c = TopologyFileValidation(add_folder_path("config_file_014.yml"))
     with pytest.raises(
@@ -247,11 +258,13 @@ def conf_file_014() -> None:
         c.validate_file()
 
 
-@allure.title("'names' value typ falsch")
-@allure.description("Testet ob erkannt wird, ob der 'names' value typ falsch ist")
-@allure.tag("user-input", "negativ-test", "config-file")
-@allure.feature("config_file")
-@allure.severity(allure.severity_level.MINOR)
+@pytest.mark.testlink(
+    title="'names' value typ falsch",
+    description="Testet ob erkannt wird, ob der 'names' value typ falsch ist",
+    tag=["user-input", "negativ-test", "config-file"],
+    feature="config_file",
+    severity="MINOR",
+)
 def conf_file_015() -> None:
     c = TopologyFileValidation(add_folder_path("config_file_015.yml"))
     with pytest.raises(
@@ -261,11 +274,13 @@ def conf_file_015() -> None:
         c.validate_file()
 
 
-@allure.title("name value ist None")
-@allure.description("Testet ob erkannt wird, ob ein 'names' value von typ None ist")
-@allure.tag("user-input", "negativ-test", "config-file")
-@allure.feature("config_file")
-@allure.severity(allure.severity_level.MINOR)
+@pytest.mark.testlink(
+    title="name value ist None",
+    description="Testet ob erkannt wird, ob ein 'names' value von typ None ist",
+    tag=["user-input", "negativ-test", "config-file"],
+    feature="config_file",
+    severity="MINOR",
+)
 def conf_file_016() -> None:
     c = TopologyFileValidation(add_folder_path("config_file_016.yml"))
     with pytest.raises(
@@ -275,11 +290,13 @@ def conf_file_016() -> None:
         c.validate_file()
 
 
-@allure.title("'names' doppelte namen")
-@allure.description("Testet ob erkannt wird, ob in 'names' ein value doppelt vorkommt")
-@allure.tag("user-input", "negativ-test", "config-file")
-@allure.feature("config_file")
-@allure.severity(allure.severity_level.MINOR)
+@pytest.mark.testlink(
+    title="'names' doppelte namen",
+    description="Testet ob erkannt wird, ob in 'names' ein value doppelt vorkommt",
+    tag=["user-input", "negativ-test", "config-file"],
+    feature="config_file",
+    severity="MINOR",
+)
 def conf_file_017() -> None:
     c = TopologyFileValidation(add_folder_path("config_file_017.yml"))
     with pytest.raises(
@@ -289,11 +306,13 @@ def conf_file_017() -> None:
         c.validate_file()
 
 
-@allure.title("doppelte Namen")
-@allure.description("Testet ob erkannt wird, ob insgesamt doppelte Namen vorkommen")
-@allure.tag("user-input", "negativ-test", "config-file")
-@allure.feature("config_file")
-@allure.severity(allure.severity_level.MINOR)
+@pytest.mark.testlink(
+    title="doppelte Namen",
+    description="Testet ob erkannt wird, ob insgesamt doppelte Namen vorkommen",
+    tag=["user-input", "negativ-test", "config-file"],
+    feature="config_file",
+    severity="MINOR",
+)
 def conf_file_018() -> None:
     c = TopologyFileValidation(add_folder_path("config_file_018.yml"))
     with pytest.raises(
@@ -303,13 +322,13 @@ def conf_file_018() -> None:
         c.validate_file()
 
 
-@allure.title("edges node namen nicht initialisiert")
-@allure.description(
-    "Testet ob erkannt wird, ob in edges namen vorkommen, welche nicht initialisiert wurden"
+@pytest.mark.testlink(
+    title="edges node namen nicht initialisiert",
+    description="Testet ob erkannt wird, ob in edges namen vorkommen, welche nicht initialisiert wurden",
+    tag=["user-input", "negativ-test", "config-file"],
+    feature="config_file",
+    severity="MINOR",
 )
-@allure.tag("user-input", "negativ-test", "config-file")
-@allure.feature("config_file")
-@allure.severity(allure.severity_level.MINOR)
 def conf_file_019() -> None:
     c = TopologyFileValidation(add_folder_path("config_file_019.yml"))
     with pytest.raises(
@@ -319,11 +338,13 @@ def conf_file_019() -> None:
         c.validate_file()
 
 
-@allure.title("zu wenige values in edge")
-@allure.description("Testet ob erkannt wird, ob genug Values in edge vorkommen")
-@allure.tag("user-input", "negativ-test", "config-file")
-@allure.feature("config_file")
-@allure.severity(allure.severity_level.MINOR)
+@pytest.mark.testlink(
+    title="zu wenige values in edge",
+    description="Testet ob erkannt wird, ob genug Values in edge vorkommen",
+    tag=["user-input", "negativ-test", "config-file"],
+    feature="config_file",
+    severity="MINOR",
+)
 def conf_file_020() -> None:
     c = TopologyFileValidation(add_folder_path("config_file_020.yml"))
     with pytest.raises(
@@ -333,11 +354,13 @@ def conf_file_020() -> None:
         c.validate_file()
 
 
-@allure.title("Interface besetzung")
-@allure.description("Testet ob erkannt wird, ob Interfaces doppelt besetzt werden")
-@allure.tag("user-input", "negativ-test", "config-file")
-@allure.feature("config_file")
-@allure.severity(allure.severity_level.MINOR)
+@pytest.mark.testlink(
+    title="Interface besetzung",
+    description="Testet ob erkannt wird, ob Interfaces doppelt besetzt werden",
+    tag=["user-input", "negativ-test", "config-file"],
+    feature="config_file",
+    severity="MINOR",
+)
 def conf_file_021() -> None:
     c = TopologyFileValidation(add_folder_path("config_file_021.yml"))
     with pytest.raises(
@@ -347,11 +370,13 @@ def conf_file_021() -> None:
         c.validate_file()
 
 
-@allure.title("Interface namen typ falsch")
-@allure.description("Testet ob erkannt wird, ob Interface namen vom falsch typ sind")
-@allure.tag("user-input", "negativ-test", "config-file")
-@allure.feature("config_file")
-@allure.severity(allure.severity_level.MINOR)
+@pytest.mark.testlink(
+    title="Interface namen typ falsch",
+    description="Testet ob erkannt wird, ob Interface namen vom falsch typ sind",
+    tag=["user-input", "negativ-test", "config-file"],
+    feature="config_file",
+    severity="MINOR",
+)
 def conf_file_022() -> None:
     c = TopologyFileValidation(add_folder_path("config_file_022.yml"))
     with pytest.raises(
@@ -361,23 +386,25 @@ def conf_file_022() -> None:
         c.validate_file()
 
 
-@allure.title("'names' typ ist None")
-@allure.description("Testet ob es gültig ist, wenn der value von 'names', None ist")
-@allure.tag("user-input", "negativ-test", "config-file")
-@allure.feature("config_file")
-@allure.severity(allure.severity_level.MINOR)
+@pytest.mark.testlink(
+    title="'names' typ ist None",
+    description="Testet ob es gültig ist, wenn der value von 'names', None ist",
+    tag=["user-input", "negativ-test", "config-file"],
+    feature="config_file",
+    severity="MINOR",
+)
 def conf_file_023() -> None:
     c = TopologyFileValidation(add_folder_path("config_file_023.yml"))
     c.validate_file()
 
 
-@allure.title("edge node name typ ist falsch")
-@allure.description(
-    "Testet ob erkannt wird, ob in edge, die node namen nicht den richtigen typ haben"
+@pytest.mark.testlink(
+    title="edge node name typ ist falsch",
+    description="Testet ob erkannt wird, ob in edge, die node namen nicht den richtigen typ haben",
+    tag=["user-input", "negativ-test", "config-file"],
+    feature="config_file",
+    severity="MINOR",
 )
-@allure.tag("user-input", "negativ-test", "config-file")
-@allure.feature("config_file")
-@allure.severity(allure.severity_level.MINOR)
 def conf_file_024() -> None:
     c = TopologyFileValidation(add_folder_path("config_file_024.yml"))
     with pytest.raises(
@@ -387,13 +414,13 @@ def conf_file_024() -> None:
         c.validate_file()
 
 
-@allure.title("Doppelte node_groups vorhanden")
-@allure.description(
-    "Testet ob es funktioniert, dass man zwei gleiche Node Groups in der file angibt, mit verschiedenen Namen"
+@pytest.mark.testlink(
+    title="Doppelte node_groups vorhanden",
+    description="Testet ob es funktioniert, dass man zwei gleiche Node Groups in der file angibt, mit verschiedenen Namen",
+    tag=["user-input", "positiv-test", "config-file"],
+    feature="config_file",
+    severity="MINOR",
 )
-@allure.tag("user-input", "positiv-test", "config-file")
-@allure.feature("config_file")
-@allure.severity(allure.severity_level.MINOR)
 def conf_file_025() -> None:
     c = TopologyFileValidation(add_folder_path("config_file_025.yml"))
     c.validate_file()
