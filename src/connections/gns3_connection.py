@@ -144,7 +144,7 @@ class GNS3Connection(APIHandler):
         # --------------------------------------------------------------------------------------------------------------
         if Settings.IS_DRY_RUN:
             Verbosity.volumatic_print(
-                Verbosity.NORMAL, f"Would deploy {node.name} on GNS3. {node.image}"
+                Verbosity.NORMAL, f"Would deploy {node.name} on GNS3: {node.image}"
             )
             return None
         Verbosity.volumatic_print(
@@ -193,7 +193,7 @@ class GNS3Connection(APIHandler):
             # ----------------------------------------------------------------------------------------------------------
             if Settings.IS_DRY_RUN:
                 Verbosity.volumatic_print(
-                    Verbosity.NORMAL, f"Would deploy {node.name} on GNS3. {template}"
+                    Verbosity.NORMAL, f"Would deploy {node.name} on GNS3: {template}"
                 )
                 return None
             Verbosity.volumatic_print(
@@ -229,7 +229,7 @@ class GNS3Connection(APIHandler):
         node.gns3_node_info = response
         return response
 
-    def _get_template(self, template_name: str) -> dict[str, Any]:
+    def _get_template(self, template_name: str) -> Any:
         """
         Gets the template information of a certain existing GNS3 template.
         :param template_name: Name of the GNS3 template to get the information.

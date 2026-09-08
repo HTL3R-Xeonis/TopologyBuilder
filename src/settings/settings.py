@@ -179,6 +179,22 @@ class Settings:
                     Settings.ESXI.PASSWORD = check_value_type(value, (str, type(None)))
                 case "virtual_switch":
                     Settings.ESXI.VIRTUAL_SWITCH = check_value_type(value, str)
+                case "trunk_port_group":
+                    Settings.ESXI.TRUNK_PORT_GROUP = check_value_type(value, str)
+                case "management_port_group":
+                    Settings.ESXI.MANAGEMENT_PORT_GROUP = check_value_type(value, str)
+                case "ignore_virtual_switches":
+                    Settings.ESXI.IGNORE_VIRTUAL_SWITCHES = set(
+                        check_value_type(value, (set, list))
+                    )
+                case "ignore_port_groups":
+                    Settings.ESXI.IGNORE_PORT_GROUPS = set(
+                        check_value_type(value, (set, list))
+                    )
+                case "ignore_virtual_machines":
+                    Settings.ESXI.IGNORE_VIRTUAL_MACHINES = set(
+                        check_value_type(value, (set, list))
+                    )
                 case "ignore_port_groups":
                     Settings.ESXI.IGNORE_PORT_GROUPS = set(
                         check_value_type(value, (list, set))
@@ -272,8 +288,16 @@ class Settings:
         """Password to use for the ESXi connections."""
         VIRTUAL_SWITCH: str = None
         """Specifies the virtual switch to use on the ESXi client."""
+        TRUNK_PORT_GROUP: str = None
+        """Specifies which port group should be used for the GNS3 VM to have a connection to every other VM on the ESXi host."""
+        MANAGEMENT_PORT_GROUP: str = None
+        """Specifies which port group should be used for the management of the GNS3 VM. This portgroup should be on a separate virtual switch, which must have a physical adapter."""
+        IGNORE_VIRTUAL_SWITCHES: set[str] = None
+        """Specifies which virtual switches not to edit."""
         IGNORE_PORT_GROUPS: set[str] = None
-        """Specifies which port groups not to delete on the virtual switch."""
+        """Specifies which port groups not to edit."""
+        IGNORE_VIRTUAL_MACHINES: set[str] = None
+        """Specifies which virtual machines not to edit"""
         DATASTORE: str = None
         """Specifies the name of the datastore to use on the ESXi client."""
         GNS3_VM_NAME: str = None

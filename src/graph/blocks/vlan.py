@@ -17,8 +17,7 @@ class VirtualLan:
         :raise ValueError: Is thrown when the vlan_id exceeds the limit of 4093. The vlan_id is automatically incremented with the creation of this object.
         """
         self._name: str = f"{node_name}_{interface_name.replace('/', '-')}"
-
-        if VirtualLan._vlan_id >= 4094:
+        if VirtualLan._vlan_id > 4094:
             logger.error(
                 msg
                 := "VLANs on ESXi exceed the limit of 4094. Reduce the number of interfaces on VMs which will be located on ESXi."
@@ -31,7 +30,7 @@ class VirtualLan:
     @property
     def id(self) -> int:
         """
-        A unique id, expected in the range of 2 <= id <= 4093.
+        A unique id, expected in the range of 2 <= id <= 4094.
         :return: Returns this attribute
         """
         return self._vlan_id

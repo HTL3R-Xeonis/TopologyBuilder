@@ -5,7 +5,7 @@ import typer
 from src.settings import Settings, Verbosity
 from src.graph import Graph
 from src.topology_file_validation import TopologyFileValidation
-from src.vm_orchestrator.vm_orchestrator import VMOrchestrator
+from src.orchestrator.graph_orchestrator import GraphOrchestrator
 
 
 app = typer.Typer(
@@ -138,15 +138,14 @@ def deploy(
 
     graph = Graph(validator.nodes, validator.edges)
 
-    orchestrator = VMOrchestrator(
+    orchestrator = GraphOrchestrator(
         esxi_host=Settings.ESXI.IP,
         esxi_port=Settings.ESXI.PORT,
         esxi_username=Settings.ESXI.USERNAME,
         esxi_password=Settings.ESXI.PASSWORD,
-        gns3_vm_name=Settings.ESXI.GNS3_VM_NAME,
     )
 
-    orchestrator.deploy_graph(
+    orchestrator.execute_graph_deployment(
         graph=graph,
         gns3_username=Settings.GNS3.USERNAME,
         gns3_password=Settings.GNS3.PASSWORD,
