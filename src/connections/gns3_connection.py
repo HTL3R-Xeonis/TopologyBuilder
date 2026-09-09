@@ -228,6 +228,62 @@ class GNS3Connection(APIHandler):
             raise RuntimeError(msg) from exc
         return True
 
+    @staticmethod
+    def delete_node(ip: str, port: int, project_id: str, node_id: str) -> None:
+        """
+        Deletes a single node from a project, leaving every other node
+        and link untouched. Unlike delete_project, does not touch the
+        project itself.
+        :param ip: GNS3 IP address
+        :param port: GNS3 API port
+        :param project_id: the project the node belongs to
+        :param node_id: the node to delete
+        :return:
+        :raises TimeoutError: Is thrown when it takes too long to receive a response.
+        :raises RuntimeError: Is thrown when deletion fails.
+        """
+        if Settings.IS_DRY_RUN:
+            Verbosity.volumatic_print(Verbosity.NORMAL, f"Would delete node {node_id}")
+            return
+        Verbosity.volumatic_print(Verbosity.NORMAL, f"Deletes node {node_id}")
+        try:
+            GNS3Connection.delete(
+                f"http://{ip}:{port}/v2/projects/{project_id}/nodes/{node_id}"
+            )
+        except requests.exceptions.HTTPError as exc:
+            logger.error(
+                msg := f"Something went wrong deleting node '{node_id}' on {ip}"
+            )
+            raise RuntimeError(msg) from exc
+
+    @staticmethod
+    def delete_link(ip: str, port: int, project_id: str, link_id: str) -> None:
+        """
+        Deletes a single link from a project. See delete_node - same
+        shape, one level down (a link between two nodes' ports rather
+        than a node itself).
+        :param ip: GNS3 IP address
+        :param port: GNS3 API port
+        :param project_id: the project the link belongs to
+        :param link_id: the link to delete
+        :return:
+        :raises TimeoutError: Is thrown when it takes too long to receive a response.
+        :raises RuntimeError: Is thrown when deletion fails.
+        """
+        if Settings.IS_DRY_RUN:
+            Verbosity.volumatic_print(Verbosity.NORMAL, f"Would delete link {link_id}")
+            return
+        Verbosity.volumatic_print(Verbosity.NORMAL, f"Deletes link {link_id}")
+        try:
+            GNS3Connection.delete(
+                f"http://{ip}:{port}/v2/projects/{project_id}/links/{link_id}"
+            )
+        except requests.exceptions.HTTPError as exc:
+            logger.error(
+                msg := f"Something went wrong deleting link '{link_id}' on {ip}"
+            )
+            raise RuntimeError(msg) from exc
+
     def _init_project(self, name: str) -> dict[str, Any] | None:
         """
         Create a new GNS3 project. If project already exists, it is deleted

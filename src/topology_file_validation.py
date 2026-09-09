@@ -235,3 +235,67 @@ class TopologyFileValidation:
         intf_list_2.append(edge[3])
         self.__node_map[edge[0]] = intf_list_1
         self.__node_map[edge[2]] = intf_list_2
+
+    def add_node(self, name: str, role: str, image: str) -> None:
+        """
+        Adds a node to self.nodes - merged into an existing node group if
+        one already has this exact role+image, otherwise added as a new
+        group. Does not validate or save; call validate_file() and
+        save() afterward.
+        :param name: name of the new node
+        :param role: role of the new node, e.g. "ROUTER"
+        :param image: image/template name of the new node
+        :return:
+        """
+        for node_group in self.nodes:
+            if node_group["role"] == role and node_group["image"] == image:
+                node_group["names"].append(name)
+                return
+        self.nodes.append({"names": [name], "role": role, "image": image})
+
+    def remove_node(self, name: str) -> None:
+        """
+        Removes a node by name from its group (dropping the group
+        entirely if it becomes empty) and drops any edge referencing it.
+        Does not validate or save; call validate_file() and save()
+        afterward if used on an already-validated instance.
+        :param name: name of the node to remove
+        :return:
+        """
+        for node_group in self.nodes:
+            if node_group["names"] and name in node_group["names"]:
+                node_group["names"].remove(name)
+        self.nodes = [group for group in self.nodes if group["names"]]
+        self.edges = [edge for edge in self.edges if name not in (edge[0], edge[2])]
+
+    def add_edge(self, node1: str, if1: str, node2: str, if2: str) -> None:
+        """Adds an edge to self.edges. Does not validate or save."""
+        self.edges.append([node1, if1, node2, if2])
+
+    def remove_edge(self, node1: str, node2: str) -> None:
+        """
+        Removes any edge directly connecting node1 and node2 (regardless
+        of which side is listed first). Does not validate or save.
+        """
+        self.edges = [
+            edge for edge in self.edges if {edge[0], edge[2]} != {node1, node2}
+        ]
+
+    def save(self) -> None:
+        """
+        Writes self.nodes/self.edges back to this instance's own path,
+        in the same {"nodes": [...], "edges": [...]} shape read_file()
+        reads. Overwrites the file in place.
+        :return:
+        :raises RuntimeError: Is thrown when an error occurs while trying to write the YAML-file.
+        """
+        try:
+            with open(self._path, "w") as file:
+                yaml.safe_dump(
+                    {"nodes": self.nodes, "edges": self.edges},
+                    file,
+                    sort_keys=False,
+                )
+        except Exception as e:
+            logger.error(msg := f"Error writing file: {self._path}")
+            raise RuntimeError(msg) from e

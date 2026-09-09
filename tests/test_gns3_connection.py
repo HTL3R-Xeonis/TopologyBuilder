@@ -789,3 +789,95 @@ def gns3_connection_028() -> None:
 
     mock_delete.assert_not_called()
     assert result is True
+
+
+@allure.title("delete_node schickt einen DELETE-Request an den richtigen Node-Endpoint")
+@allure.description(
+    "Überprüft, dass delete_node() ein DELETE an "
+    "/v2/projects/{project_id}/nodes/{node_id} schickt, ohne das Projekt "
+    "oder andere Nodes zu berühren"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_029() -> None:
+    _reset_settings()
+    with patch.object(GNS3Connection, "delete") as mock_delete:
+        GNS3Connection.delete_node("10.20.20.231", 80, "proj-1", "node-1")
+
+    mock_delete.assert_called_once_with(
+        "http://10.20.20.231:80/v2/projects/proj-1/nodes/node-1"
+    )
+
+
+@allure.title("delete_node löscht nichts im Dry-Run-Modus")
+@allure.description(
+    "Überprüft, dass delete_node im Dry-Run-Modus keinen DELETE-Request schickt"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_connection_030() -> None:
+    _reset_settings()
+    Settings.IS_DRY_RUN = True
+    try:
+        with patch.object(GNS3Connection, "delete") as mock_delete:
+            GNS3Connection.delete_node("10.20.20.231", 80, "proj-1", "node-1")
+    finally:
+        _reset_settings()
+
+    mock_delete.assert_not_called()
+
+
+@allure.title("delete_node wirft RuntimeError, wenn der DELETE-Request fehlschlägt")
+@allure.description(
+    "Überprüft, dass ein HTTPError von delete() als RuntimeError "
+    "weitergegeben wird, statt unbehandelt durchzuschlagen"
+)
+@allure.tag("negativ-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_connection_031() -> None:
+    _reset_settings()
+    with patch.object(
+        GNS3Connection, "delete", side_effect=requests.exceptions.HTTPError()
+    ):
+        with pytest.raises(RuntimeError):
+            GNS3Connection.delete_node("10.20.20.231", 80, "proj-1", "node-1")
+
+
+@allure.title("delete_link schickt einen DELETE-Request an den richtigen Link-Endpoint")
+@allure.description(
+    "Überprüft, dass delete_link() ein DELETE an "
+    "/v2/projects/{project_id}/links/{link_id} schickt"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_032() -> None:
+    _reset_settings()
+    with patch.object(GNS3Connection, "delete") as mock_delete:
+        GNS3Connection.delete_link("10.20.20.231", 80, "proj-1", "link-1")
+
+    mock_delete.assert_called_once_with(
+        "http://10.20.20.231:80/v2/projects/proj-1/links/link-1"
+    )
+
+
+@allure.title("delete_link löscht nichts im Dry-Run-Modus")
+@allure.description(
+    "Überprüft, dass delete_link im Dry-Run-Modus keinen DELETE-Request schickt"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_connection_033() -> None:
+    _reset_settings()
+    Settings.IS_DRY_RUN = True
+    try:
+        with patch.object(GNS3Connection, "delete") as mock_delete:
+            GNS3Connection.delete_link("10.20.20.231", 80, "proj-1", "link-1")
+    finally:
+        _reset_settings()
+
+    mock_delete.assert_not_called()
