@@ -15,7 +15,7 @@ loguru==0.7.3
 markdown-it-py==4.2.0
 mdurl==0.1.2
 packaging==26.2
-paramiko==5.0.0
+paramiko==4.0.0
 pluggy==1.6.0
 pycparser==3.0
 Pygments==2.20.0

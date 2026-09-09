@@ -11,7 +11,11 @@ requires-python = ">=3.12"
 license = { text = "GPL-3.0-or-later" }
 dependencies = [
     "loguru==0.7.3",
-    "paramiko==5.0.0",
+    # Capped below 5.0 (was 5.0.0) - netmiko, a TopologyOperator dependency
+    # that also needs to install alongside this package, caps paramiko
+    # <5.0 itself. Only basic, long-stable SSHClient APIs are used here
+    # (see src/connections/ssh_connection.py), nothing 5.0-specific.
+    "paramiko==4.0.0",
     "python-dotenv==1.2.3",
     "pyvmomi==9.1.0.0",
     "PyYAML==6.0.3",
