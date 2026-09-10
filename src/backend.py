@@ -10,7 +10,11 @@ VMOrchestrator/Graph internals directly.
 
 from __future__ import annotations
 
+import os
+import tempfile
 from pathlib import Path
+
+import yaml
 
 from src.connections.gns3_connection import GNS3Connection
 from src.graph import Environment, Graph
@@ -84,20 +88,50 @@ class TopologyBackend:
         project = next((p for p in projects if p["name"] == project_name), None)
         return project["project_id"] if project is not None else None
 
+    def _validate_and_build_graph(self, validator: TopologyFileValidation) -> Graph:
+        """
+        Validates a validator's in-memory (not yet saved) nodes/edges
+        and builds the resulting Graph - without ever touching the real
+        topology file. TopologyFileValidation.validate_file() always
+        re-reads from its own path on disk, so the only way to validate
+        an in-memory change is to point a throwaway validator at a
+        disposable temp file holding that same content. This lets
+        add_node/add_link validate+deploy the new state before ever
+        writing the real topology_file, so a failed deploy leaves it
+        untouched (see add_node's own docstring).
+        :raises ValueError: propagated from validate_file() - e.g. an invalid role or image.
+        """
+        fd, tmp_path = tempfile.mkstemp(suffix=".yaml")
+        try:
+            with os.fdopen(fd, "w") as file:
+                yaml.safe_dump(
+                    {"nodes": validator.nodes, "edges": validator.edges},
+                    file,
+                    sort_keys=False,
+                )
+            tmp_validator = TopologyFileValidation(tmp_path)
+            tmp_validator.validate_file()
+            return Graph(tmp_validator.nodes, tmp_validator.edges)
+        finally:
+            os.unlink(tmp_path)
+
     def add_node(
         self, topology_file: str, name: str, role: str, image: str
     ) -> GenericNode:
         """
-        Adds a node to the topology YAML and deploys it live
-        (incrementally - existing nodes/links are left untouched, but
-        see VMOrchestrator.deploy_graph's own docstring: every VLAN
-        subinterface on the GNS3 VM's trunk NIC still gets briefly torn
-        down and recreated on every call, even for one new node).
+        Deploys a new node live (incrementally - existing nodes/links
+        are left untouched, but see VMOrchestrator.deploy_graph's own
+        docstring: every VLAN subinterface on the GNS3 VM's trunk NIC
+        still gets briefly torn down and recreated on every call, even
+        for one new node) and only then adds it to the topology YAML.
+        Live deployment happens first, so a failure there leaves the
+        YAML file unchanged rather than claiming a node exists that was
+        never actually deployed.
         :param topology_file: path to the topology YAML file
         :param name: name of the new node
         :param role: role of the new node, e.g. "ROUTER"
         :param image: image/template name of the new node
-        :return: the new node, as it exists in the reloaded Graph
+        :return: the new node, as it exists in the freshly-built Graph
         :raises ValueError: if a node with this name already exists, or the image doesn't exist on GNS3/ESXi.
         :raises RuntimeError: propagated from VMOrchestrator.deploy_graph on deploy failure.
         """
@@ -106,22 +140,25 @@ class TopologyBackend:
             raise ValueError(f"node {name!r} already exists in {topology_file}")
 
         validator.add_node(name, role, image)
-        validator.save()
+        graph = self._validate_and_build_graph(validator)
 
         self._set_project_name(topology_file)
-        _, graph = self._load(topology_file)
         self._orchestrator.deploy_graph(
             graph, self._gns3_username, self._gns3_password, incremental=True
         )
+
+        validator.save()
         return graph.nodes[name]
 
     def add_link(
         self, topology_file: str, node1: str, if1: str, node2: str, if2: str
     ) -> None:
         """
-        Adds an edge to the topology YAML and connects the two nodes
-        live (incrementally - see add_node's docstring for the same
-        VLAN-subinterface caveat).
+        Connects two nodes live (incrementally - see add_node's
+        docstring for the same VLAN-subinterface caveat) and only then
+        adds the edge to the topology YAML. Live deployment happens
+        first, so a failure there leaves the YAML file unchanged rather
+        than claiming an edge exists that was never actually deployed.
         :param topology_file: path to the topology YAML file
         :param node1: name of the first node
         :param if1: interface name on the first node
@@ -133,13 +170,14 @@ class TopologyBackend:
         """
         validator, _ = self._load(topology_file)
         validator.add_edge(node1, if1, node2, if2)
-        validator.save()
+        graph = self._validate_and_build_graph(validator)
 
         self._set_project_name(topology_file)
-        _, graph = self._load(topology_file)
         self._orchestrator.deploy_graph(
             graph, self._gns3_username, self._gns3_password, incremental=True
         )
+
+        validator.save()
 
     def remove_node(self, topology_file: str, name: str) -> None:
         """

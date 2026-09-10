@@ -233,3 +233,100 @@ def backend_006(tmp_path) -> None:
     reloaded = TopologyFileValidation(topology_file)
     reloaded.validate_file()
     assert not any({e[0], e[2]} == {"PC1", "SW-C1"} for e in reloaded.edges)
+
+
+@allure.title("add_node lässt die YAML-Datei unverändert, wenn das Deployment fehlschlägt")
+@allure.description(
+    "Überprüft, dass add_node() den neuen Knoten NICHT in die "
+    "Topology-YAML schreibt, wenn VMOrchestrator.deploy_graph "
+    "fehlschlägt - verhindert, dass die Datei einen Knoten behauptet, "
+    "der nie live deployt wurde"
+)
+@allure.tag("negativ-test", "backend")
+@allure.feature("backend")
+@allure.severity(allure.severity_level.CRITICAL)
+def backend_007(tmp_path) -> None:
+    _reset_settings()
+    topology_file = _copy_topology(tmp_path)
+    backend, orchestrator = _make_backend()
+    orchestrator.deploy_graph.side_effect = RuntimeError("deploy failed")
+
+    with pytest.raises(RuntimeError, match="deploy failed"):
+        backend.add_node(topology_file, "PC99", "PC", "VPCS")
+
+    from src.topology_file_validation import TopologyFileValidation
+
+    reloaded = TopologyFileValidation(topology_file)
+    reloaded.validate_file()
+    assert not any("PC99" in g["names"] for g in reloaded.nodes)
+
+
+@allure.title("add_link lässt die YAML-Datei unverändert, wenn das Deployment fehlschlägt")
+@allure.description(
+    "Überprüft, dass add_link() die neue Edge NICHT in die "
+    "Topology-YAML schreibt, wenn VMOrchestrator.deploy_graph "
+    "fehlschlägt - verhindert, dass die Datei eine Edge behauptet, "
+    "die nie live deployt wurde"
+)
+@allure.tag("negativ-test", "backend")
+@allure.feature("backend")
+@allure.severity(allure.severity_level.CRITICAL)
+def backend_008(tmp_path) -> None:
+    _reset_settings()
+    topology_file = _copy_topology(tmp_path)
+    backend, orchestrator = _make_backend()
+    orchestrator.deploy_graph.side_effect = RuntimeError("deploy failed")
+
+    with pytest.raises(RuntimeError, match="deploy failed"):
+        backend.add_link(topology_file, "PC1", "gi0/1", "PC2", "gi0/1")
+
+    from src.topology_file_validation import TopologyFileValidation
+
+    reloaded = TopologyFileValidation(topology_file)
+    reloaded.validate_file()
+    assert not any({e[0], e[2]} == {"PC1", "PC2"} for e in reloaded.edges)
+
+
+@allure.title("add_node schreibt den neuen Knoten erst NACH einem erfolgreichen Deployment in die YAML-Datei")
+@allure.description(
+    "Überprüft, dass die reale Topology-YAML-Datei nach einem "
+    "erfolgreichen add_node()-Aufruf tatsächlich den neuen Knoten "
+    "enthält - bisher wurde nur der in-memory deployed_graph geprüft"
+)
+@allure.tag("positiv-test", "backend")
+@allure.feature("backend")
+@allure.severity(allure.severity_level.CRITICAL)
+def backend_009(tmp_path) -> None:
+    _reset_settings()
+    topology_file = _copy_topology(tmp_path)
+    backend, _orchestrator = _make_backend()
+
+    backend.add_node(topology_file, "PC99", "PC", "VPCS")
+
+    from src.topology_file_validation import TopologyFileValidation
+
+    reloaded = TopologyFileValidation(topology_file)
+    reloaded.validate_file()
+    assert any("PC99" in g["names"] for g in reloaded.nodes)
+
+
+@allure.title("add_link schreibt die neue Edge erst NACH einem erfolgreichen Deployment in die YAML-Datei")
+@allure.description(
+    "Überprüft, dass die reale Topology-YAML-Datei nach einem "
+    "erfolgreichen add_link()-Aufruf tatsächlich die neue Edge enthält"
+)
+@allure.tag("positiv-test", "backend")
+@allure.feature("backend")
+@allure.severity(allure.severity_level.CRITICAL)
+def backend_010(tmp_path) -> None:
+    _reset_settings()
+    topology_file = _copy_topology(tmp_path)
+    backend, _orchestrator = _make_backend()
+
+    backend.add_link(topology_file, "PC1", "gi0/1", "PC2", "gi0/1")
+
+    from src.topology_file_validation import TopologyFileValidation
+
+    reloaded = TopologyFileValidation(topology_file)
+    reloaded.validate_file()
+    assert any({e[0], e[2]} == {"PC1", "PC2"} for e in reloaded.edges)
