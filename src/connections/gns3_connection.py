@@ -284,6 +284,89 @@ class GNS3Connection(APIHandler):
             )
             raise RuntimeError(msg) from exc
 
+    @staticmethod
+    def start_node(ip: str, port: int, project_id: str, node_id: str) -> None:
+        """
+        Starts a single already-created node. Unlike start_all_nodes, does
+        not iterate a whole project - for live operators like
+        TopologyOperator that need to control one node at a time.
+        :param ip: GNS3 IP address
+        :param port: GNS3 API port
+        :param project_id: the project the node belongs to
+        :param node_id: the node to start
+        :return:
+        :raises TimeoutError: Is thrown when it takes too long to receive a response.
+        :raises RuntimeError: Is thrown when starting the node fails.
+        """
+        if Settings.IS_DRY_RUN:
+            Verbosity.volumatic_print(Verbosity.NORMAL, f"Would start node {node_id}")
+            return
+        Verbosity.volumatic_print(Verbosity.NORMAL, f"Starts node {node_id}")
+        try:
+            GNS3Connection.post(
+                f"http://{ip}:{port}/v2/projects/{project_id}/nodes/{node_id}/start",
+                timeout=_NODE_START_TIMEOUT_SECONDS,
+            )
+        except requests.exceptions.HTTPError as exc:
+            logger.error(
+                msg := f"Something went wrong starting node '{node_id}' on {ip}"
+            )
+            raise RuntimeError(msg) from exc
+
+    @staticmethod
+    def stop_node(ip: str, port: int, project_id: str, node_id: str) -> None:
+        """
+        Stops a single node. See start_node - same shape, opposite action.
+        :param ip: GNS3 IP address
+        :param port: GNS3 API port
+        :param project_id: the project the node belongs to
+        :param node_id: the node to stop
+        :return:
+        :raises TimeoutError: Is thrown when it takes too long to receive a response.
+        :raises RuntimeError: Is thrown when stopping the node fails.
+        """
+        if Settings.IS_DRY_RUN:
+            Verbosity.volumatic_print(Verbosity.NORMAL, f"Would stop node {node_id}")
+            return
+        Verbosity.volumatic_print(Verbosity.NORMAL, f"Stops node {node_id}")
+        try:
+            GNS3Connection.post(
+                f"http://{ip}:{port}/v2/projects/{project_id}/nodes/{node_id}/stop"
+            )
+        except requests.exceptions.HTTPError as exc:
+            logger.error(
+                msg := f"Something went wrong stopping node '{node_id}' on {ip}"
+            )
+            raise RuntimeError(msg) from exc
+
+    @staticmethod
+    def reload_node(ip: str, port: int, project_id: str, node_id: str) -> None:
+        """
+        Reloads (restarts from scratch) a single node. See start_node -
+        same shape.
+        :param ip: GNS3 IP address
+        :param port: GNS3 API port
+        :param project_id: the project the node belongs to
+        :param node_id: the node to reload
+        :return:
+        :raises TimeoutError: Is thrown when it takes too long to receive a response.
+        :raises RuntimeError: Is thrown when reloading the node fails.
+        """
+        if Settings.IS_DRY_RUN:
+            Verbosity.volumatic_print(Verbosity.NORMAL, f"Would reload node {node_id}")
+            return
+        Verbosity.volumatic_print(Verbosity.NORMAL, f"Reloads node {node_id}")
+        try:
+            GNS3Connection.post(
+                f"http://{ip}:{port}/v2/projects/{project_id}/nodes/{node_id}/reload",
+                timeout=_NODE_START_TIMEOUT_SECONDS,
+            )
+        except requests.exceptions.HTTPError as exc:
+            logger.error(
+                msg := f"Something went wrong reloading node '{node_id}' on {ip}"
+            )
+            raise RuntimeError(msg) from exc
+
     def _init_project(self, name: str) -> dict[str, Any] | None:
         """
         Create a new GNS3 project. If project already exists, it is deleted

@@ -809,6 +809,17 @@ class ESXiConnection(GenericConnection):
         if vm.runtime.powerState != vim.VirtualMachine.PowerState.poweredOff:
             self._wait_for_task(vm.PowerOffVM_Task())
 
+    def reset_vm(self, vm: vim.VirtualMachine) -> None:
+        """
+        Resets (a hard restart, not a graceful guest reboot) the given VM,
+        if it's currently powered on - a no-op otherwise, since resetting
+        an already-off VM doesn't mean anything.
+        :param vm: the VM to reset
+        :return:
+        """
+        if vm.runtime.powerState == vim.VirtualMachine.PowerState.poweredOn:
+            self._wait_for_task(vm.ResetVM_Task())
+
     def delete_vm(self, vm: vim.VirtualMachine) -> None:
         """
         Powers off (if needed) and permanently deletes the given VM. Used

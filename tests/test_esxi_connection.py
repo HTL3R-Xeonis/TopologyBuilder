@@ -1107,3 +1107,49 @@ def esxi_connection_043() -> None:
         Settings.ESXI.TRUNK_PORT_GROUP = original_trunk
         Settings.ESXI.IGNORE_PORT_GROUPS = original_ignore
         Settings.ESXI.RESERVED_PORT_GROUPS = original_reserved
+
+
+@allure.title("reset_vm setzt eine laufende VM über ResetVM_Task zurück")
+@allure.description(
+    "Überprüft, dass reset_vm bei einer laufenden VM ResetVM_Task aufruft"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_044() -> None:
+    from pyVmomi import vim
+
+    _reset_settings()
+    conn = _make_esxi_connection()
+
+    vm = MagicMock()
+    vm.runtime.powerState = vim.VirtualMachine.PowerState.poweredOn
+    task = MagicMock()
+    task.info.state = vim.TaskInfo.State.success
+    vm.ResetVM_Task.return_value = task
+
+    conn.reset_vm(vm)
+
+    vm.ResetVM_Task.assert_called_once()
+
+
+@allure.title("reset_vm tut nichts, wenn die VM bereits ausgeschaltet ist")
+@allure.description(
+    "Überprüft, dass reset_vm ResetVM_Task nicht aufruft, wenn die VM "
+    "bereits ausgeschaltet ist - ein Reset ergibt in diesem Zustand keinen Sinn"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def esxi_connection_045() -> None:
+    from pyVmomi import vim
+
+    _reset_settings()
+    conn = _make_esxi_connection()
+
+    vm = MagicMock()
+    vm.runtime.powerState = vim.VirtualMachine.PowerState.poweredOff
+
+    conn.reset_vm(vm)
+
+    vm.ResetVM_Task.assert_not_called()

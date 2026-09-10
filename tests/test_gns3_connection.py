@@ -10,7 +10,10 @@ import allure
 import pytest
 import requests
 
-from src.connections.gns3_connection import GNS3Connection
+from src.connections.gns3_connection import (
+    _NODE_START_TIMEOUT_SECONDS,
+    GNS3Connection,
+)
 from src.settings import Settings
 
 
@@ -881,3 +884,167 @@ def gns3_connection_033() -> None:
         _reset_settings()
 
     mock_delete.assert_not_called()
+
+
+@allure.title("start_node schickt einen POST-Request an den richtigen Start-Endpoint")
+@allure.description(
+    "Überprüft, dass start_node() ein POST an "
+    "/v2/projects/{project_id}/nodes/{node_id}/start schickt"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_034() -> None:
+    _reset_settings()
+    with patch.object(GNS3Connection, "post") as mock_post:
+        GNS3Connection.start_node("10.20.20.231", 80, "proj-1", "node-1")
+
+    mock_post.assert_called_once_with(
+        "http://10.20.20.231:80/v2/projects/proj-1/nodes/node-1/start",
+        timeout=_NODE_START_TIMEOUT_SECONDS,
+    )
+
+
+@allure.title("start_node startet nichts im Dry-Run-Modus")
+@allure.description(
+    "Überprüft, dass start_node im Dry-Run-Modus keinen POST-Request schickt"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_connection_035() -> None:
+    _reset_settings()
+    Settings.IS_DRY_RUN = True
+    try:
+        with patch.object(GNS3Connection, "post") as mock_post:
+            GNS3Connection.start_node("10.20.20.231", 80, "proj-1", "node-1")
+    finally:
+        _reset_settings()
+
+    mock_post.assert_not_called()
+
+
+@allure.title("start_node wirft RuntimeError, wenn der POST-Request fehlschlägt")
+@allure.description(
+    "Überprüft, dass ein HTTPError von post() als RuntimeError "
+    "weitergegeben wird, statt unbehandelt durchzuschlagen"
+)
+@allure.tag("negativ-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_connection_036() -> None:
+    _reset_settings()
+    with patch.object(
+        GNS3Connection, "post", side_effect=requests.exceptions.HTTPError()
+    ):
+        with pytest.raises(RuntimeError):
+            GNS3Connection.start_node("10.20.20.231", 80, "proj-1", "node-1")
+
+
+@allure.title("stop_node schickt einen POST-Request an den richtigen Stop-Endpoint")
+@allure.description(
+    "Überprüft, dass stop_node() ein POST an "
+    "/v2/projects/{project_id}/nodes/{node_id}/stop schickt"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_037() -> None:
+    _reset_settings()
+    with patch.object(GNS3Connection, "post") as mock_post:
+        GNS3Connection.stop_node("10.20.20.231", 80, "proj-1", "node-1")
+
+    mock_post.assert_called_once_with(
+        "http://10.20.20.231:80/v2/projects/proj-1/nodes/node-1/stop"
+    )
+
+
+@allure.title("stop_node stoppt nichts im Dry-Run-Modus")
+@allure.description(
+    "Überprüft, dass stop_node im Dry-Run-Modus keinen POST-Request schickt"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_connection_038() -> None:
+    _reset_settings()
+    Settings.IS_DRY_RUN = True
+    try:
+        with patch.object(GNS3Connection, "post") as mock_post:
+            GNS3Connection.stop_node("10.20.20.231", 80, "proj-1", "node-1")
+    finally:
+        _reset_settings()
+
+    mock_post.assert_not_called()
+
+
+@allure.title("stop_node wirft RuntimeError, wenn der POST-Request fehlschlägt")
+@allure.description(
+    "Überprüft, dass ein HTTPError von post() als RuntimeError "
+    "weitergegeben wird, statt unbehandelt durchzuschlagen"
+)
+@allure.tag("negativ-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_connection_039() -> None:
+    _reset_settings()
+    with patch.object(
+        GNS3Connection, "post", side_effect=requests.exceptions.HTTPError()
+    ):
+        with pytest.raises(RuntimeError):
+            GNS3Connection.stop_node("10.20.20.231", 80, "proj-1", "node-1")
+
+
+@allure.title("reload_node schickt einen POST-Request an den richtigen Reload-Endpoint")
+@allure.description(
+    "Überprüft, dass reload_node() ein POST an "
+    "/v2/projects/{project_id}/nodes/{node_id}/reload schickt"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_040() -> None:
+    _reset_settings()
+    with patch.object(GNS3Connection, "post") as mock_post:
+        GNS3Connection.reload_node("10.20.20.231", 80, "proj-1", "node-1")
+
+    mock_post.assert_called_once_with(
+        "http://10.20.20.231:80/v2/projects/proj-1/nodes/node-1/reload",
+        timeout=_NODE_START_TIMEOUT_SECONDS,
+    )
+
+
+@allure.title("reload_node lädt nichts neu im Dry-Run-Modus")
+@allure.description(
+    "Überprüft, dass reload_node im Dry-Run-Modus keinen POST-Request schickt"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_connection_041() -> None:
+    _reset_settings()
+    Settings.IS_DRY_RUN = True
+    try:
+        with patch.object(GNS3Connection, "post") as mock_post:
+            GNS3Connection.reload_node("10.20.20.231", 80, "proj-1", "node-1")
+    finally:
+        _reset_settings()
+
+    mock_post.assert_not_called()
+
+
+@allure.title("reload_node wirft RuntimeError, wenn der POST-Request fehlschlägt")
+@allure.description(
+    "Überprüft, dass ein HTTPError von post() als RuntimeError "
+    "weitergegeben wird, statt unbehandelt durchzuschlagen"
+)
+@allure.tag("negativ-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_connection_042() -> None:
+    _reset_settings()
+    with patch.object(
+        GNS3Connection, "post", side_effect=requests.exceptions.HTTPError()
+    ):
+        with pytest.raises(RuntimeError):
+            GNS3Connection.reload_node("10.20.20.231", 80, "proj-1", "node-1")
