@@ -19,7 +19,6 @@ esxi:
   ignore_virtual_machines:
     - "GNS3 (1)"
 
-
 gns3:
   username: "gns3"
   password:

@@ -8,15 +8,16 @@ __date__ = "28/07/2026"
 __license__ = "GNU GPLv3"
 __status__ = "In development"
 
+import time
+
 from loguru import logger
 
 from src.connections.esxi_connection import ESXiConnection
 from src.connections.gns3_connection import GNS3Connection
 from src.graph import Environment, Graph
+from src.orchestrator.esxi.esxi_orchestrator import ESXiOrchestrator
+from src.orchestrator.gns3.gns3_orchestrator import GNS3Orchestrator
 from src.settings import Settings
-
-from .esxi_orchestrator import ESXiOrchestrator
-from .gns3_orchestrator import GNS3Orchestrator
 
 
 # @TODO ExceptionHandling
@@ -92,6 +93,8 @@ class GraphOrchestrator:
             port_group_names=needed_port_groups,
             should_connect=True,
         )
+
+        time.sleep(1)
 
         gns3_connection = GNS3Connection(
             ip=self._get_gns3_ip(Settings.ESXI.GNS3_VM_NAME),

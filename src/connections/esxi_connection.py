@@ -1,6 +1,5 @@
 import atexit
 import ssl
-from typing import TypeVar
 
 import pyVmomi
 from loguru import logger
@@ -10,8 +9,6 @@ from pyVmomi import vim, vmodl
 from src.settings import Settings, Verbosity
 
 from .generic_connection import GenericConnection
-
-T = TypeVar("T")
 
 
 # @TODO upgrade resetting vSwitch
@@ -79,11 +76,11 @@ class ESXiConnection(GenericConnection):
             raise ConnectionError(msg) from exc
         return instance
 
-    def get_object_by_name(
+    def get_esxi_object[T](
         self, vim_type: type[T], name: str | None = None, get_all: bool = False
     ) -> T | None | list[T]:
         """
-        Finds the object on the ServiceInstance by type and name.
+        Finds the object on the ServiceInstance by type.
         :param vim_type: Specifies the type of the object to look for. Should be a type of the pyVmomi library.
         :param name: Name of the object to look for. If this is set to None, the first object will be returned.
         :param get_all: Whether to return all objects found or not.
@@ -118,7 +115,7 @@ class ESXiConnection(GenericConnection):
         :param virtual_switch_name: Name of the virtual switch to look for.
         :return: Returns the virtual Switch if found, else ``None``.
         """
-        host = self.get_object_by_name(vim.HostSystem)
+        host = self.get_esxi_object(vim.HostSystem)
         config = getattr(host, "config", vim.host.ConfigInfo)
         virtual_switches = getattr(config.network, "vswitch", [])
 
@@ -138,7 +135,7 @@ class ESXiConnection(GenericConnection):
         :raises RuntimeError: Is thrown when the virtual switch already exists on the ESXi host. May also be thrown when no host-system or network-system was found.
         :raises ValueError: Is thrown when the name length of the vswitch exceeds the character limit of 32.
         """
-        host = self.get_object_by_name(vim.HostSystem)
+        host = self.get_esxi_object(vim.HostSystem)
         if host is None:
             logger.error(msg := f"Hostsystem not found on ESXi host: {self.ip}")
             raise RuntimeError(msg)
@@ -198,7 +195,7 @@ class ESXiConnection(GenericConnection):
         spec.vlanId = pg_id
         spec.policy = vim.host.NetworkPolicy()
 
-        host_system = self.get_object_by_name(vim.HostSystem)
+        host_system = self.get_esxi_object(vim.HostSystem)
         if host_system is None:
             logger.error(msg := "No host system found on ESXi.")
             raise RuntimeError(msg)
@@ -223,7 +220,7 @@ class ESXiConnection(GenericConnection):
         Returns a list of all port groups on the ESXi host.
         :return: A list of port groups.
         """
-        host = self.get_object_by_name(vim.HostSystem)
+        host = self.get_esxi_object(vim.HostSystem)
 
         return {
             port_group.spec.name: port_group
@@ -256,7 +253,7 @@ class ESXiConnection(GenericConnection):
             # ----------------------------------------------------------------------------------------------------------
 
         self._ensure_virtual_switch_policy(virtual_switch)
-        host = self.get_object_by_name(vim.HostSystem)
+        host = self.get_esxi_object(vim.HostSystem)
 
         return {
             port_group.spec.name: port_group
@@ -282,7 +279,7 @@ class ESXiConnection(GenericConnection):
         )
         # ----------------------------------------------------------------------------------------------------------
 
-        host = self.get_object_by_name(vim.HostSystem)
+        host = self.get_esxi_object(vim.HostSystem)
         network = host.configManager.networkSystem
         try:
             network.RemovePortGroup(pgName=port_group_name)
@@ -307,7 +304,7 @@ class ESXiConnection(GenericConnection):
         :param vm_name: Name of VM to look for.
         :return: Returns Virtual Machine if found, else None.
         """
-        return self.get_object_by_name(vim.VirtualMachine, vm_name)
+        return self.get_esxi_object(vim.VirtualMachine, vm_name)
 
     def get_vm_ip_address(self, vm_name: str) -> str | None:
         """

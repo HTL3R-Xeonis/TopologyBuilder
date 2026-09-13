@@ -146,7 +146,8 @@ class APIHandler:
         data = APIHandler.get(
             f"{Settings.API.ESXI_TEMPLATE_SERVER_URL}/api/search?name={template_name}"
         )
-        return next(r for r in data["results"])["template"]["file"]
+        template = next(r for r in data["results"])["template"]
+        return f"{template['_source_dir']}/{template['file']}"
 
     @staticmethod
     def get_gns3_template_names() -> set[str]:

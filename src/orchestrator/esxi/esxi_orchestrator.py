@@ -4,10 +4,11 @@ from loguru import logger
 from pyVim.task import WaitForTasks
 from pyVmomi import vim
 
-from src.connections import APIHandler
 from src.connections.esxi_connection import ESXiConnection
 from src.graph.blocks import GenericNode
 from src.settings import Settings, Verbosity
+
+from .ova_importer import OvaImporter
 
 
 class ESXiOrchestrator:
@@ -56,7 +57,7 @@ class ESXiOrchestrator:
             update_spec.policy.security.macChanges = True
             is_change_needed = True
         if is_change_needed:
-            host = self.esxi_connection.get_object_by_name(vim.HostSystem)
+            host = self.esxi_connection.get_esxi_object(vim.HostSystem)
             if host is None:
                 logger.error(
                     msg
@@ -198,7 +199,7 @@ class ESXiOrchestrator:
         :return: Returns a list of ``vim.Task`` objects for the deletion process of each virtual machine.
         :raises RuntimeError: Is thrown when no ContainerView can be created.
         """
-        virtual_machines = self.esxi_connection.get_object_by_name(
+        virtual_machines = self.esxi_connection.get_esxi_object(
             vim.VirtualMachine, get_all=True
         )
         tasks = []
@@ -274,21 +275,16 @@ class ESXiOrchestrator:
         )
         # --------------------------------------------------------------------------------------------------------------
 
-        ova_filename = APIHandler.get_ova(node.image)
-        mapped_network = self._create_mapped_network(node)
-
-        # @TODO CONTROL IF RESOURCES ARE EVEN ON THE ESXI HOST. PROPABLY BEST TO CHECK ON THE DEPLOYMENT API.
-        json = {
-            "ip": self.esxi_connection.ip,
-            "port": self.esxi_connection.port,
-            "vm_name": node.name,
-            "ova_filename": ova_filename,
-            "datastore": datastore,
-            "network": mapped_network,
-        }
-
-        Verbosity.volumatic_print(
-            Verbosity.DEBUG, ("VM_Deployment_JSON_Data: " + str(json))
+        datastore_object = self.esxi_connection.get_esxi_object(
+            vim.Datastore, datastore
         )
+        if not isinstance(datastore_object, vim.Datastore):
+            raise TypeError(f"No datastore found with name: {datastore}")
 
-        APIHandler.post(url="http://10.20.20.172:8003/deploy/ova", json=json)
+        importer = OvaImporter(
+            esxi_connection=self.esxi_connection,
+            node=node,
+            datastore=datastore_object,
+            network_mapping=self._create_mapped_network(node),
+        )
+        importer.deploy_ova()

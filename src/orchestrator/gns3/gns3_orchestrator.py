@@ -4,7 +4,7 @@ from src.connections import SSHConnection
 from src.connections.gns3_connection import GNS3Connection
 from src.graph import Graph
 from src.graph.blocks import GenericNode
-from src.orchestrator.gns3_vm_interface_setup import GNS3VMInterfaceSetup
+from src.orchestrator.gns3.gns3_vm_interface_setup import GNS3VMInterfaceSetup
 from src.settings import Settings
 
 

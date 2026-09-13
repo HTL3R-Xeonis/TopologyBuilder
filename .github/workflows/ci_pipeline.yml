@@ -31,7 +31,7 @@ jobs:
           LITERAL_API_VALUES: "true"
         run: |
           pip install pytest
-          python -m pytest ./tests
+          python -m pytest
 
       # LINTER
       - name: Ruff installieren
