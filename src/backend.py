@@ -115,6 +115,42 @@ class TopologyBackend:
         finally:
             os.unlink(tmp_path)
 
+    def deploy_topology(self, topology_file: str, topology_yaml_text: str) -> Graph:
+        """
+        Deploys every node/edge described by topology_yaml_text live,
+        incrementally (see add_node's own docstring for what
+        incremental means and its VLAN-subinterface caveat) - reuses
+        anything already live by name, creates whatever's new, never
+        removes anything already live that isn't in
+        topology_yaml_text. Only after a successful deploy does it
+        overwrite topology_file with topology_yaml_text - a failed
+        deploy leaves topology_file completely untouched, same
+        guarantee add_node/add_link already give.
+        :param topology_file: path to the topology YAML file to overwrite on success
+        :param topology_yaml_text: the new topology's full YAML content (not yet on disk anywhere)
+        :return: the freshly deployed Graph
+        :raises ValueError: if topology_yaml_text itself is invalid (bad role/image/edge).
+        :raises RuntimeError: propagated from VMOrchestrator.deploy_graph on deploy failure.
+        """
+        fd, tmp_path = tempfile.mkstemp(suffix=".yaml")
+        try:
+            with os.fdopen(fd, "w") as file:
+                file.write(topology_yaml_text)
+            tmp_validator = TopologyFileValidation(tmp_path)
+            tmp_validator.validate_file()
+            graph = Graph(tmp_validator.nodes, tmp_validator.edges)
+        finally:
+            os.unlink(tmp_path)
+
+        self._set_project_name(topology_file)
+        self._orchestrator.deploy_graph(
+            graph, self._gns3_username, self._gns3_password, incremental=True
+        )
+
+        with open(topology_file, "w") as file:
+            file.write(topology_yaml_text)
+        return graph
+
     def add_node(
         self, topology_file: str, name: str, role: str, image: str
     ) -> GenericNode:

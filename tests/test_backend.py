@@ -330,3 +330,65 @@ def backend_010(tmp_path) -> None:
     reloaded = TopologyFileValidation(topology_file)
     reloaded.validate_file()
     assert any({e[0], e[2]} == {"PC1", "PC2"} for e in reloaded.edges)
+
+
+_NEW_TOPOLOGY_YAML = """\
+nodes:
+  - image: VPCS
+    role: PC
+    names:
+      - BUNDLE-PC1
+      - BUNDLE-PC2
+edges:
+  - [ BUNDLE-PC1, Ethernet0, BUNDLE-PC2, Ethernet0 ]
+"""
+
+
+@allure.title("deploy_topology deployt inkrementell und schreibt die YAML-Datei erst danach")
+@allure.description(
+    "Überprüft, dass deploy_topology() den übergebenen YAML-Text live "
+    "deployt (incremental=True) und die reale Topology-YAML-Datei "
+    "danach vollständig durch diesen Text ersetzt"
+)
+@allure.tag("positiv-test", "backend")
+@allure.feature("backend")
+@allure.severity(allure.severity_level.CRITICAL)
+def backend_011(tmp_path) -> None:
+    _reset_settings()
+    topology_file = _copy_topology(tmp_path)
+    backend, orchestrator = _make_backend()
+
+    graph = backend.deploy_topology(topology_file, _NEW_TOPOLOGY_YAML)
+
+    assert "BUNDLE-PC1" in graph.nodes
+    orchestrator.deploy_graph.assert_called_once()
+    call_args = orchestrator.deploy_graph.call_args
+    assert "BUNDLE-PC1" in call_args[0][0].nodes
+    assert call_args.kwargs["incremental"] is True
+
+    with open(topology_file) as file:
+        assert file.read() == _NEW_TOPOLOGY_YAML
+
+
+@allure.title("deploy_topology lässt die YAML-Datei unverändert, wenn das Deployment fehlschlägt")
+@allure.description(
+    "Überprüft, dass deploy_topology() die reale Topology-YAML-Datei "
+    "NICHT überschreibt, wenn VMOrchestrator.deploy_graph fehlschlägt"
+)
+@allure.tag("negativ-test", "backend")
+@allure.feature("backend")
+@allure.severity(allure.severity_level.CRITICAL)
+def backend_012(tmp_path) -> None:
+    _reset_settings()
+    topology_file = _copy_topology(tmp_path)
+    backend, orchestrator = _make_backend()
+    orchestrator.deploy_graph.side_effect = RuntimeError("deploy failed")
+
+    with open(topology_file) as file:
+        original_content = file.read()
+
+    with pytest.raises(RuntimeError, match="deploy failed"):
+        backend.deploy_topology(topology_file, _NEW_TOPOLOGY_YAML)
+
+    with open(topology_file) as file:
+        assert file.read() == original_content
