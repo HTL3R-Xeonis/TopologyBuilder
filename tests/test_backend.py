@@ -103,7 +103,10 @@ def backend_002(tmp_path) -> None:
 
     orchestrator.deploy_graph.assert_called_once()
     deployed_graph = orchestrator.deploy_graph.call_args[0][0]
-    assert deployed_graph.nodes["PC1"].get_interface(deployed_graph.nodes["PC2"]) is not None
+    assert (
+        deployed_graph.nodes["PC1"].get_interface(deployed_graph.nodes["PC2"])
+        is not None
+    )
 
 
 @allure.title("remove_node löscht den GNS3-Node und die ESXi-VM, dann die YAML-Zeilen")
@@ -164,7 +167,9 @@ def backend_004(tmp_path) -> None:
         backend.remove_node(topology_file, "GHOST")
 
 
-@allure.title("remove_node überspringt die Live-Löschung, wenn kein GNS3-Projekt existiert")
+@allure.title(
+    "remove_node überspringt die Live-Löschung, wenn kein GNS3-Projekt existiert"
+)
 @allure.description(
     "Überprüft, dass remove_node() weiterhin die Topology-YAML "
     "aktualisiert, auch wenn (noch) kein passendes GNS3-Projekt live "
@@ -235,7 +240,9 @@ def backend_006(tmp_path) -> None:
     assert not any({e[0], e[2]} == {"PC1", "SW-C1"} for e in reloaded.edges)
 
 
-@allure.title("add_node lässt die YAML-Datei unverändert, wenn das Deployment fehlschlägt")
+@allure.title(
+    "add_node lässt die YAML-Datei unverändert, wenn das Deployment fehlschlägt"
+)
 @allure.description(
     "Überprüft, dass add_node() den neuen Knoten NICHT in die "
     "Topology-YAML schreibt, wenn VMOrchestrator.deploy_graph "
@@ -261,7 +268,9 @@ def backend_007(tmp_path) -> None:
     assert not any("PC99" in g["names"] for g in reloaded.nodes)
 
 
-@allure.title("add_link lässt die YAML-Datei unverändert, wenn das Deployment fehlschlägt")
+@allure.title(
+    "add_link lässt die YAML-Datei unverändert, wenn das Deployment fehlschlägt"
+)
 @allure.description(
     "Überprüft, dass add_link() die neue Edge NICHT in die "
     "Topology-YAML schreibt, wenn VMOrchestrator.deploy_graph "
@@ -287,7 +296,9 @@ def backend_008(tmp_path) -> None:
     assert not any({e[0], e[2]} == {"PC1", "PC2"} for e in reloaded.edges)
 
 
-@allure.title("add_node schreibt den neuen Knoten erst NACH einem erfolgreichen Deployment in die YAML-Datei")
+@allure.title(
+    "add_node schreibt den neuen Knoten erst NACH einem erfolgreichen Deployment in die YAML-Datei"
+)
 @allure.description(
     "Überprüft, dass die reale Topology-YAML-Datei nach einem "
     "erfolgreichen add_node()-Aufruf tatsächlich den neuen Knoten "
@@ -310,7 +321,9 @@ def backend_009(tmp_path) -> None:
     assert any("PC99" in g["names"] for g in reloaded.nodes)
 
 
-@allure.title("add_link schreibt die neue Edge erst NACH einem erfolgreichen Deployment in die YAML-Datei")
+@allure.title(
+    "add_link schreibt die neue Edge erst NACH einem erfolgreichen Deployment in die YAML-Datei"
+)
 @allure.description(
     "Überprüft, dass die reale Topology-YAML-Datei nach einem "
     "erfolgreichen add_link()-Aufruf tatsächlich die neue Edge enthält"
@@ -344,7 +357,9 @@ edges:
 """
 
 
-@allure.title("deploy_topology deployt inkrementell und schreibt die YAML-Datei erst danach")
+@allure.title(
+    "deploy_topology deployt inkrementell und schreibt die YAML-Datei erst danach"
+)
 @allure.description(
     "Überprüft, dass deploy_topology() den übergebenen YAML-Text live "
     "deployt (incremental=True) und die reale Topology-YAML-Datei "
@@ -370,7 +385,9 @@ def backend_011(tmp_path) -> None:
         assert file.read() == _NEW_TOPOLOGY_YAML
 
 
-@allure.title("deploy_topology lässt die YAML-Datei unverändert, wenn das Deployment fehlschlägt")
+@allure.title(
+    "deploy_topology lässt die YAML-Datei unverändert, wenn das Deployment fehlschlägt"
+)
 @allure.description(
     "Überprüft, dass deploy_topology() die reale Topology-YAML-Datei "
     "NICHT überschreibt, wenn VMOrchestrator.deploy_graph fehlschlägt"

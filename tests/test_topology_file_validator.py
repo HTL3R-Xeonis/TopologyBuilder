@@ -396,7 +396,9 @@ def conf_file_025() -> None:
     c.validate_file()
 
 
-@allure.title("add_node fügt zu bestehender Node-Group mit gleicher Rolle und Image hinzu")
+@allure.title(
+    "add_node fügt zu bestehender Node-Group mit gleicher Rolle und Image hinzu"
+)
 @allure.description(
     "Überprüft, dass add_node() einen neuen Namen an eine bestehende "
     "Node-Group anhängt, wenn Rolle und Image exakt übereinstimmen, "
@@ -437,7 +439,9 @@ def conf_file_027() -> None:
     assert new_group == {"names": ["NEW-VM"], "role": "VM", "image": "pfSense"}
 
 
-@allure.title("remove_node entfernt den Namen, die leere Gruppe und referenzierende Edges")
+@allure.title(
+    "remove_node entfernt den Namen, die leere Gruppe und referenzierende Edges"
+)
 @allure.description(
     "Überprüft, dass remove_node() den Namen aus seiner Gruppe entfernt, "
     "die Gruppe komplett fallen lässt, wenn sie dadurch leer wird, und "
@@ -458,7 +462,9 @@ def conf_file_028() -> None:
     assert not any(e[0] == "PC4" or e[2] == "PC4" for e in c.edges)
 
 
-@allure.title("remove_node lässt die Gruppe bestehen, wenn noch andere Namen übrig sind")
+@allure.title(
+    "remove_node lässt die Gruppe bestehen, wenn noch andere Namen übrig sind"
+)
 @allure.description(
     "Überprüft, dass remove_node() eine Node-Group nicht fallen lässt, "
     "solange nach dem Entfernen noch mindestens ein anderer Name übrig ist"
@@ -477,7 +483,9 @@ def conf_file_029() -> None:
     assert "PC2" in pc_group["names"]
 
 
-@allure.title("add_edge und remove_edge fügen hinzu bzw. entfernen unabhängig von der Seite")
+@allure.title(
+    "add_edge und remove_edge fügen hinzu bzw. entfernen unabhängig von der Seite"
+)
 @allure.description(
     "Überprüft, dass add_edge() eine neue Edge anhängt, und dass "
     "remove_edge() jede Edge zwischen zwei Knoten entfernt, unabhängig "
@@ -497,7 +505,9 @@ def conf_file_030() -> None:
     assert ["PC1", "gi0/1", "PC2", "gi0/1"] not in c.edges
 
 
-@allure.title("save schreibt nodes/edges so, dass eine neue Validierung dieselben Daten liefert")
+@allure.title(
+    "save schreibt nodes/edges so, dass eine neue Validierung dieselben Daten liefert"
+)
 @allure.description(
     "Überprüft den vollen Round-Trip: add_node()/add_edge() gefolgt von "
     "save(), dann eine frische TopologyFileValidation auf derselben "
@@ -523,6 +533,8 @@ def conf_file_031(tmp_path) -> None:
     reloaded.validate_file()
     assert reloaded.nodes == c.nodes
     assert reloaded.edges == c.edges
-    pc_group = next(g for g in reloaded.nodes if g["role"] == "PC" and g["image"] == "VPCS")
+    pc_group = next(
+        g for g in reloaded.nodes if g["role"] == "PC" and g["image"] == "VPCS"
+    )
     assert "PC99" in pc_group["names"]
     assert ["PC99", "gi0/0", "SW-C1", "gi0/9"] in reloaded.edges

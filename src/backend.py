@@ -284,7 +284,9 @@ class TopologyBackend:
                 gns3_vm_ip, self._gns3_port, project_id
             )
             node_ids = {
-                n["name"]: n["node_id"] for n in live_nodes if n["name"] in (node1, node2)
+                n["name"]: n["node_id"]
+                for n in live_nodes
+                if n["name"] in (node1, node2)
             }
             if node1 in node_ids and node2 in node_ids:
                 wanted = {node_ids[node1], node_ids[node2]}
@@ -295,9 +297,7 @@ class TopologyBackend:
                     (
                         candidate
                         for candidate in live_links
-                        if {
-                            endpoint["node_id"] for endpoint in candidate["nodes"]
-                        }
+                        if {endpoint["node_id"] for endpoint in candidate["nodes"]}
                         == wanted
                     ),
                     None,
