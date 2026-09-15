@@ -229,6 +229,48 @@ class GNS3Connection(APIHandler):
         return True
 
     @staticmethod
+    def ensure_project_open(ip: str, port: int, project_id: str) -> None:
+        """
+        Reopens the given GNS3 project if the controller's own in-memory
+        state currently has it closed. Confirmed happening live during a
+        long-running TopologyOperator session: GNS3's own project
+        `status` can silently go from "opened" back to "closed"
+        independently of whether the project's nodes are still actually
+        running - every mutating per-node/per-link call below then fails
+        outright with a real `403 Forbidden`/`"The project is not
+        opened"` from GNS3 itself (confirmed via a direct API probe, not
+        guessed). `_init_project` already does this same check once, up
+        front, for a full `deploy_graph` call (add_node/add_link/
+        deploy_topology all go through it); this is the same check for
+        the standalone per-node/per-link mutations below, which never go
+        through `_init_project` at all - a no-op if the project is
+        already open, the common case, at the cost of one extra GET
+        before each mutating call.
+        :param ip: GNS3 IP address
+        :param port: GNS3 API port
+        :param project_id: the project to ensure is open
+        :raises TimeoutError: Is thrown when it takes too long to receive a response.
+        :raises RuntimeError: Is thrown when checking or reopening the project fails.
+        """
+        try:
+            project = GNS3Connection.get(f"http://{ip}:{port}/v2/projects/{project_id}")
+        except requests.exceptions.HTTPError as exc:
+            logger.error(
+                msg := f"Failed to check GNS3 project '{project_id}' status on {ip}"
+            )
+            raise RuntimeError(msg) from exc
+        if project.get("status") == "opened":
+            return
+        Verbosity.volumatic_print(Verbosity.NORMAL, f"Reopens GNS3 project {project_id}")
+        try:
+            GNS3Connection.post(f"http://{ip}:{port}/v2/projects/{project_id}/open")
+        except requests.exceptions.HTTPError as exc:
+            logger.error(
+                msg := f"Failed to reopen GNS3 project '{project_id}' on {ip}"
+            )
+            raise RuntimeError(msg) from exc
+
+    @staticmethod
     def delete_node(ip: str, port: int, project_id: str, node_id: str) -> None:
         """
         Deletes a single node from a project, leaving every other node
@@ -245,6 +287,7 @@ class GNS3Connection(APIHandler):
         if Settings.IS_DRY_RUN:
             Verbosity.volumatic_print(Verbosity.NORMAL, f"Would delete node {node_id}")
             return
+        GNS3Connection.ensure_project_open(ip, port, project_id)
         Verbosity.volumatic_print(Verbosity.NORMAL, f"Deletes node {node_id}")
         try:
             GNS3Connection.delete(
@@ -273,6 +316,7 @@ class GNS3Connection(APIHandler):
         if Settings.IS_DRY_RUN:
             Verbosity.volumatic_print(Verbosity.NORMAL, f"Would delete link {link_id}")
             return
+        GNS3Connection.ensure_project_open(ip, port, project_id)
         Verbosity.volumatic_print(Verbosity.NORMAL, f"Deletes link {link_id}")
         try:
             GNS3Connection.delete(
@@ -301,6 +345,7 @@ class GNS3Connection(APIHandler):
         if Settings.IS_DRY_RUN:
             Verbosity.volumatic_print(Verbosity.NORMAL, f"Would start node {node_id}")
             return
+        GNS3Connection.ensure_project_open(ip, port, project_id)
         Verbosity.volumatic_print(Verbosity.NORMAL, f"Starts node {node_id}")
         try:
             GNS3Connection.post(
@@ -328,6 +373,7 @@ class GNS3Connection(APIHandler):
         if Settings.IS_DRY_RUN:
             Verbosity.volumatic_print(Verbosity.NORMAL, f"Would stop node {node_id}")
             return
+        GNS3Connection.ensure_project_open(ip, port, project_id)
         Verbosity.volumatic_print(Verbosity.NORMAL, f"Stops node {node_id}")
         try:
             GNS3Connection.post(
@@ -355,6 +401,7 @@ class GNS3Connection(APIHandler):
         if Settings.IS_DRY_RUN:
             Verbosity.volumatic_print(Verbosity.NORMAL, f"Would reload node {node_id}")
             return
+        GNS3Connection.ensure_project_open(ip, port, project_id)
         Verbosity.volumatic_print(Verbosity.NORMAL, f"Reloads node {node_id}")
         try:
             GNS3Connection.post(
