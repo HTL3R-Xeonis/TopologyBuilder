@@ -4,7 +4,7 @@ import atexit
 import re
 import ssl
 import time
-from typing import Optional, List, TypeVar
+from typing import Callable, Optional, List, TypeVar
 from typing import TYPE_CHECKING
 
 import pyVmomi
@@ -23,6 +23,24 @@ from src.settings import Settings, Verbosity
 
 
 T = TypeVar("T")
+
+# A long-lived ESXiConnection's underlying pyvmomi/SOAP session can go
+# stale with no warning - observed twice in production against the same
+# real root cause: once as CreateContainerView raising vmodl.RuntimeFault
+# (see _get_object_by_name's own pre-existing except clause, which only
+# ever caught this one), and separately as a raw
+# http.client.RemoteDisconnected (a ConnectionError subclass) propagating
+# completely unwrapped since nothing caught it at all. ssl.SSLError is
+# included defensively for the same dead-socket root cause, since
+# connect() negotiates its own SSL context. See
+# ESXiConnection._call_with_reconnect's own docstring for how these are
+# used - never added to newly, speculatively guard against anything that
+# hasn't actually happened here yet.
+_TRANSIENT_ESXI_ERRORS: tuple[type[BaseException], ...] = (
+    vmodl.RuntimeFault,
+    ConnectionError,
+    ssl.SSLError,
+)
 
 
 class ESXiConnection(GenericConnection):
@@ -89,17 +107,59 @@ class ESXiConnection(GenericConnection):
             raise ConnectionError(msg) from exc
         return instance
 
+    def _reconnect(self) -> None:
+        """
+        Re-establishes the ESXi session and refreshes the ``content``/
+        ``view_manager`` handles derived from it. Only ever called by
+        _call_with_reconnect, after a first attempt already failed with a
+        transient connection-level error - vSphere gives no way to check
+        staleness ahead of time, so this is never called proactively.
+        :raises ValueError/TimeoutError/ConnectionError: propagated from connect() if the reconnect attempt itself fails.
+        :raises RuntimeError: Is thrown when no ViewManager is available after reconnecting.
+        """
+        logger.warning(f"ESXi session to {self.ip} looks stale - reconnecting.")
+        self._connection = self.connect()
+        self.content = self.connection.RetrieveContent()
+        view_manager = self.content.viewManager
+        if view_manager is None:
+            raise RuntimeError("vSphere ViewManager is not available.")
+        self.view_manager = view_manager
+
+    def _call_with_reconnect(self, fn: Callable[[], T]) -> T:
+        """
+        Calls ``fn()``, reconnecting and retrying exactly once if the
+        first attempt fails with a transient connection-level error (see
+        _TRANSIENT_ESXI_ERRORS's own comment for the real incidents this
+        fixes). A second failure after the retry is left to propagate
+        normally - it's a real error, not staleness.
+
+        Deliberately only used for read-only vSphere calls
+        (CreateContainerView lookups) - a write/task-launching call
+        (power on/off, delete, reconfigure, ...) isn't safe to blindly
+        retry after a transport error, since the original request may
+        have already landed server-side before the response was lost;
+        those are left uncovered on purpose, not missed.
+        :raises: whatever fn() raises, if it still fails after one reconnect+retry.
+        """
+        try:
+            return fn()
+        except _TRANSIENT_ESXI_ERRORS:
+            self._reconnect()
+            return fn()
+
     def _get_object_by_name(self, vim_type: type[T], name: str = None) -> T | None:
         """
         Finds the object on the ServiceInstance by type and name.
         :param vim_type: Specifies the type of the object to look for. Should be a type of the pyVmomi library.
         :param name: Name of the object to look for. If this is set to None, the first object will be returned.
         :return: Returns the pyVmomi object or None.
-        :raises RuntimeError: Is thrown when no ContainerView can be created.
+        :raises RuntimeError: Is thrown when no ContainerView can be created (even after a reconnect attempt).
         """
         try:
-            view = self.view_manager.CreateContainerView(
-                self.content.rootFolder, [vim_type], True
+            view = self._call_with_reconnect(
+                lambda: self.view_manager.CreateContainerView(
+                    self.content.rootFolder, [vim_type], True
+                )
             )
         except vmodl.RuntimeFault as fault:
             logger.error(msg := "Failed to create container view.")
@@ -143,8 +203,10 @@ class ESXiConnection(GenericConnection):
         Returns every datastore registered on the host.
         :return: list of all datastores
         """
-        view = self.view_manager.CreateContainerView(
-            self.content.rootFolder, [vim.Datastore], True
+        view = self._call_with_reconnect(
+            lambda: self.view_manager.CreateContainerView(
+                self.content.rootFolder, [vim.Datastore], True
+            )
         )
         try:
             return list(view.view)
@@ -190,8 +252,10 @@ class ESXiConnection(GenericConnection):
         Returns every VM registered on the host.
         :return: list of all VMs
         """
-        view = self.view_manager.CreateContainerView(
-            self.content.rootFolder, [vim.VirtualMachine], True
+        view = self._call_with_reconnect(
+            lambda: self.view_manager.CreateContainerView(
+                self.content.rootFolder, [vim.VirtualMachine], True
+            )
         )
         try:
             return list(view.view)
@@ -244,8 +308,10 @@ class ESXiConnection(GenericConnection):
         :return: list of matching VMs
         """
         pattern = re.compile(rf"^{re.escape(name)}([ _]\(?\d+\)?)?$")
-        view = self.view_manager.CreateContainerView(
-            self.content.rootFolder, [vim.VirtualMachine], True
+        view = self._call_with_reconnect(
+            lambda: self.view_manager.CreateContainerView(
+                self.content.rootFolder, [vim.VirtualMachine], True
+            )
         )
         try:
             return [vm for vm in view.view if pattern.match(vm.name)]

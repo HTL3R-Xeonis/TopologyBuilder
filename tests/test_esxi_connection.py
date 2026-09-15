@@ -1153,3 +1153,164 @@ def esxi_connection_045() -> None:
     conn.reset_vm(vm)
 
     vm.ResetVM_Task.assert_not_called()
+
+
+@allure.title(
+    "_call_with_reconnect reconnected und wiederholt fn() einmal nach einem transienten Fehler"
+)
+@allure.description(
+    "Überprüft, dass _call_with_reconnect nach einem ersten fehlgeschlagenen "
+    "Aufruf mit einem transienten Verbindungsfehler (z.B. ConnectionError) "
+    "_reconnect() aufruft und fn() genau einmal erneut versucht - simuliert "
+    "das reale, mehrfach beobachtete Problem einer über die Zeit ungültig "
+    "gewordenen pyvmomi/SOAP-Session"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_046() -> None:
+    conn = _make_esxi_connection()
+    conn._reconnect = MagicMock()
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ConnectionError("Remote end closed connection without response")
+        return "ok"
+
+    result = conn._call_with_reconnect(flaky)
+
+    assert result == "ok"
+    assert calls["n"] == 2
+    conn._reconnect.assert_called_once()
+
+
+@allure.title(
+    "_call_with_reconnect gibt den zweiten Fehler weiter, wenn auch der Retry fehlschlägt"
+)
+@allure.description(
+    "Überprüft, dass _call_with_reconnect nicht endlos wiederholt - schlägt "
+    "fn() auch nach dem einmaligen Reconnect erneut fehl, wird dieser zweite "
+    "Fehler unverändert weitergegeben statt verschluckt"
+)
+@allure.tag("negativ-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def esxi_connection_047() -> None:
+    conn = _make_esxi_connection()
+    conn._reconnect = MagicMock()
+
+    def always_fails():
+        raise ConnectionError("still broken")
+
+    with pytest.raises(ConnectionError, match="still broken"):
+        conn._call_with_reconnect(always_fails)
+
+    conn._reconnect.assert_called_once()
+
+
+@allure.title("_call_with_reconnect reconnected nicht, wenn fn() sofort erfolgreich ist")
+@allure.description(
+    "Überprüft, dass _call_with_reconnect _reconnect() nicht aufruft, wenn "
+    "der erste Aufruf von fn() bereits erfolgreich ist - der Normalfall bei "
+    "einer gesunden Session"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def esxi_connection_048() -> None:
+    conn = _make_esxi_connection()
+    conn._reconnect = MagicMock()
+
+    result = conn._call_with_reconnect(lambda: "fine")
+
+    assert result == "fine"
+    conn._reconnect.assert_not_called()
+
+
+@allure.title("_reconnect baut die Session neu auf und aktualisiert content/view_manager")
+@allure.description(
+    "Überprüft, dass _reconnect() connect() erneut aufruft und die daraus "
+    "abgeleiteten content- und view_manager-Handles auf die frische Session "
+    "aktualisiert, statt die veralteten Handles der alten Session zu behalten"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_049() -> None:
+    conn = _make_esxi_connection()
+    conn._ip_address = "10.20.20.202"
+
+    new_instance = MagicMock()
+    new_content = MagicMock()
+    new_content.viewManager = MagicMock()
+    new_instance.RetrieveContent.return_value = new_content
+    conn.connect = MagicMock(return_value=new_instance)
+
+    conn._reconnect()
+
+    conn.connect.assert_called_once()
+    assert conn._connection is new_instance
+    assert conn.content is new_content
+    assert conn.view_manager is new_content.viewManager
+
+
+@allure.title("_reconnect wirft RuntimeError, wenn die frische Session keinen ViewManager hat")
+@allure.description(
+    "Überprüft, dass _reconnect() einen RuntimeError wirft, wenn die neu "
+    "aufgebaute Session keinen ViewManager liefert - dieselbe Prüfung, die "
+    "__init__ bereits beim allerersten Verbindungsaufbau macht"
+)
+@allure.tag("negativ-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def esxi_connection_050() -> None:
+    conn = _make_esxi_connection()
+    conn._ip_address = "10.20.20.202"
+
+    new_instance = MagicMock()
+    new_content = MagicMock()
+    new_content.viewManager = None
+    new_instance.RetrieveContent.return_value = new_content
+    conn.connect = MagicMock(return_value=new_instance)
+
+    with pytest.raises(RuntimeError, match="ViewManager"):
+        conn._reconnect()
+
+
+@allure.title(
+    "_get_object_by_name reconnected und findet das Objekt trotzdem, wenn die erste CreateContainerView stale war"
+)
+@allure.description(
+    "End-to-end-Test des realen, in Produktion beobachteten Fehlers: "
+    "CreateContainerView schlägt beim ersten Versuch mit vmodl.RuntimeFault "
+    "fehl (abgelaufene Session), _get_object_by_name reconnected über "
+    "_call_with_reconnect und findet das gesuchte Objekt beim zweiten "
+    "Versuch trotzdem - kein RuntimeError mehr für eine bloß veraltete "
+    "Session"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_051() -> None:
+    from pyVmomi import vim, vmodl
+
+    conn = _make_esxi_connection()
+    conn.content = MagicMock()
+    conn._reconnect = MagicMock()
+
+    node = MagicMock()
+    node.name = "dw"
+    good_view = MagicMock()
+    good_view.view = [node]
+
+    conn.view_manager.CreateContainerView.side_effect = [
+        vmodl.RuntimeFault(),
+        good_view,
+    ]
+
+    result = conn._get_object_by_name(vim.VirtualMachine, "dw")
+
+    assert result is node
+    conn._reconnect.assert_called_once()
