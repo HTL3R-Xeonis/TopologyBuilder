@@ -112,9 +112,7 @@ class GenericNode:
         if isinstance(interface, str):
             intf_obj = self.interfaces.get(interface, None)
             if intf_obj is None:
-                logger.error(
-                    msg := f"Interface {interface} does not exist on node {self.name}"
-                )
+                logger.error(msg := f"Interface {interface} does not exist on node {self.name}")
                 raise ValueError(msg)
             return intf_obj.neighbour
 
@@ -153,9 +151,7 @@ class GenericNode:
             or too many interfaces with a vlan were created.
         """
         if if_name in self.interfaces:
-            logger.error(
-                msg := f"Interface {if_name} already exists on node {self.name}"
-            )
+            logger.error(msg := f"Interface {if_name} already exists on node {self.name}")
             raise ValueError(msg)
 
         intf = Interface(if_name, self)

@@ -31,17 +31,13 @@ class HTTPRangeFile(io.RawIOBase):
         self.session = requests.Session()
         self.pos = 0
 
-        with self.session.head(
-            self.url, headers=self.headers, timeout=self.timeout, allow_redirects=True
-        ) as r:
+        with self.session.head(self.url, headers=self.headers, timeout=self.timeout, allow_redirects=True) as r:
             r.raise_for_status()
 
             content_length = r.headers.get("Content-Length")
 
             if content_length is None:
-                raise RuntimeError(
-                    "HTTP-server does not return a content-length header."
-                )
+                raise RuntimeError("HTTP-server does not return a content-length header.")
             self.size = int(content_length)
 
     def readable(self) -> bool:
@@ -118,9 +114,7 @@ class HTTPRangeFile(io.RawIOBase):
             allow_redirects=True,
         ) as r:
             if r.status_code != 206:
-                raise RuntimeError(
-                    f"Range Request {start}-{end}. Status code: {r.status_code}"
-                )
+                raise RuntimeError(f"Range Request {start}-{end}. Status code: {r.status_code}")
 
             data = r.raw.read(size)
 
@@ -182,9 +176,7 @@ class OvaImporter:
         :return: Returns the OVF member.
         :raises RuntimeError: Is thrown when no ovf member was wound
         """
-        ovf_member = next(
-            (m for m in members if m.isfile() and m.name.lower().endswith(".ovf")), None
-        )
+        ovf_member = next((m for m in members if m.isfile() and m.name.lower().endswith(".ovf")), None)
         if ovf_member is None:
             raise RuntimeError("No ovf member found.")
         return ovf_member
@@ -229,10 +221,7 @@ class OvaImporter:
         :return:
         """
         if not lease.capabilities.pullModeSupported:
-            logger.error(
-                msg
-                := f"This ESXi host ({self.esxi_connection.ip}) does not support pull mode."
-            )
+            logger.error(msg := f"This ESXi host ({self.esxi_connection.ip}) does not support pull mode.")
             raise RuntimeError(msg)
 
     def _get_nfc_lease_source_files(
@@ -247,11 +236,7 @@ class OvaImporter:
         :return: Returns a list of Sourcefiles which the ESXi host needs to pull.
         :raises RuntimeError: Is thrown when no device url was found for a requested member.
         """
-        device_urls_by_import_key = {
-            d.importKey: d
-            for d in lease.info.deviceUrl
-            if getattr(d, "importKey", None)
-        }
+        device_urls_by_import_key = {d.importKey: d for d in lease.info.deviceUrl if getattr(d, "importKey", None)}
 
         source_files = []
 
@@ -300,17 +285,13 @@ class OvaImporter:
         for port_group_name in networkMapping.values():
             network = self.esxi_connection.get_esxi_object(vim.Network, port_group_name)
             if not isinstance(network, vim.Network):
-                raise TypeError(
-                    f"None or too many networks found for portgroup. VarType: {type(network)}"
-                )
+                raise TypeError(f"None or too many networks found for portgroup. VarType: {type(network)}")
             new_changes.append(self._create_new_nic(network, key))
             key -= 1
         vm_config_spec.deviceChange = new_changes
 
     @staticmethod
-    def _create_new_nic(
-        network: vim.Network, key: int
-    ) -> vim.vm.device.VirtualDeviceSpec:
+    def _create_new_nic(network: vim.Network, key: int) -> vim.vm.device.VirtualDeviceSpec:
         """
         Returns a new change to generate a vim.vm.device.VirtualVmxnet3() NIC,
         which is connected to the given network.
@@ -330,9 +311,7 @@ class OvaImporter:
         nic.backing = vim.vm.device.VirtualEthernetCard.NetworkBackingInfo(
             deviceName=network.name, network=network, useAutoDetect=False
         )
-        return vim.vm.device.VirtualDeviceSpec(
-            operation=vim.vm.device.VirtualDeviceSpec.Operation.add, device=nic
-        )
+        return vim.vm.device.VirtualDeviceSpec(operation=vim.vm.device.VirtualDeviceSpec.Operation.add, device=nic)
 
     def deploy_ova(self) -> None:
         """
@@ -354,13 +333,11 @@ class OvaImporter:
                 hostSystem=host,
             )
 
-            import_spec_result = (
-                self.esxi_connection.content.ovfManager.CreateImportSpec(
-                    ovfDescriptor=ovf_descriptor,
-                    resourcePool=resource_pool,
-                    datastore=self._datastore,
-                    cisp=params,
-                )
+            import_spec_result = self.esxi_connection.content.ovfManager.CreateImportSpec(
+                ovfDescriptor=ovf_descriptor,
+                resourcePool=resource_pool,
+                datastore=self._datastore,
+                cisp=params,
             )
 
             self._edit_nics(import_spec_result, self._network_mapping)
@@ -417,9 +394,7 @@ class OvaImporter:
                 raise RuntimeError(f"HttpNfcLease Error: {msg}")
 
             if time.time() > deadline:
-                raise TimeoutError(
-                    "Ran into a timeout while initializing the HttpNfcLease."
-                )
+                raise TimeoutError("Ran into a timeout while initializing the HttpNfcLease.")
 
             progress = getattr(lease, "initializeProgress", None)
             if not progress is None:
@@ -427,9 +402,7 @@ class OvaImporter:
             time.sleep(1)
 
     @staticmethod
-    def _print_pull_task_progress(
-        task: vim.Task, task_progress: int | None, task_start_time: float
-    ) -> int | None:
+    def _print_pull_task_progress(task: vim.Task, task_progress: int | None, task_start_time: float) -> int | None:
         """
         Prints the progress of the task which gets pulled.
         :param task: Task to track the progress from.

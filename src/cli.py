@@ -69,9 +69,7 @@ def validate() -> None:
 
 @app.command()
 def visualize(
-    detailed: bool = typer.Option(
-        False, "--detail", "-d", help="Prints the details of the network graph."
-    ),
+    detailed: bool = typer.Option(False, "--detail", "-d", help="Prints the details of the network graph."),
 ) -> None:
     """Construct the graph and print it."""
     validator = TopologyFileValidation(Settings.TOPOLOGY_FILE)
@@ -88,15 +86,9 @@ def visualize(
 
 @connection_app.callback()
 def connection_main(
-    address: str = typer.Option(
-        None, "--address", "-a", help="The IP address of the ESXi server."
-    ),
-    esxi_username: str = typer.Option(
-        None, "--esxi_username", "-u", help="A username of the ESXi server."
-    ),
-    esxi_password: str = typer.Option(
-        None, "--esxi_password", "-p", help="The password for the ESXi user."
-    ),
+    address: str = typer.Option(None, "--address", "-a", help="The IP address of the ESXi server."),
+    esxi_username: str = typer.Option(None, "--esxi_username", "-u", help="A username of the ESXi server."),
+    esxi_password: str = typer.Option(None, "--esxi_password", "-p", help="The password for the ESXi user."),
     gns3_vm_name: str = typer.Option(
         None,
         "--gns3_vm_name",
@@ -116,15 +108,9 @@ def connection_main(
 
 @connection_app.command()
 def deploy(
-    gns3_username: str = typer.Option(
-        None, "--gns3_username", "-u", help="A username of the GNS3 server."
-    ),
-    gns3_password: str = typer.Option(
-        None, "--gns3_password", "-p", help="The password for the GNS3 user."
-    ),
-    is_dry_run: bool = typer.Option(
-        False, "--dry_run", "-d", help="Prints what would have been deployed."
-    ),
+    gns3_username: str = typer.Option(None, "--gns3_username", "-u", help="A username of the GNS3 server."),
+    gns3_password: str = typer.Option(None, "--gns3_password", "-p", help="The password for the GNS3 user."),
+    is_dry_run: bool = typer.Option(False, "--dry_run", "-d", help="Prints what would have been deployed."),
     is_incremental: bool = typer.Option(
         False,
         "--incremental",
@@ -169,15 +155,12 @@ def deploy(
 
 @app.command()
 def generate(
-    prompt: str = typer.Argument(
-        ..., help="Natural-language description of the desired topology."
-    ),
+    prompt: str = typer.Argument(..., help="Natural-language description of the desired topology."),
     output: Path = typer.Option(
         None,
         "--output",
         "-o",
-        help="Path to write the generated topology file to. Defaults to "
-        "--topology/-t's current value.",
+        help="Path to write the generated topology file to. Defaults to --topology/-t's current value.",
     ),
 ) -> None:
     """
@@ -194,9 +177,7 @@ def generate(
 
 @connection_app.command()
 def generate_deploy(
-    prompt: str = typer.Argument(
-        ..., help="Natural-language description of the desired topology."
-    ),
+    prompt: str = typer.Argument(..., help="Natural-language description of the desired topology."),
 ) -> None:
     """
     Generates a topology from a natural-language prompt,
@@ -260,15 +241,11 @@ def portgroups() -> None:
     )
     virtual_switch = esxi_connection.get_virtual_switch(Settings.ESXI.VIRTUAL_SWITCH)
     if virtual_switch is None:
-        typer.echo(
-            f"No virtual switch found on the ESXi host by the name: {Settings.ESXI.VIRTUAL_SWITCH}"
-        )
+        typer.echo(f"No virtual switch found on the ESXi host by the name: {Settings.ESXI.VIRTUAL_SWITCH}")
         return
 
     for port_group in esxi_connection.get_vswitch_port_groups(virtual_switch).values():
-        typer.echo(
-            f"{port_group.spec.name} (VLAN {port_group.spec.vlanId}) on {virtual_switch.name}"
-        )
+        typer.echo(f"{port_group.spec.name} (VLAN {port_group.spec.vlanId}) on {virtual_switch.name}")
 
 
 @app.command()
@@ -284,9 +261,7 @@ def logs(
     """Show the most recent entries from the log file."""
     log_file_path = Path(Settings.LOG_FILE_PATH)
     if not log_file_path.exists():
-        typer.secho(
-            f"No log file found at {log_file_path}.", fg=typer.colors.RED, err=True
-        )
+        typer.secho(f"No log file found at {log_file_path}.", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
 
     with open(log_file_path, "r") as file:

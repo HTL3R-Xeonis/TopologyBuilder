@@ -88,9 +88,7 @@ class ESXiConnection(GenericConnection):
         :raises RuntimeError: Is thrown when no ContainerView can be created.
         """
         try:
-            view = self.view_manager.CreateContainerView(
-                self.content.rootFolder, [vim_type], True
-            )
+            view = self.view_manager.CreateContainerView(self.content.rootFolder, [vim_type], True)
         except vmodl.RuntimeFault as fault:
             logger.error(msg := "Failed to create container view.")
             raise RuntimeError(msg) from fault
@@ -107,9 +105,7 @@ class ESXiConnection(GenericConnection):
         finally:
             view.Destroy()
 
-    def get_virtual_switch(
-        self, virtual_switch_name: str
-    ) -> vim.host.VirtualSwitch | None:
+    def get_virtual_switch(self, virtual_switch_name: str) -> vim.host.VirtualSwitch | None:
         """
         Looks for a virtual Switch with the name, specified in ``Settings.Esxi.VIRTUAL_SWITCH``, on the ESXi Host.
         :param virtual_switch_name: Name of the virtual switch to look for.
@@ -120,10 +116,7 @@ class ESXiConnection(GenericConnection):
         virtual_switches = getattr(config.network, "vswitch", [])
 
         for vswitch in virtual_switches:
-            if (
-                isinstance(vswitch, vim.host.VirtualSwitch)
-                and vswitch.name == virtual_switch_name
-            ):
+            if isinstance(vswitch, vim.host.VirtualSwitch) and vswitch.name == virtual_switch_name:
                 return vswitch
         return None
 
@@ -147,23 +140,19 @@ class ESXiConnection(GenericConnection):
 
         if len(virtual_switch_name) > 32:
             logger.error(
-                msg
-                := f"Virtual Switch name is limited to 32 characters. ({len(virtual_switch_name)} characters)"
+                msg := f"Virtual Switch name is limited to 32 characters. ({len(virtual_switch_name)} characters)"
             )
             raise ValueError(msg)
         try:
             network_system.AddVirtualSwitch(vswitchName=virtual_switch_name, spec=None)
         except vim.fault.AlreadyExists:
-            logger.error(
-                msg := f"Virtual Switch already exists on ESXi host: {self.ip}"
-            )
+            logger.error(msg := f"Virtual Switch already exists on ESXi host: {self.ip}")
             raise RuntimeError(msg)
 
         vswitch = self.get_virtual_switch(virtual_switch_name)
         if vswitch is None:
             logger.error(
-                msg
-                := f"Created Virtual switch not found on ESXi host: {self.ip} - vswitch name: {virtual_switch_name}"
+                msg := f"Created Virtual switch not found on ESXi host: {self.ip} - vswitch name: {virtual_switch_name}"
             )
             raise RuntimeError(msg)
         return vswitch
@@ -182,9 +171,7 @@ class ESXiConnection(GenericConnection):
             return
         # ----------------------------------------------------------------------------------------------------------
         if Settings.IS_DRY_RUN:
-            Verbosity.volumatic_print(
-                Verbosity.NORMAL, f"Would add portgroup {pg_name}"
-            )
+            Verbosity.volumatic_print(Verbosity.NORMAL, f"Would add portgroup {pg_name}")
             return
         Verbosity.volumatic_print(Verbosity.NORMAL, f"Adds portgroup {pg_name}")
         # ----------------------------------------------------------------------------------------------------------
@@ -210,9 +197,7 @@ class ESXiConnection(GenericConnection):
             logger.error(msg := f"Port group {pg_name} already exists on ESXi.")
             raise RuntimeError(msg) from exc
         except Exception as exc:
-            logger.error(
-                msg := f"Something went wrong while adding port group {pg_name}."
-            )
+            logger.error(msg := f"Something went wrong while adding port group {pg_name}.")
             raise RuntimeError(msg) from exc
 
     def get_all_port_groups(self) -> dict[str, pyVmomi.vim.host.PortGroup]:
@@ -222,14 +207,9 @@ class ESXiConnection(GenericConnection):
         """
         host = self.get_esxi_object(vim.HostSystem)
 
-        return {
-            port_group.spec.name: port_group
-            for port_group in host.config.network.portgroup
-        }
+        return {port_group.spec.name: port_group for port_group in host.config.network.portgroup}
 
-    def get_vswitch_port_groups(
-        self, virtual_switch: vim.host.VirtualSwitch
-    ) -> dict[str, pyVmomi.vim.host.PortGroup]:
+    def get_vswitch_port_groups(self, virtual_switch: vim.host.VirtualSwitch) -> dict[str, pyVmomi.vim.host.PortGroup]:
         """
         Returns a list of all port groups connected to the virtual switch.
         :return: A list of port groups or empty list.
@@ -251,13 +231,9 @@ class ESXiConnection(GenericConnection):
         """
         # ----------------------------------------------------------------------------------------------------------
         if Settings.IS_DRY_RUN:
-            Verbosity.volumatic_print(
-                Verbosity.NORMAL, f"Would remove portgroup {port_group_name}"
-            )
+            Verbosity.volumatic_print(Verbosity.NORMAL, f"Would remove portgroup {port_group_name}")
             return
-        Verbosity.volumatic_print(
-            Verbosity.NORMAL, f"Removes portgroup {port_group_name}"
-        )
+        Verbosity.volumatic_print(Verbosity.NORMAL, f"Removes portgroup {port_group_name}")
         # ----------------------------------------------------------------------------------------------------------
 
         host = self.get_esxi_object(vim.HostSystem)
@@ -265,18 +241,13 @@ class ESXiConnection(GenericConnection):
         try:
             network.RemovePortGroup(pgName=port_group_name)
         except vim.fault.NotFound as fault:
-            logger.error(
-                msg := f"Port group {port_group_name} not found on host: {self.ip}"
-            )
+            logger.error(msg := f"Port group {port_group_name} not found on host: {self.ip}")
             raise RuntimeError(msg) from fault
         except vim.fault.ResourceInUse as fault:
             logger.error(msg := f"Port group is currently in use on host: {self.ip}")
             raise RuntimeError(msg) from fault
         except Exception as exc:
-            logger.error(
-                msg
-                := f"Something went wrong while removing port group {port_group_name} on host: {self.ip}"
-            )
+            logger.error(msg := f"Something went wrong while removing port group {port_group_name} on host: {self.ip}")
             raise RuntimeError(msg) from exc
 
     def get_vm(self, vm_name: str) -> vim.VirtualMachine | None:

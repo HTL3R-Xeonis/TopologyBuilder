@@ -101,9 +101,7 @@ class APIHandler:
             raise
 
     @staticmethod
-    def parse_response(
-        response: requests.Response, parsing_method: str = "json"
-    ) -> None | dict:
+    def parse_response(response: requests.Response, parsing_method: str = "json") -> None | dict:
         """
         Parses the HTTP response as wanted.
         :param response: Response from the HTTP request.
@@ -118,9 +116,7 @@ class APIHandler:
                 return response.json()
             return NotImplemented
         except json.decoder.JSONDecodeError as e:
-            logger.error(
-                "An error occurred trying to parse the response to using json: " + e.msg
-            )
+            logger.error("An error occurred trying to parse the response to using json: " + e.msg)
             raise
 
     @staticmethod
@@ -143,9 +139,7 @@ class APIHandler:
         :return: Returns the ova file name of the template.
         :raises TimeoutError: Is thrown when it takes too long to receive a response.
         """
-        data = APIHandler.get(
-            f"{Settings.API.ESXI_TEMPLATE_SERVER_URL}/api/search?name={template_name}"
-        )
+        data = APIHandler.get(f"{Settings.API.ESXI_TEMPLATE_SERVER_URL}/api/search?name={template_name}")
         template = next(r for r in data["results"])["template"]
         return f"{template['_source_dir']}/{template['file']}"
 

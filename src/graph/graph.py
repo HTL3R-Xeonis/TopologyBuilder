@@ -137,7 +137,4 @@ class Graph:
         Compact representation of this object.
         :return: String representing this object.
         """
-        return (
-            f"{self.__class__.__name__}:\n"
-            f"  nodes: {nested_formatter('  nodes: ', list(self.nodes.values()))}"
-        )
+        return f"{self.__class__.__name__}:\n  nodes: {nested_formatter('  nodes: ', list(self.nodes.values()))}"

@@ -25,14 +25,10 @@ def main():
     )
 
     print_format = (
-        "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
-        "<level>{level: <8}</level> - "
-        "<level>{message}</level>"
+        "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> - <level>{message}</level>"
     )
 
-    logger.add(
-        Settings.LOG_FILE_PATH, format=file_format, level="WARNING", rotation="10MB"
-    )
+    logger.add(Settings.LOG_FILE_PATH, format=file_format, level="WARNING", rotation="10MB")
     logger.add(sys.stdout, format=print_format)
     try:
         app()

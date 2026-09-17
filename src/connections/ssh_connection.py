@@ -54,9 +54,7 @@ class SSHConnection(GenericConnection, paramiko.SSHClient):
             logger.error(msg := f"Connection refused to host: {self.ip}:{self.port}")
             raise ConnectionError(msg) from exc
         except paramiko.BadHostKeyException as exc:
-            logger.error(
-                msg := f"Could not verifiy servers host key: {self.ip}:{self.port}"
-            )
+            logger.error(msg := f"Could not verifiy servers host key: {self.ip}:{self.port}")
             raise ConnectionError(msg) from exc
         except Exception as exc:
             logger.error(msg := f"Connection to {self.ip}:{self.port} failed: {exc}")

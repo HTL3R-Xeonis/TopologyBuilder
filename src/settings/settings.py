@@ -20,10 +20,7 @@ def check_value_type[T](value: Any, value_type: type[T] | tuple[type[T], ...]) -
     :raises ValueError: Is thrown when the value is not of the corresponding type.
     """
     if not isinstance(value, value_type):
-        logger.error(
-            msg
-            := f"Setting value {value} is of wrong type {type(value)}. Should be of type {value_type}."
-        )
+        logger.error(msg := f"Setting value {value} is of wrong type {type(value)}. Should be of type {value_type}.")
         raise TypeError(msg)
     return value
 
@@ -87,9 +84,7 @@ class Settings:
                 continue
 
             if value is None and key.lower() != "password":
-                logger.info(
-                    f"{class_path}.{key} is not set. Will be set automatically if possible."
-                )
+                logger.info(f"{class_path}.{key} is not set. Will be set automatically if possible.")
                 unset_settings[key] = None
 
         return unset_settings
@@ -106,17 +101,11 @@ class Settings:
         :param custom_settings: Path to the custom YAML settings file. Set ``None`` to just use default settings.
         :return:
         """
-        if not (
-            default_settings.name.endswith(".yaml")
-            or default_settings.name.endswith(".yml")
-        ):
+        if not (default_settings.name.endswith(".yaml") or default_settings.name.endswith(".yml")):
             logger.error(msg := "Default settings file is not a yaml file.")
             raise ValueError(msg)
         if not default_settings.exists():
-            logger.error(
-                msg
-                := f"Path to default settings file does not exist: {default_settings}"
-            )
+            logger.error(msg := f"Path to default settings file does not exist: {default_settings}")
             raise ValueError(msg)
         if not default_settings.is_file():
             logger.error(msg := "Default settings file is not a file.")
@@ -129,17 +118,11 @@ class Settings:
             Settings.is_fully_initialized(Settings)
             return
 
-        if not (
-            custom_settings.name.endswith(".yaml")
-            or custom_settings.name.endswith(".yml")
-        ):
+        if not (custom_settings.name.endswith(".yaml") or custom_settings.name.endswith(".yml")):
             logger.error(msg := "Custom settings file is not a yaml file.")
             raise ValueError(msg)
         if not custom_settings.exists():
-            logger.error(
-                msg
-                := f"Path to custom settings file does not exist: {default_settings}"
-            )
+            logger.error(msg := f"Path to custom settings file does not exist: {default_settings}")
             raise ValueError(msg)
         if not custom_settings.is_file():
             logger.error(msg := "Custom settings file is not a file.")
@@ -167,9 +150,7 @@ class Settings:
         for key, value in parsed_configuration.items():
             match key.lower():
                 case "verbosity_level":
-                    verbosity = Verbosity.get_verbosity_equivalent(
-                        check_value_type(value, str)
-                    )
+                    verbosity = Verbosity.get_verbosity_equivalent(check_value_type(value, str))
 
                     if verbosity is not None:
                         Settings.VERBOSITY_LEVEL = verbosity
@@ -225,21 +206,13 @@ class Settings:
                 case "management_port_group":
                     Settings.ESXI.MANAGEMENT_PORT_GROUP = check_value_type(value, str)
                 case "ignore_virtual_switches":
-                    Settings.ESXI.IGNORE_VIRTUAL_SWITCHES = set(
-                        check_value_type(value, (set, list))
-                    )
+                    Settings.ESXI.IGNORE_VIRTUAL_SWITCHES = set(check_value_type(value, (set, list)))
                 case "ignore_port_groups":
-                    Settings.ESXI.IGNORE_PORT_GROUPS = set(
-                        check_value_type(value, (set, list))
-                    )
+                    Settings.ESXI.IGNORE_PORT_GROUPS = set(check_value_type(value, (set, list)))
                 case "ignore_virtual_machines":
-                    Settings.ESXI.IGNORE_VIRTUAL_MACHINES = set(
-                        check_value_type(value, (set, list))
-                    )
+                    Settings.ESXI.IGNORE_VIRTUAL_MACHINES = set(check_value_type(value, (set, list)))
                 case "ignore_port_groups":
-                    Settings.ESXI.IGNORE_PORT_GROUPS = set(
-                        check_value_type(value, (list, set))
-                    )
+                    Settings.ESXI.IGNORE_PORT_GROUPS = set(check_value_type(value, (list, set)))
                 case "datastore":
                     Settings.ESXI.DATASTORE = check_value_type(value, str)
                 case "gns3_vm_name":
@@ -273,13 +246,9 @@ class Settings:
                         Settings.GNS3.PROJECT_NAME = value
                     if value is None:
                         if isinstance(Settings._CUSTOM_SETTINGS_FILE_PATH, Path):
-                            Settings.GNS3.PROJECT_NAME = (
-                                Settings._CUSTOM_SETTINGS_FILE_PATH.stem
-                            )
+                            Settings.GNS3.PROJECT_NAME = Settings._CUSTOM_SETTINGS_FILE_PATH.stem
                         else:
-                            Settings.GNS3.PROJECT_NAME = (
-                                Settings._DEFAULT_SETTING_FILE_PATH.stem
-                            )
+                            Settings.GNS3.PROJECT_NAME = Settings._DEFAULT_SETTING_FILE_PATH.stem
                 case "port":
                     Settings.GNS3.PORT = check_value_type(value, (int, type(None)))
                 case "parent_interface":
@@ -303,18 +272,12 @@ class Settings:
                     Settings.API.ESXI_TEMPLATE_SERVER_URL = check_value_type(value, str)
                 case "literal_api_values":
                     if value is None:
-                        value = (
-                            os.getenv("LITERAL_API_VALUES", "false").lower() == "true"
-                        )
+                        value = os.getenv("LITERAL_API_VALUES", "false").lower() == "true"
                     Settings.API.LITERAL_API_VALUES = check_value_type(value, bool)
                 case "literal_esxi_templates":
-                    Settings.API.LITERAL_ESXI_TEMPLATES = set(
-                        check_value_type(value, (list, set))
-                    )
+                    Settings.API.LITERAL_ESXI_TEMPLATES = set(check_value_type(value, (list, set)))
                 case "literal_gns3_templates":
-                    Settings.API.LITERAL_GNS3_TEMPLATES = set(
-                        check_value_type(value, (list, set))
-                    )
+                    Settings.API.LITERAL_GNS3_TEMPLATES = set(check_value_type(value, (list, set)))
                 case _:
                     logger.warning(f"Unrecognized setting: Settings.API.{key.upper()}")
 

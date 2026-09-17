@@ -45,16 +45,12 @@ class GraphOrchestrator:
         :raises TimeoutError: Is thrown when timeout occurs.
         :raises ConnectionError: Is thrown when the connection buildup fails.
         """
-        esxi_connection = ESXiConnection(
-            esxi_host, esxi_port, esxi_username, esxi_password
-        )
+        esxi_connection = ESXiConnection(esxi_host, esxi_port, esxi_username, esxi_password)
 
         self.esxi_orchestrator = ESXiOrchestrator(esxi_connection)
         self.gns3_orchestrator = None
 
-    def execute_graph_deployment(
-        self, graph: Graph, gns3_username: str, gns3_password: str | None = None
-    ) -> None:
+    def execute_graph_deployment(self, graph: Graph, gns3_username: str, gns3_password: str | None = None) -> None:
         """
         Deploys the graph on the ESXi host and GNS3 VM. The connection between the nodes runs solely between GNS3.
         This is established with multiple port groups with unique vlans on the vSwitch in ESXi.
@@ -104,9 +100,7 @@ class GraphOrchestrator:
         self.gns3_orchestrator = GNS3Orchestrator(gns3_connection)
 
         # Configure GNS3 Interfaces
-        self.gns3_orchestrator.configure_gns3_vm_interfaces(
-            graph, gns3_username, gns3_password
-        )
+        self.gns3_orchestrator.configure_gns3_vm_interfaces(graph, gns3_username, gns3_password)
         # Deploy VMs
         self.deploy_vm(graph)
 
@@ -128,9 +122,7 @@ class GraphOrchestrator:
         """
         for node in graph.nodes.values():
             if node.env == Environment.ON_ESXI:
-                self.esxi_orchestrator.deploy_virtual_machine(
-                    node=node, datastore=Settings.ESXI.DATASTORE
-                )
+                self.esxi_orchestrator.deploy_virtual_machine(node=node, datastore=Settings.ESXI.DATASTORE)
                 self.gns3_orchestrator.create_node(node)
 
             if node.env == Environment.ON_GNS3:

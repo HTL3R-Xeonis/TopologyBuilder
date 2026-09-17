@@ -70,13 +70,9 @@ class GNS3Connection(APIHandler):
             self.delete(f"{self.url}/v2/projects/{project_id}")
         except requests.exceptions.HTTPError as exc:
             if getattr(exc.response, "status_code", None) == 404:
-                logger.error(
-                    msg := f"GNS3 project {project_id} does not exist on {self.ip}"
-                )
+                logger.error(msg := f"GNS3 project {project_id} does not exist on {self.ip}")
                 raise RuntimeError(msg) from exc
-            raise RuntimeError(
-                f"Something went wrong with the deletion of a GNS3 project on {self.ip}"
-            ) from exc
+            raise RuntimeError(f"Something went wrong with the deletion of a GNS3 project on {self.ip}") from exc
 
     def _create_new_project(self, name) -> dict[str, Any]:
         """
@@ -145,13 +141,9 @@ class GNS3Connection(APIHandler):
 
         # --------------------------------------------------------------------------------------------------------------
         if Settings.IS_DRY_RUN:
-            Verbosity.volumatic_print(
-                Verbosity.NORMAL, f"Would deploy {node.name} on GNS3: {node.image}"
-            )
+            Verbosity.volumatic_print(Verbosity.NORMAL, f"Would deploy {node.name} on GNS3: {node.image}")
             return None
-        Verbosity.volumatic_print(
-            Verbosity.NORMAL, f"Deploys {node.name} on GNS3: {node.image}"
-        )
+        Verbosity.volumatic_print(Verbosity.NORMAL, f"Deploys {node.name} on GNS3: {node.image}")
         # --------------------------------------------------------------------------------------------------------------
         # If the template is a builtin (e.g.: VPC, Cloud or NAT) it requires special treatment
         if template["builtin"]:
@@ -167,9 +159,7 @@ class GNS3Connection(APIHandler):
             if getattr(exc.response, "status_code", None) == 400:
                 logger.error(msg := "Invalid GET request was made.")
                 raise RuntimeError(msg) from exc
-            raise RuntimeError(
-                "Something went wrong with the creation of the node request."
-            ) from exc
+            raise RuntimeError("Something went wrong with the creation of the node request.") from exc
 
         node.gns3_node_info = response
         return response
@@ -194,13 +184,9 @@ class GNS3Connection(APIHandler):
         if isinstance(template, str):
             # ----------------------------------------------------------------------------------------------------------
             if Settings.IS_DRY_RUN:
-                Verbosity.volumatic_print(
-                    Verbosity.NORMAL, f"Would deploy {node.name} on GNS3: {template}"
-                )
+                Verbosity.volumatic_print(Verbosity.NORMAL, f"Would deploy {node.name} on GNS3: {template}")
                 return None
-            Verbosity.volumatic_print(
-                Verbosity.NORMAL, f"Deploys {node.name} on GNS3: {template}"
-            )
+            Verbosity.volumatic_print(Verbosity.NORMAL, f"Deploys {node.name} on GNS3: {template}")
             # ----------------------------------------------------------------------------------------------------------
             template = self._get_template(template)
 
@@ -224,9 +210,7 @@ class GNS3Connection(APIHandler):
             if getattr(exc.response, "status_code", None) == 400:
                 logger.error(msg := "Invalid GET request was made.")
                 raise RuntimeError(msg) from exc
-            raise RuntimeError(
-                "Something went wrong with the creation of the node request."
-            ) from exc
+            raise RuntimeError("Something went wrong with the creation of the node request.") from exc
 
         node.gns3_node_info = response
         return response
@@ -243,9 +227,7 @@ class GNS3Connection(APIHandler):
         try:
             response = self.get(f"{self.url}/v2/templates")
         except requests.exceptions.HTTPError as exc:
-            logger.error(
-                msg := f"Could not collect GNS3 template information on host {self.ip}"
-            )
+            logger.error(msg := f"Could not collect GNS3 template information on host {self.ip}")
             raise RuntimeError(msg) from exc
 
         template = next((t for t in response if t["name"] == template_name), None)
@@ -273,9 +255,7 @@ class GNS3Connection(APIHandler):
             f"Interface {intf.name} on {intf.parent.name} cannot be associated to any adapter of the {gns3_node_info['name']} template."
         )
 
-    def connect_nodes(
-        self, node_1: GenericNode, node_2: GenericNode
-    ) -> dict[str, Any] | None:
+    def connect_nodes(self, node_1: GenericNode, node_2: GenericNode) -> dict[str, Any] | None:
         """
         Connects two GNS3 nodes from the same GNS3 project together.
         :param node_1: Node to connect to ``node_2``.
@@ -291,9 +271,7 @@ class GNS3Connection(APIHandler):
         intf_2 = node_2.get_interface(node_1)
 
         if intf_1 is None or intf_2 is None:
-            raise RuntimeError(
-                f"Node {node_1.name} has no internal connection to {node_2.name}"
-            )
+            raise RuntimeError(f"Node {node_1.name} has no internal connection to {node_2.name}")
         # --------------------------------------------------------------------------------------------------------------
         if Settings.IS_DRY_RUN:
             Verbosity.volumatic_print(
@@ -341,6 +319,4 @@ class GNS3Connection(APIHandler):
             if getattr(exc.response, "status_code", None) == 400:
                 logger.error(msg := "Invalid GET request was made.")
                 raise RuntimeError(msg) from exc
-            raise RuntimeError(
-                f"Something went wrong while linking two nodes on {self.ip}"
-            )
+            raise RuntimeError(f"Something went wrong while linking two nodes on {self.ip}")

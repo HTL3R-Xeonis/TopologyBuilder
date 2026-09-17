@@ -41,10 +41,7 @@ class TopologyFileValidation:
             logger.error(msg := f"File does not exists. Current path: {path}")
             raise FileNotFoundError(msg)
         if not Path(path).is_file() and not path.endswith((".yml", ".yaml")):
-            logger.error(
-                msg
-                := f"Path does not link to *.yaml or *.yml file. Current path: {path}"
-            )
+            logger.error(msg := f"Path does not link to *.yaml or *.yml file. Current path: {path}")
             raise ValueError(msg)
 
         self.nodes: list[dict[str, str]] = []
@@ -101,8 +98,7 @@ class TopologyFileValidation:
         content = self.read_file()
         if not {"edges", "nodes"} <= content.keys():
             logger.error(
-                msg
-                := f"Key 'edges' or 'nodes' not found in configuration file. Current keys: {list(content.keys())}"
+                msg := f"Key 'edges' or 'nodes' not found in configuration file. Current keys: {list(content.keys())}"
             )
             raise KeyError(msg)
 
@@ -110,14 +106,10 @@ class TopologyFileValidation:
         self.edges = content["edges"]
 
         if not isinstance(self.nodes, list):
-            logger.error(
-                msg := f"'nodes' must be of type list. Current type: {type(self.nodes)}"
-            )
+            logger.error(msg := f"'nodes' must be of type list. Current type: {type(self.nodes)}")
             raise TypeError(msg)
         if not isinstance(self.edges, list):
-            logger.error(
-                msg := f"'edges' must be of type list. Current type: {type(self.edges)}"
-            )
+            logger.error(msg := f"'edges' must be of type list. Current type: {type(self.edges)}")
             raise TypeError(msg)
 
         for node_group in self.nodes:
@@ -135,10 +127,7 @@ class TopologyFileValidation:
         :raises ValueError: Is thrown when a value is not a valid option in the YAML-file or the format is incorrect.
         """
         if not isinstance(node_group, dict):
-            logger.error(
-                msg
-                := f"Node group must be of type dict. Current type: {type(node_group)}"
-            )
+            logger.error(msg := f"Node group must be of type dict. Current type: {type(node_group)}")
             raise TypeError(msg)
         if not {"image", "role", "names"} <= node_group.keys():
             logger.error(
@@ -147,60 +136,36 @@ class TopologyFileValidation:
             )
             raise KeyError(msg)
         if not isinstance(node_group["image"], str):
-            logger.error(
-                msg
-                := f"Image must be of type string. Current type: {type(node_group['image'])}"
-            )
+            logger.error(msg := f"Image must be of type string. Current type: {type(node_group['image'])}")
             raise TypeError(msg)
-        if (
-            self._available_templates is not None
-            and node_group["image"] not in self._available_templates
-        ):
-            logger.error(
-                msg := f"Image {node_group['image']} not found on ESXi or GNS3"
-            )
+        if self._available_templates is not None and node_group["image"] not in self._available_templates:
+            logger.error(msg := f"Image {node_group['image']} not found on ESXi or GNS3")
             raise ValueError(msg)
 
         if not isinstance(node_group["role"], str):
-            logger.error(
-                msg
-                := f"Role must be of type string. Current type: {type(node_group['role'])}"
-            )
+            logger.error(msg := f"Role must be of type string. Current type: {type(node_group['role'])}")
             raise TypeError(msg)
         if node_group["role"] not in self.__VALID_ROLES:
-            logger.error(
-                msg
-                := f"{node_group['role']} is not a valid role. Valid roles: {self.__VALID_ROLES}"
-            )
+            logger.error(msg := f"{node_group['role']} is not a valid role. Valid roles: {self.__VALID_ROLES}")
             raise ValueError(msg)
 
         names = node_group["names"]
         if names is None:
             return
         if not isinstance(names, list):
-            logger.error(
-                msg
-                := f"Names must be of type list or None. Current type: {type(names)}"
-            )
+            logger.error(msg := f"Names must be of type list or None. Current type: {type(names)}")
             raise TypeError(msg)
         for name in names:
             if not isinstance(name, str):
-                logger.error(
-                    msg
-                    := f"Entries of 'names' must be of type str. Current type: {type(name)}"
-                )
+                logger.error(msg := f"Entries of 'names' must be of type str. Current type: {type(name)}")
                 raise TypeError(msg)
         if len(names) != len(set(names)):
             logger.error(
-                msg
-                := f"Node names must be distinct. Not unique names: { {n for n in names if names.count(n) > 1} }"
+                msg := f"Node names must be distinct. Not unique names: { {n for n in names if names.count(n) > 1} }"
             )
             raise ValueError(msg)
         if set(names) & self.__node_names:
-            logger.error(
-                msg
-                := f"Node names must be distinct. Not unique names: {set(names) & self.__node_names}"
-            )
+            logger.error(msg := f"Node names must be distinct. Not unique names: {set(names) & self.__node_names}")
             raise ValueError(msg)
         self.__node_names.update(names)
 
@@ -224,14 +189,10 @@ class TopologyFileValidation:
         intf_list_1 = self.__node_map.get(edge[0], [])
         intf_list_2 = self.__node_map.get(edge[2], [])
         if edge[1] in intf_list_1:
-            logger.error(
-                msg := f"Interface {edge[1]} is used twice in edges of {edge[0]} node"
-            )
+            logger.error(msg := f"Interface {edge[1]} is used twice in edges of {edge[0]} node")
             raise ValueError(msg)
         if edge[3] in intf_list_2:
-            logger.error(
-                msg := f"Interface {edge[3]} is used twice in edges of {edge[2]} node"
-            )
+            logger.error(msg := f"Interface {edge[3]} is used twice in edges of {edge[2]} node")
             raise ValueError(msg)
 
         intf_list_1.append(edge[1])

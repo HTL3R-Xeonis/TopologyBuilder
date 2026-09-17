@@ -29,33 +29,24 @@ class ESXiOrchestrator:
         :return: Returns the found or created virtual switch.
         """
         virtual_switch = self.esxi_connection.get_virtual_switch(virtual_switch_name)
-        if virtual_switch is None:
-            if Settings.IS_DRY_RUN and virtual_switch is None:
-                # ----------------------------------------------------------------------------------------------------------
-                if Settings.IS_DRY_RUN:
-                    Verbosity.volumatic_print(
-                        Verbosity.NORMAL,
-                        f"Would create virtual switch: {Settings.ESXI.VIRTUAL_SWITCH}",
-                    )
-                    return {}
-                # ----------------------------------------------------------------------------------------------------------
-                return {}
-            if virtual_switch is None:
-                # ----------------------------------------------------------------------------------------------------------
-                Verbosity.volumatic_print(
-                    Verbosity.NORMAL,
-                    f"Creates virtual switch: {Settings.ESXI.VIRTUAL_SWITCH}",
-                )
-                # ----------------------------------------------------------------------------------------------------------
-
-            virtual_switch = self.esxi_connection.create_virtual_switch(
-                virtual_switch_name
+        if Settings.IS_DRY_RUN and virtual_switch is None:
+            # ----------------------------------------------------------------------------------------------------------
+            Verbosity.volumatic_print(
+                Verbosity.NORMAL,
+                f"Would create virtual switch: {Settings.ESXI.VIRTUAL_SWITCH}",
             )
+            return {}
+        if virtual_switch is None:
+            Verbosity.volumatic_print(
+                Verbosity.NORMAL,
+                f"Creates virtual switch: {Settings.ESXI.VIRTUAL_SWITCH}",
+            )
+            # ----------------------------------------------------------------------------------------------------------
+
+            virtual_switch = self.esxi_connection.create_virtual_switch(virtual_switch_name)
         return virtual_switch
 
-    def _ensure_virtual_switch_policy(
-        self, virtual_switch: vim.host.VirtualSwitch
-    ) -> None:
+    def _ensure_virtual_switch_policy(self, virtual_switch: vim.host.VirtualSwitch) -> None:
         """
         Checks whether the virtual switch has the needed policies and sets updates them if needed.
         :param virtual_switch: Virtual switch to check.
@@ -77,23 +68,15 @@ class ESXiOrchestrator:
         if is_change_needed:
             host = self.esxi_connection.get_esxi_object(vim.HostSystem)
             if host is None:
-                logger.error(
-                    msg
-                    := f"Hostsystem not found on ESXi host: {self.esxi_connection.ip}"
-                )
+                logger.error(msg := f"Hostsystem not found on ESXi host: {self.esxi_connection.ip}")
                 raise RuntimeError(msg)
 
             network_system = host.configManager.networkSystem
             if network_system is None:
-                logger.error(
-                    msg
-                    := f"NetworkSystem not found on ESXi host: {self.esxi_connection.ip}"
-                )
+                logger.error(msg := f"NetworkSystem not found on ESXi host: {self.esxi_connection.ip}")
                 raise RuntimeError(msg)
 
-            network_system.UpdateVirtualSwitch(
-                vswitchName=virtual_switch.name, spec=update_spec
-            )
+            network_system.UpdateVirtualSwitch(vswitchName=virtual_switch.name, spec=update_spec)
 
     def remove_port_groups(self, port_groups: set[str] | dict[str, Any]) -> None:
         """
@@ -123,9 +106,7 @@ class ESXiOrchestrator:
         WaitForTasks(tasks)
 
     # @TODO Does not Handle missing adapters. Fix this. And fix parameter requests of None
-    def ensure_gns3_vm_adapter(
-        self, gns3_vm_name: str, mgmt_port_group: str, trunk_port_group: str
-    ) -> None | vim.Task:
+    def ensure_gns3_vm_adapter(self, gns3_vm_name: str, mgmt_port_group: str, trunk_port_group: str) -> None | vim.Task:
         """
         Checks and corrects the adapters of the GNS3 VM on ESXi to match a correct settings for possible connectivity.
         :param gns3_vm_name: Name of the GNS3 VM on the ESXi host to check.
@@ -138,9 +119,7 @@ class ESXiOrchestrator:
         for device in gns3_vm.config.hardware.device:
             if not isinstance(device, vim.vm.device.VirtualEthernetCard):
                 continue
-            if not isinstance(
-                device.backing, vim.vm.device.VirtualEthernetCard.NetworkBackingInfo
-            ):
+            if not isinstance(device.backing, vim.vm.device.VirtualEthernetCard.NetworkBackingInfo):
                 continue
             device_name = device.backing.deviceName
             if device.deviceInfo.label.endswith("1"):
@@ -189,9 +168,7 @@ class ESXiOrchestrator:
             for device in vm.config.hardware.device:
                 if not isinstance(device, vim.vm.device.VirtualEthernetCard):
                     continue
-                if not isinstance(
-                    device.backing, vim.vm.device.VirtualEthernetCard.NetworkBackingInfo
-                ):
+                if not isinstance(device.backing, vim.vm.device.VirtualEthernetCard.NetworkBackingInfo):
                     continue
                 if device.backing.deviceName not in port_group_names:
                     continue
@@ -217,15 +194,10 @@ class ESXiOrchestrator:
         :return: Returns a list of ``vim.Task`` objects for the deletion process of each virtual machine.
         :raises RuntimeError: Is thrown when no ContainerView can be created.
         """
-        virtual_machines = self.esxi_connection.get_esxi_object(
-            vim.VirtualMachine, get_all=True
-        )
+        virtual_machines = self.esxi_connection.get_esxi_object(vim.VirtualMachine, get_all=True)
         tasks = []
         for vm in virtual_machines:
-            if (
-                vm.name == Settings.ESXI.GNS3_VM_NAME
-                or vm.name in Settings.ESXI.IGNORE_VIRTUAL_MACHINES
-            ):
+            if vm.name == Settings.ESXI.GNS3_VM_NAME or vm.name in Settings.ESXI.IGNORE_VIRTUAL_MACHINES:
                 continue
 
             hardware = getattr(vm.config, "hardware", [])
@@ -233,9 +205,7 @@ class ESXiOrchestrator:
                 if not isinstance(device, vim.vm.device.VirtualEthernetCard):
                     continue
                 backing = device.backing
-                if not isinstance(
-                    backing, vim.vm.device.VirtualEthernetCard.NetworkBackingInfo
-                ):
+                if not isinstance(backing, vim.vm.device.VirtualEthernetCard.NetworkBackingInfo):
                     continue
                 if backing.deviceName != port_group_name:
                     continue
@@ -284,18 +254,12 @@ class ESXiOrchestrator:
         """
         # --------------------------------------------------------------------------------------------------------------
         if Settings.IS_DRY_RUN:
-            Verbosity.volumatic_print(
-                Verbosity.NORMAL, f"Would deploy {node.name} on ESXi: {node.image}"
-            )
+            Verbosity.volumatic_print(Verbosity.NORMAL, f"Would deploy {node.name} on ESXi: {node.image}")
             return
-        Verbosity.volumatic_print(
-            Verbosity.NORMAL, f"Deploys {node.name} on ESXi: {node.image}"
-        )
+        Verbosity.volumatic_print(Verbosity.NORMAL, f"Deploys {node.name} on ESXi: {node.image}")
         # --------------------------------------------------------------------------------------------------------------
 
-        datastore_object = self.esxi_connection.get_esxi_object(
-            vim.Datastore, datastore
-        )
+        datastore_object = self.esxi_connection.get_esxi_object(vim.Datastore, datastore)
         if not isinstance(datastore_object, vim.Datastore):
             raise TypeError(f"No datastore found with name: {datastore}")
 

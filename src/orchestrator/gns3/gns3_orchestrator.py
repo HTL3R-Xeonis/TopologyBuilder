@@ -44,9 +44,7 @@ class GNS3Orchestrator:
                 continue
             self.gns3_connection.connect_nodes(node, neighbour)
 
-    def configure_gns3_vm_interfaces(
-        self, graph: Graph, gns3_username: str, gns3_password: str | None
-    ) -> None:
+    def configure_gns3_vm_interfaces(self, graph: Graph, gns3_username: str, gns3_password: str | None) -> None:
         """
         Configures the interfaces of the GNS3 VM to fit the graph. This is done to have an interface for each VLAN on the vSwitch.
         :param graph: Create the interfaces based on given graph.
@@ -60,12 +58,8 @@ class GNS3Orchestrator:
         """
         port = 22
 
-        gns3_connection = SSHConnection(
-            self.gns3_connection.ip, port, gns3_username, gns3_password
-        )
-        gns3_interface_setup = GNS3VMInterfaceSetup(
-            gns3_connection, Settings.GNS3.PARENT_INTERFACE
-        )
+        gns3_connection = SSHConnection(self.gns3_connection.ip, port, gns3_username, gns3_password)
+        gns3_interface_setup = GNS3VMInterfaceSetup(gns3_connection, Settings.GNS3.PARENT_INTERFACE)
 
         gns3_interface_setup.initialize_commands(graph)
         gns3_interface_setup.execute_script()

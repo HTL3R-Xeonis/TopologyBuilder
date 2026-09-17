@@ -87,10 +87,6 @@ class GenericConnection(ABC):
             addr = ipaddress.ip_address(ip)
             if addr.version != 4:
                 return False
-            return (
-                addr.is_global
-                or addr.is_private
-                or (addr.is_loopback and not ignore_loopback)
-            )
+            return addr.is_global or addr.is_private or (addr.is_loopback and not ignore_loopback)
         except ValueError:
             return False

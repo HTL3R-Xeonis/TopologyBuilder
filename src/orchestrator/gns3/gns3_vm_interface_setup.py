@@ -17,9 +17,7 @@ class GNS3VMInterfaceSetup:
     This is done by subinterfaces with vlans on the GNS3 VM which correspond with the VLANs of the vSwitch on the ESXi host.
     """
 
-    def __init__(
-        self, gns3_ssh_connection: SSHConnection, parent_interface: str
-    ) -> None:
+    def __init__(self, gns3_ssh_connection: SSHConnection, parent_interface: str) -> None:
         """
         :param gns3_ssh_connection: SSH connection to the GNS3 VM
         :param parent_interface: name of the interface on the GNS3 VM where the subinterfaces should be located.
@@ -39,10 +37,7 @@ class GNS3VMInterfaceSetup:
         )
         if stderr.channel.recv_exit_status() != 0:
             err = stderr.read().decode()
-            logger.error(
-                msg
-                := "An error occurred while trying to receive subinterface information."
-            )
+            logger.error(msg := "An error occurred while trying to receive subinterface information.")
             raise RuntimeError(msg + "\n" + err)
 
         lines = stdout.readlines()
@@ -58,13 +53,9 @@ class GNS3VMInterfaceSetup:
         for subinterface in self._get_existing_subinterfaces():
             # ----------------------------------------------------------------------------------------------------------
             if Settings.IS_DRY_RUN:
-                Verbosity.volumatic_print(
-                    Verbosity.NORMAL, f"Would delete subinterface {subinterface}"
-                )
+                Verbosity.volumatic_print(Verbosity.NORMAL, f"Would delete subinterface {subinterface}")
                 continue
-            Verbosity.volumatic_print(
-                Verbosity.NORMAL, f"Deletes subinterface {subinterface}"
-            )
+            Verbosity.volumatic_print(Verbosity.NORMAL, f"Deletes subinterface {subinterface}")
             # ----------------------------------------------------------------------------------------------------------
             self.script += f"ip link delete {subinterface}\n"
 
@@ -125,10 +116,7 @@ class GNS3VMInterfaceSetup:
         errors = stderr.read().decode()
         exit_code = stdout.channel.recv_exit_status()
         if stderr.channel.recv_exit_status() != 0:
-            logger.error(
-                msg
-                := "An error occurred while trying to execute the subinterface script."
-            )
+            logger.error(msg := "An error occurred while trying to execute the subinterface script.")
             raise RuntimeError(msg + "\n" + errors)
 
         return exit_code, output, errors
