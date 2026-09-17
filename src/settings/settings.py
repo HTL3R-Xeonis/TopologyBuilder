@@ -29,16 +29,21 @@ def check_value_type[T](value: Any, value_type: type[T] | tuple[type[T], ...]) -
 
 
 class Settings:
+    _DEFAULT_SETTING_FILE_PATH: Path = Path("./default_settings.yaml")
+    """Path to the default settings file."""
+    _CUSTOM_SETTINGS_FILE_PATH: Path | None = None
+    """Path to the custom settings file."""
+
     @staticmethod
     def reset_settings() -> None:
         """
         Removes the custom settings. Default settings takes over.
         :return:
         """
-        Settings.initialise_settings()
+        Settings.initialise_settings_file()
 
     @staticmethod
-    def is_fully_initialised(cls_object: Any, class_path="") -> bool:
+    def is_fully_initialized(cls_object: type, class_path=""):
         """
         Checks recursively whether the class attributes are all initialized, meaning not None.
         :param cls_object: Class to check.
@@ -52,19 +57,48 @@ class Settings:
                 continue
 
             if isinstance(value, type):
-                is_it = is_it & Settings.is_fully_initialised(value, class_path)
+                is_it = is_it & Settings.is_fully_initialized(value, class_path)
                 continue
 
             if value is None and key.lower() != "password":
-                logger.warning(f"{class_path}.{key} is None. May lead to errors.")
+                logger.warning(f"{class_path}.{key} is unset. May lead to errors.")
+                is_it = False
 
         return is_it
 
     @staticmethod
-    def initialise_settings(
+    def get_unset_settings(cls_object: Any, class_path="") -> dict:
+        """
+        Checks recursively whether the class attributes are all initialized, meaning not None.
+        :param cls_object: Class to check.
+        :param class_path: Classpath of the nested class.
+        :return: True if all attributes are initialized, False otherwise.
+        """
+        unset_settings = {}
+        class_path = f"{class_path}.{cls_object.__name__}".lstrip(".")
+        for key, value in vars(cls_object).items():
+            if key.startswith("_"):
+                continue
+
+            if isinstance(value, type):
+                unset_setting = Settings.get_unset_settings(value, class_path)
+                if unset_setting:
+                    unset_settings[key] = unset_setting
+                continue
+
+            if value is None and key.lower() != "password":
+                logger.info(
+                    f"{class_path}.{key} is not set. Will be set automatically if possible."
+                )
+                unset_settings[key] = None
+
+        return unset_settings
+
+    @staticmethod
+    def initialise_settings_file(
         *,
-        default_settings: Path = Path("./default_settings.yaml"),
-        custom_settings: Path | None = None,
+        default_settings: Path = _DEFAULT_SETTING_FILE_PATH,
+        custom_settings: Path | None = _CUSTOM_SETTINGS_FILE_PATH,
     ) -> None:
         """
         Initializes the default settings and if not None, the custom settings as well.
@@ -87,11 +121,14 @@ class Settings:
         if not default_settings.is_file():
             logger.error(msg := "Default settings file is not a file.")
             raise ValueError(msg)
-        Settings.initialise_settings_file(default_settings)
+        Settings.initialise_settings(default_settings)
 
         if custom_settings is None:
-            Settings.is_fully_initialised(Settings)
+            unset_settings = Settings.get_unset_settings(Settings)
+            Settings.initialise_settings(unset_settings)
+            Settings.is_fully_initialized(Settings)
             return
+
         if not (
             custom_settings.name.endswith(".yaml")
             or custom_settings.name.endswith(".yml")
@@ -107,23 +144,28 @@ class Settings:
         if not custom_settings.is_file():
             logger.error(msg := "Custom settings file is not a file.")
             raise ValueError(msg)
-        Settings.initialise_settings_file(custom_settings)
 
-        Settings.is_fully_initialised(Settings)
+        Settings.initialise_settings(custom_settings)
+        unset_settings = Settings.get_unset_settings(Settings)
+        Settings.initialise_settings(unset_settings)
+        Settings.is_fully_initialized(Settings)
 
     @staticmethod
-    def initialise_settings_file(path: Path) -> None:
+    def initialise_settings(config: Path | dict) -> None:
         """
         Initializes the settings based on a YAML file.
-        :param path: Path to the YAML file.
+        :param config: Path to the YAML config file or already parsed configuration.
         :return:
         :raises ValueError: Is thrown when the value of a setting option is not correct.
         """
-        with open(path, "r", encoding="utf-8") as file:
-            config = yaml.safe_load(file)
+        if isinstance(config, Path):
+            with open(config, "r", encoding="utf-8") as file:
+                parsed_configuration = yaml.safe_load(file)
+        if isinstance(config, dict):
+            parsed_configuration = config
 
-        for key, value in config.items():
-            match key:
+        for key, value in parsed_configuration.items():
+            match key.lower():
                 case "verbosity_level":
                     verbosity = Verbosity.get_verbosity_equivalent(
                         check_value_type(value, str)
@@ -161,7 +203,7 @@ class Settings:
         :raises ValueError: Is thrown when the value of a setting option is not correct.
         """
         for key, value in esxi_settings.items():
-            match key:
+            match key.lower():
                 case "ip":
                     Settings.ESXI.IP = check_value_type(value, str)
                 case "port":
@@ -214,7 +256,7 @@ class Settings:
         :raises ValueError: Is thrown when the value of a setting option is not correct.
         """
         for key, value in gns3_settings.items():
-            match key:
+            match key.lower():
                 case "username":
                     Settings.GNS3.USERNAME = check_value_type(value, str)
                 case "password":
@@ -226,9 +268,20 @@ class Settings:
                         value = None
                     Settings.GNS3.PASSWORD = check_value_type(value, (str, type(None)))
                 case "project_name":
-                    Settings.GNS3.PROJECT_NAME = check_value_type(value, str)
+                    value = check_value_type(value, (str, type(None)))
+                    if isinstance(value, str):
+                        Settings.GNS3.PROJECT_NAME = value
+                    if value is None:
+                        if isinstance(Settings._CUSTOM_SETTINGS_FILE_PATH, Path):
+                            Settings.GNS3.PROJECT_NAME = (
+                                Settings._CUSTOM_SETTINGS_FILE_PATH.stem
+                            )
+                        else:
+                            Settings.GNS3.PROJECT_NAME = (
+                                Settings._DEFAULT_SETTING_FILE_PATH.stem
+                            )
                 case "port":
-                    Settings.GNS3.PORT = check_value_type(value, int)
+                    Settings.GNS3.PORT = check_value_type(value, (int, type(None)))
                 case "parent_interface":
                     Settings.GNS3.PARENT_INTERFACE = check_value_type(value, str)
                 case _:
@@ -266,13 +319,17 @@ class Settings:
                     logger.warning(f"Unrecognized setting: Settings.API.{key.upper()}")
 
     # ------------------------ Setting Attributes ------------------------
-
     VERBOSITY_LEVEL: Verbosity = None
     """The verbosity level of the program."""
     TOPOLOGY_FILE: str = None
     """Path to the YAML file which represents the topology."""
     IS_DRY_RUN: bool = None
     """If True, only prints what would happen. May still execute API requests."""
+    # @TODO NOT IMPLEMENTED
+    IS_INCREMENTAL: bool = None
+    """If True, does reuse resources such as ESXi VMs and GNS3 nodes."""
+    LOG_FILE_PATH: Path = "./logs/app.log"
+    """Path to the logs file."""
 
     class ESXI:
         """Settings related to ESXi."""
@@ -329,3 +386,10 @@ class Settings:
         """Literal ESXi template name values."""
         LITERAL_GNS3_TEMPLATES: set[str] = None
         """Literal GNS3 template name values."""
+
+    class LLM:
+        """Settings related to LLM."""
+
+        # @TODO NOT IMPLEMENTED
+        MAX_RETRIES: int = None
+        """Maximum of retries the LLM makes before giving up on failing to generate a valid topology file."""

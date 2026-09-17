@@ -227,32 +227,13 @@ class ESXiConnection(GenericConnection):
             for port_group in host.config.network.portgroup
         }
 
-    def _get_vswitch_port_groups(
+    def get_vswitch_port_groups(
         self, virtual_switch: vim.host.VirtualSwitch
     ) -> dict[str, pyVmomi.vim.host.PortGroup]:
         """
         Returns a list of all port groups connected to the virtual switch.
         :return: A list of port groups or empty list.
         """
-        if Settings.IS_DRY_RUN and virtual_switch is None:
-            # ----------------------------------------------------------------------------------------------------------
-            if Settings.IS_DRY_RUN:
-                Verbosity.volumatic_print(
-                    Verbosity.NORMAL,
-                    f"Would create virtual switch: {Settings.ESXI.VIRTUAL_SWITCH}",
-                )
-                return {}
-            # ----------------------------------------------------------------------------------------------------------
-            return {}
-        if virtual_switch is None:
-            # ----------------------------------------------------------------------------------------------------------
-            Verbosity.volumatic_print(
-                Verbosity.NORMAL,
-                f"Creates virtual switch: {Settings.ESXI.VIRTUAL_SWITCH}",
-            )
-            # ----------------------------------------------------------------------------------------------------------
-
-        self._ensure_virtual_switch_policy(virtual_switch)
         host = self.get_esxi_object(vim.HostSystem)
 
         return {

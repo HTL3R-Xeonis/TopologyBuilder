@@ -12,7 +12,7 @@ import pytest
 from src.settings import Settings
 from src.topology_file_validation import TopologyFileValidation
 
-Settings.initialise_settings()
+Settings.initialise_settings_file()
 TEST_FILE_FOLDER = "./tests/files/"
 
 

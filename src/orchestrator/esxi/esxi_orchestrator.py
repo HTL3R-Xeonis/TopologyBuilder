@@ -30,6 +30,24 @@ class ESXiOrchestrator:
         """
         virtual_switch = self.esxi_connection.get_virtual_switch(virtual_switch_name)
         if virtual_switch is None:
+            if Settings.IS_DRY_RUN and virtual_switch is None:
+                # ----------------------------------------------------------------------------------------------------------
+                if Settings.IS_DRY_RUN:
+                    Verbosity.volumatic_print(
+                        Verbosity.NORMAL,
+                        f"Would create virtual switch: {Settings.ESXI.VIRTUAL_SWITCH}",
+                    )
+                    return {}
+                # ----------------------------------------------------------------------------------------------------------
+                return {}
+            if virtual_switch is None:
+                # ----------------------------------------------------------------------------------------------------------
+                Verbosity.volumatic_print(
+                    Verbosity.NORMAL,
+                    f"Creates virtual switch: {Settings.ESXI.VIRTUAL_SWITCH}",
+                )
+                # ----------------------------------------------------------------------------------------------------------
+
             virtual_switch = self.esxi_connection.create_virtual_switch(
                 virtual_switch_name
             )
