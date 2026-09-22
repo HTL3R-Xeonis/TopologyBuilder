@@ -1210,7 +1210,9 @@ def esxi_connection_047() -> None:
     conn._reconnect.assert_called_once()
 
 
-@allure.title("_call_with_reconnect reconnected nicht, wenn fn() sofort erfolgreich ist")
+@allure.title(
+    "_call_with_reconnect reconnected nicht, wenn fn() sofort erfolgreich ist"
+)
 @allure.description(
     "Überprüft, dass _call_with_reconnect _reconnect() nicht aufruft, wenn "
     "der erste Aufruf von fn() bereits erfolgreich ist - der Normalfall bei "
@@ -1229,7 +1231,9 @@ def esxi_connection_048() -> None:
     conn._reconnect.assert_not_called()
 
 
-@allure.title("_reconnect baut die Session neu auf und aktualisiert content/view_manager")
+@allure.title(
+    "_reconnect baut die Session neu auf und aktualisiert content/view_manager"
+)
 @allure.description(
     "Überprüft, dass _reconnect() connect() erneut aufruft und die daraus "
     "abgeleiteten content- und view_manager-Handles auf die frische Session "
@@ -1256,7 +1260,9 @@ def esxi_connection_049() -> None:
     assert conn.view_manager is new_content.viewManager
 
 
-@allure.title("_reconnect wirft RuntimeError, wenn die frische Session keinen ViewManager hat")
+@allure.title(
+    "_reconnect wirft RuntimeError, wenn die frische Session keinen ViewManager hat"
+)
 @allure.description(
     "Überprüft, dass _reconnect() einen RuntimeError wirft, wenn die neu "
     "aufgebaute Session keinen ViewManager liefert - dieselbe Prüfung, die "

@@ -266,13 +266,13 @@ class GNS3Connection(APIHandler):
             raise RuntimeError(msg) from exc
         if project.get("status") == "opened":
             return
-        Verbosity.volumatic_print(Verbosity.NORMAL, f"Reopens GNS3 project {project_id}")
+        Verbosity.volumatic_print(
+            Verbosity.NORMAL, f"Reopens GNS3 project {project_id}"
+        )
         try:
             GNS3Connection.post(f"http://{ip}:{port}/v2/projects/{project_id}/open")
         except requests.exceptions.HTTPError as exc:
-            logger.error(
-                msg := f"Failed to reopen GNS3 project '{project_id}' on {ip}"
-            )
+            logger.error(msg := f"Failed to reopen GNS3 project '{project_id}' on {ip}")
             raise RuntimeError(msg) from exc
 
     @staticmethod

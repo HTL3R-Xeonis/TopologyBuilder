@@ -805,9 +805,10 @@ def gns3_connection_028() -> None:
 @allure.severity(allure.severity_level.CRITICAL)
 def gns3_connection_029() -> None:
     _reset_settings()
-    with patch.object(
-        GNS3Connection, "get", return_value={"status": "opened"}
-    ), patch.object(GNS3Connection, "delete") as mock_delete:
+    with (
+        patch.object(GNS3Connection, "get", return_value={"status": "opened"}),
+        patch.object(GNS3Connection, "delete") as mock_delete,
+    ):
         GNS3Connection.delete_node("10.20.20.231", 80, "proj-1", "node-1")
 
     mock_delete.assert_called_once_with(
@@ -845,10 +846,11 @@ def gns3_connection_030() -> None:
 @allure.severity(allure.severity_level.NORMAL)
 def gns3_connection_031() -> None:
     _reset_settings()
-    with patch.object(
-        GNS3Connection, "get", return_value={"status": "opened"}
-    ), patch.object(
-        GNS3Connection, "delete", side_effect=requests.exceptions.HTTPError()
+    with (
+        patch.object(GNS3Connection, "get", return_value={"status": "opened"}),
+        patch.object(
+            GNS3Connection, "delete", side_effect=requests.exceptions.HTTPError()
+        ),
     ):
         with pytest.raises(RuntimeError):
             GNS3Connection.delete_node("10.20.20.231", 80, "proj-1", "node-1")
@@ -864,9 +866,10 @@ def gns3_connection_031() -> None:
 @allure.severity(allure.severity_level.CRITICAL)
 def gns3_connection_032() -> None:
     _reset_settings()
-    with patch.object(
-        GNS3Connection, "get", return_value={"status": "opened"}
-    ), patch.object(GNS3Connection, "delete") as mock_delete:
+    with (
+        patch.object(GNS3Connection, "get", return_value={"status": "opened"}),
+        patch.object(GNS3Connection, "delete") as mock_delete,
+    ):
         GNS3Connection.delete_link("10.20.20.231", 80, "proj-1", "link-1")
 
     mock_delete.assert_called_once_with(
@@ -903,9 +906,10 @@ def gns3_connection_033() -> None:
 @allure.severity(allure.severity_level.CRITICAL)
 def gns3_connection_034() -> None:
     _reset_settings()
-    with patch.object(
-        GNS3Connection, "get", return_value={"status": "opened"}
-    ), patch.object(GNS3Connection, "post") as mock_post:
+    with (
+        patch.object(GNS3Connection, "get", return_value={"status": "opened"}),
+        patch.object(GNS3Connection, "post") as mock_post,
+    ):
         GNS3Connection.start_node("10.20.20.231", 80, "proj-1", "node-1")
 
     mock_post.assert_called_once_with(
@@ -943,10 +947,11 @@ def gns3_connection_035() -> None:
 @allure.severity(allure.severity_level.NORMAL)
 def gns3_connection_036() -> None:
     _reset_settings()
-    with patch.object(
-        GNS3Connection, "get", return_value={"status": "opened"}
-    ), patch.object(
-        GNS3Connection, "post", side_effect=requests.exceptions.HTTPError()
+    with (
+        patch.object(GNS3Connection, "get", return_value={"status": "opened"}),
+        patch.object(
+            GNS3Connection, "post", side_effect=requests.exceptions.HTTPError()
+        ),
     ):
         with pytest.raises(RuntimeError):
             GNS3Connection.start_node("10.20.20.231", 80, "proj-1", "node-1")
@@ -962,9 +967,10 @@ def gns3_connection_036() -> None:
 @allure.severity(allure.severity_level.CRITICAL)
 def gns3_connection_037() -> None:
     _reset_settings()
-    with patch.object(
-        GNS3Connection, "get", return_value={"status": "opened"}
-    ), patch.object(GNS3Connection, "post") as mock_post:
+    with (
+        patch.object(GNS3Connection, "get", return_value={"status": "opened"}),
+        patch.object(GNS3Connection, "post") as mock_post,
+    ):
         GNS3Connection.stop_node("10.20.20.231", 80, "proj-1", "node-1")
 
     mock_post.assert_called_once_with(
@@ -1001,10 +1007,11 @@ def gns3_connection_038() -> None:
 @allure.severity(allure.severity_level.NORMAL)
 def gns3_connection_039() -> None:
     _reset_settings()
-    with patch.object(
-        GNS3Connection, "get", return_value={"status": "opened"}
-    ), patch.object(
-        GNS3Connection, "post", side_effect=requests.exceptions.HTTPError()
+    with (
+        patch.object(GNS3Connection, "get", return_value={"status": "opened"}),
+        patch.object(
+            GNS3Connection, "post", side_effect=requests.exceptions.HTTPError()
+        ),
     ):
         with pytest.raises(RuntimeError):
             GNS3Connection.stop_node("10.20.20.231", 80, "proj-1", "node-1")
@@ -1020,9 +1027,10 @@ def gns3_connection_039() -> None:
 @allure.severity(allure.severity_level.CRITICAL)
 def gns3_connection_040() -> None:
     _reset_settings()
-    with patch.object(
-        GNS3Connection, "get", return_value={"status": "opened"}
-    ), patch.object(GNS3Connection, "post") as mock_post:
+    with (
+        patch.object(GNS3Connection, "get", return_value={"status": "opened"}),
+        patch.object(GNS3Connection, "post") as mock_post,
+    ):
         GNS3Connection.reload_node("10.20.20.231", 80, "proj-1", "node-1")
 
     mock_post.assert_called_once_with(
@@ -1060,10 +1068,11 @@ def gns3_connection_041() -> None:
 @allure.severity(allure.severity_level.NORMAL)
 def gns3_connection_042() -> None:
     _reset_settings()
-    with patch.object(
-        GNS3Connection, "get", return_value={"status": "opened"}
-    ), patch.object(
-        GNS3Connection, "post", side_effect=requests.exceptions.HTTPError()
+    with (
+        patch.object(GNS3Connection, "get", return_value={"status": "opened"}),
+        patch.object(
+            GNS3Connection, "post", side_effect=requests.exceptions.HTTPError()
+        ),
     ):
         with pytest.raises(RuntimeError):
             GNS3Connection.reload_node("10.20.20.231", 80, "proj-1", "node-1")
@@ -1079,15 +1088,16 @@ def gns3_connection_042() -> None:
 @allure.severity(allure.severity_level.CRITICAL)
 def gns3_connection_043() -> None:
     _reset_settings()
-    with patch.object(
-        GNS3Connection, "get", return_value={"status": "closed"}
-    ) as mock_get, patch.object(GNS3Connection, "post") as mock_post:
+    with (
+        patch.object(
+            GNS3Connection, "get", return_value={"status": "closed"}
+        ) as mock_get,
+        patch.object(GNS3Connection, "post") as mock_post,
+    ):
         GNS3Connection.ensure_project_open("10.20.20.231", 80, "proj-1")
 
     mock_get.assert_called_once_with("http://10.20.20.231:80/v2/projects/proj-1")
-    mock_post.assert_called_once_with(
-        "http://10.20.20.231:80/v2/projects/proj-1/open"
-    )
+    mock_post.assert_called_once_with("http://10.20.20.231:80/v2/projects/proj-1/open")
 
 
 @allure.title("ensure_project_open does nothing when the project is already open")
@@ -1100,9 +1110,10 @@ def gns3_connection_043() -> None:
 @allure.severity(allure.severity_level.NORMAL)
 def gns3_connection_044() -> None:
     _reset_settings()
-    with patch.object(
-        GNS3Connection, "get", return_value={"status": "opened"}
-    ), patch.object(GNS3Connection, "post") as mock_post:
+    with (
+        patch.object(GNS3Connection, "get", return_value={"status": "opened"}),
+        patch.object(GNS3Connection, "post") as mock_post,
+    ):
         GNS3Connection.ensure_project_open("10.20.20.231", 80, "proj-1")
 
     mock_post.assert_not_called()
@@ -1120,16 +1131,14 @@ def gns3_connection_044() -> None:
 @allure.severity(allure.severity_level.CRITICAL)
 def gns3_connection_045() -> None:
     _reset_settings()
-    with patch.object(
-        GNS3Connection, "get", return_value={"status": "closed"}
-    ), patch.object(GNS3Connection, "post") as mock_post, patch.object(
-        GNS3Connection, "delete"
-    ) as mock_delete:
+    with (
+        patch.object(GNS3Connection, "get", return_value={"status": "closed"}),
+        patch.object(GNS3Connection, "post") as mock_post,
+        patch.object(GNS3Connection, "delete") as mock_delete,
+    ):
         GNS3Connection.delete_node("10.20.20.231", 80, "proj-1", "node-1")
 
-    mock_post.assert_called_once_with(
-        "http://10.20.20.231:80/v2/projects/proj-1/open"
-    )
+    mock_post.assert_called_once_with("http://10.20.20.231:80/v2/projects/proj-1/open")
     mock_delete.assert_called_once_with(
         "http://10.20.20.231:80/v2/projects/proj-1/nodes/node-1",
         timeout=_NODE_START_TIMEOUT_SECONDS,
@@ -1163,16 +1172,19 @@ def gns3_connection_046() -> None:
 @allure.severity(allure.severity_level.NORMAL)
 def gns3_connection_047() -> None:
     _reset_settings()
-    with patch.object(
-        GNS3Connection, "get", return_value={"status": "closed"}
-    ), patch.object(
-        GNS3Connection, "post", side_effect=requests.exceptions.HTTPError()
+    with (
+        patch.object(GNS3Connection, "get", return_value={"status": "closed"}),
+        patch.object(
+            GNS3Connection, "post", side_effect=requests.exceptions.HTTPError()
+        ),
     ):
         with pytest.raises(RuntimeError):
             GNS3Connection.ensure_project_open("10.20.20.231", 80, "proj-1")
 
 
-@allure.title("delete_node passes a generous timeout, not APIHandler.delete's default 5s")
+@allure.title(
+    "delete_node passes a generous timeout, not APIHandler.delete's default 5s"
+)
 @allure.description(
     "Regression test: delete_node used to send its DELETE request with "
     "no timeout override at all, hitting APIHandler.delete's hardcoded "
@@ -1189,16 +1201,19 @@ def gns3_connection_047() -> None:
 @allure.severity(allure.severity_level.CRITICAL)
 def gns3_connection_048() -> None:
     _reset_settings()
-    with patch.object(
-        GNS3Connection, "get", return_value={"status": "opened"}
-    ), patch.object(GNS3Connection, "delete") as mock_delete:
+    with (
+        patch.object(GNS3Connection, "get", return_value={"status": "opened"}),
+        patch.object(GNS3Connection, "delete") as mock_delete,
+    ):
         GNS3Connection.delete_node("10.20.20.231", 80, "proj-1", "node-1")
 
     _, kwargs = mock_delete.call_args
     assert kwargs["timeout"] == _NODE_START_TIMEOUT_SECONDS
 
 
-@allure.title("delete_node's TimeoutError still propagates if it's ever genuinely exceeded")
+@allure.title(
+    "delete_node's TimeoutError still propagates if it's ever genuinely exceeded"
+)
 @allure.description(
     "Überprüft, dass ein TimeoutError von delete() weiterhin unverändert "
     "durchschlägt (delete_node wickelt nur HTTPError in RuntimeError ein, "
@@ -1212,8 +1227,9 @@ def gns3_connection_048() -> None:
 @allure.severity(allure.severity_level.NORMAL)
 def gns3_connection_049() -> None:
     _reset_settings()
-    with patch.object(
-        GNS3Connection, "get", return_value={"status": "opened"}
-    ), patch.object(GNS3Connection, "delete", side_effect=TimeoutError()):
+    with (
+        patch.object(GNS3Connection, "get", return_value={"status": "opened"}),
+        patch.object(GNS3Connection, "delete", side_effect=TimeoutError()),
+    ):
         with pytest.raises(TimeoutError):
             GNS3Connection.delete_node("10.20.20.231", 80, "proj-1", "node-1")
