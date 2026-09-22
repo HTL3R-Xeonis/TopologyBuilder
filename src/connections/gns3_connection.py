@@ -23,7 +23,12 @@ from loguru import logger
 # ordinary metadata calls (project/node/link creation). Comfortably above
 # GNS3's own ~240s internal per-node timeout (see the "GNS3 node-start
 # batch timeout" project notes) so a legitimately slow QEMU boot doesn't
-# get mistaken for a hang.
+# get mistaken for a hang. Also reused by delete_node - deleting a live
+# node needs GNS3 to stop its process first, the same kind of
+# potentially-slow wait as starting one (confirmed live: the default
+# APIHandler.delete timeout of 5s is nowhere near enough for that,
+# causing a real TimeoutError/502 even though the delete had actually
+# succeeded server-side moments later - see HANDOFF.md).
 _NODE_START_TIMEOUT_SECONDS = 300
 
 # Matches the error GNS3 raises when a node's console TCP port is already
@@ -291,7 +296,8 @@ class GNS3Connection(APIHandler):
         Verbosity.volumatic_print(Verbosity.NORMAL, f"Deletes node {node_id}")
         try:
             GNS3Connection.delete(
-                f"http://{ip}:{port}/v2/projects/{project_id}/nodes/{node_id}"
+                f"http://{ip}:{port}/v2/projects/{project_id}/nodes/{node_id}",
+                timeout=_NODE_START_TIMEOUT_SECONDS,
             )
         except requests.exceptions.HTTPError as exc:
             logger.error(

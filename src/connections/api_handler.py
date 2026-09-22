@@ -83,11 +83,18 @@ class APIHandler:
             raise
 
     @staticmethod
-    def delete(url: str, parsing_method: str = "json", **kwargs) -> dict | None:
+    def delete(
+        url: str, parsing_method: str = "json", timeout: int = 5, **kwargs
+    ) -> dict | None:
         """
         General method to make an API DELETE request
         :param url: url to the API endpoint
         :param parsing_method: Method of parsing the response.
+        :param timeout: seconds to wait for a response before raising
+            TimeoutError. Defaults to 5 (a plain metadata delete is
+            normally near-instant) - pass a larger value for a call
+            expected to legitimately take longer (e.g. deleting a GNS3
+            node, which has to stop its live process first).
         :param kwargs: Keyword arguments for the delete request.
         :return: The parsed response from the DELETE request.
         :raises HTTPError: Is thrown when something went wrong with the API call.
@@ -95,7 +102,7 @@ class APIHandler:
         :raises RuntimeError: Is thrown when the response is not parseable to JSON.
         """
         try:
-            response = requests.delete(url, timeout=5, **kwargs)
+            response = requests.delete(url, timeout=timeout, **kwargs)
             response.raise_for_status()
             return APIHandler.parse_response(response, parsing_method)
         except requests.Timeout:

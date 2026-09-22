@@ -811,7 +811,8 @@ def gns3_connection_029() -> None:
         GNS3Connection.delete_node("10.20.20.231", 80, "proj-1", "node-1")
 
     mock_delete.assert_called_once_with(
-        "http://10.20.20.231:80/v2/projects/proj-1/nodes/node-1"
+        "http://10.20.20.231:80/v2/projects/proj-1/nodes/node-1",
+        timeout=_NODE_START_TIMEOUT_SECONDS,
     )
 
 
@@ -1130,7 +1131,8 @@ def gns3_connection_045() -> None:
         "http://10.20.20.231:80/v2/projects/proj-1/open"
     )
     mock_delete.assert_called_once_with(
-        "http://10.20.20.231:80/v2/projects/proj-1/nodes/node-1"
+        "http://10.20.20.231:80/v2/projects/proj-1/nodes/node-1",
+        timeout=_NODE_START_TIMEOUT_SECONDS,
     )
 
 
@@ -1168,3 +1170,50 @@ def gns3_connection_047() -> None:
     ):
         with pytest.raises(RuntimeError):
             GNS3Connection.ensure_project_open("10.20.20.231", 80, "proj-1")
+
+
+@allure.title("delete_node passes a generous timeout, not APIHandler.delete's default 5s")
+@allure.description(
+    "Regression test: delete_node used to send its DELETE request with "
+    "no timeout override at all, hitting APIHandler.delete's hardcoded "
+    "5s default - real infrastructure confirmed GNS3 can genuinely take "
+    "much longer than that to delete a node (it has to stop the node's "
+    "live process first, the same kind of wait start_node/reload_node "
+    "already account for), causing a real TimeoutError/502 even though "
+    "the delete had actually succeeded server-side moments later. "
+    "Überprüft, dass delete_node jetzt denselben großzügigen Timeout wie "
+    "start_node/reload_node übergibt"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_048() -> None:
+    _reset_settings()
+    with patch.object(
+        GNS3Connection, "get", return_value={"status": "opened"}
+    ), patch.object(GNS3Connection, "delete") as mock_delete:
+        GNS3Connection.delete_node("10.20.20.231", 80, "proj-1", "node-1")
+
+    _, kwargs = mock_delete.call_args
+    assert kwargs["timeout"] == _NODE_START_TIMEOUT_SECONDS
+
+
+@allure.title("delete_node's TimeoutError still propagates if it's ever genuinely exceeded")
+@allure.description(
+    "Überprüft, dass ein TimeoutError von delete() weiterhin unverändert "
+    "durchschlägt (delete_node wickelt nur HTTPError in RuntimeError ein, "
+    "dasselbe Verhalten wie start_node/reload_node schon immer hatten) - "
+    "TopologyOperator's eigene main.py fängt TimeoutError bereits auf "
+    "Endpoint-Ebene ab, dieselbe bewusste Aufgabenteilung bleibt hier "
+    "unverändert"
+)
+@allure.tag("negativ-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_connection_049() -> None:
+    _reset_settings()
+    with patch.object(
+        GNS3Connection, "get", return_value={"status": "opened"}
+    ), patch.object(GNS3Connection, "delete", side_effect=TimeoutError()):
+        with pytest.raises(TimeoutError):
+            GNS3Connection.delete_node("10.20.20.231", 80, "proj-1", "node-1")

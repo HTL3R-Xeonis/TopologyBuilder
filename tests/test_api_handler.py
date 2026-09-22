@@ -174,3 +174,46 @@ def api_handler_006() -> None:
         APIHandler.post("http://example.com/thing", timeout=300)
 
     assert mock_post.call_args.kwargs["timeout"] == 300
+
+
+@allure.title("delete verwendet standardmäßig einen 5-Sekunden-Timeout")
+@allure.description(
+    "Überprüft, dass APIHandler.delete() ohne expliziten timeout-"
+    "Parameter weiterhin den bisherigen 5-Sekunden-Standardwert an "
+    "requests.delete übergibt"
+)
+@allure.tag("positiv-test", "api-handler")
+@allure.feature("api_handler")
+@allure.severity(allure.severity_level.NORMAL)
+def api_handler_007() -> None:
+    response = MagicMock()
+    response.raise_for_status = MagicMock()
+
+    with patch(
+        "src.connections.api_handler.requests.delete", return_value=response
+    ) as mock_delete:
+        APIHandler.delete("http://example.com/thing")
+
+    assert mock_delete.call_args.kwargs["timeout"] == 5
+
+
+@allure.title("delete gibt einen expliziten Timeout an requests.delete weiter")
+@allure.description(
+    "Überprüft, dass ein explizit übergebener timeout-Parameter den "
+    "5-Sekunden-Standardwert von APIHandler.delete überschreibt - real "
+    "gebraucht von GNS3Connection.delete_node, das ein Node löschen kann, "
+    "dessen Prozess erst gestoppt werden muss (siehe HANDOFF.md)"
+)
+@allure.tag("positiv-test", "api-handler")
+@allure.feature("api_handler")
+@allure.severity(allure.severity_level.NORMAL)
+def api_handler_008() -> None:
+    response = MagicMock()
+    response.raise_for_status = MagicMock()
+
+    with patch(
+        "src.connections.api_handler.requests.delete", return_value=response
+    ) as mock_delete:
+        APIHandler.delete("http://example.com/thing", timeout=300)
+
+    assert mock_delete.call_args.kwargs["timeout"] == 300
