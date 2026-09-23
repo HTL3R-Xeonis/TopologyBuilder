@@ -797,12 +797,17 @@ class ESXiConnection(GenericConnection):
         """
         if Settings.ONLY_ON_GNS3:
             return
-        if incremental and self.find_vms_matching(node.name):
-            Verbosity.volumatic_print(
-                Verbosity.NORMAL,
-                f"ESXi VM {node.name} already exists, skipping (incremental)",
-            )
-            return
+        if incremental:
+            existing = self.find_vms_matching(node.name)
+            if existing:
+                Verbosity.volumatic_print(
+                    Verbosity.NORMAL,
+                    f"ESXi VM {node.name} already exists, skipping OVA "
+                    f"import (incremental)",
+                )
+                vm = next((v for v in existing if v.name == node.name), existing[0])
+                self._ensure_vm_nics(vm, node)
+                return
         # --------------------------------------------------------------------------------------------------------------
         if Settings.IS_DRY_RUN:
             Verbosity.volumatic_print(
@@ -839,6 +844,76 @@ class ESXiConnection(GenericConnection):
 
         self.set_vm_annotation(vm, f"topologybuilder-image:{node.image}")
         self.power_on_vm(vm)
+
+    def _ensure_vm_nics(self, vm: vim.VirtualMachine, node: GenericNode) -> None:
+        """
+        Attaches a network adapter for any of ``node``'s interfaces that
+        isn't already wired to its VLAN's port group on ``vm``. Real bug
+        found live: deploy_virtual_machine's incremental branch used to
+        skip an already-existing VM entirely, so a link added later via
+        the incremental add_link flow (TopologyBackend.add_link) never
+        actually attached anything - the VM's network adapters are only
+        ever set up from ``node.interfaces`` during the original OVA
+        import, and nothing revisited them afterwards. Confirmed live:
+        a VM linked in after its own initial deploy had zero non-
+        loopback interfaces in the guest, even across a reboot.
+        Adds a vmxnet3 adapter per missing interface via ReconfigVM_Task
+        - the guest needs VMware Tools (already a hard requirement for
+        this project's guest-ops config-push) to recognize a hot-added
+        NIC; if it doesn't appear on its own, a guest-side PCI rescan
+        (``echo 1 > /sys/bus/pci/rescan`` as root) picks it up
+        immediately without a reboot.
+        :param vm: the already-deployed VM to reconcile
+        :param node: the node describing what interfaces/VLANs it should have
+        :return:
+        :raises ValueError: if an interface has no VLAN assigned (a graph-construction bug)
+        :raises RuntimeError: if the reconfigure task fails
+        """
+        already_wired = set(self.get_vm_network_names(vm))
+        device_changes = []
+        for interface in node.interfaces.values():
+            if interface.vlan is None:
+                logger.error(
+                    msg
+                    := f"Something went wrong with the graph initialization. "
+                    f"Needed VLAN does not exist on {node.name}.{interface.name}"
+                )
+                raise ValueError(msg)
+            if interface.vlan.name in already_wired:
+                continue
+            nic = vim.vm.device.VirtualVmxnet3()
+            nic.backing = vim.vm.device.VirtualEthernetCard.NetworkBackingInfo(
+                deviceName=interface.vlan.name
+            )
+            nic.addressType = "generated"
+            nic.connectable = vim.vm.device.VirtualDevice.ConnectInfo(
+                startConnected=True, allowGuestControl=True, connected=True
+            )
+            device_changes.append(
+                vim.vm.device.VirtualDeviceSpec(
+                    operation=vim.vm.device.VirtualDeviceSpec.Operation.add,
+                    device=nic,
+                )
+            )
+
+        if not device_changes:
+            return
+
+        if Settings.IS_DRY_RUN:
+            Verbosity.volumatic_print(
+                Verbosity.NORMAL,
+                f"Would attach {len(device_changes)} missing network "
+                f"adapter(s) to existing VM {node.name}",
+            )
+            return
+
+        Verbosity.volumatic_print(
+            Verbosity.NORMAL,
+            f"Attaches {len(device_changes)} missing network adapter(s) "
+            f"to existing VM {node.name}",
+        )
+        spec = vim.vm.ConfigSpec(deviceChange=device_changes)
+        self._wait_for_task(vm.ReconfigVM_Task(spec=spec))
 
     @staticmethod
     def _wait_for_task(task: vim.Task) -> None:

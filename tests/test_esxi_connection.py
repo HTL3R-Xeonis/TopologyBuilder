@@ -601,26 +601,36 @@ def esxi_connection_021() -> None:
 
 
 @allure.title(
-    "deploy_virtual_machine überspringt eine bereits existierende VM im incremental-Modus"
+    "deploy_virtual_machine überspringt den OVA-Import einer bereits "
+    "existierenden VM im incremental-Modus, deren Netzwerkadapter schon "
+    "vollständig sind"
 )
 @allure.description(
     "Überprüft, dass deploy_virtual_machine im incremental-Modus die "
     "OVA-Datei weder auflöst noch deployt, wenn bereits eine VM mit dem "
-    "Node-Namen existiert"
+    "Node-Namen existiert, und auch kein ReconfigVM_Task ausgelöst wird, "
+    "wenn diese VM bereits einen Adapter für jedes Interface hat"
 )
 @allure.tag("positiv-test", "esxi-connection")
 @allure.feature("esxi_connection")
 @allure.severity(allure.severity_level.CRITICAL)
 def esxi_connection_022() -> None:
     from src.graph.blocks.generic_node import GenericNode
+    from src.graph.blocks.vlan import VirtualLan
 
     _reset_settings()
     Settings.API.LITERAL_API_VALUES = True
     conn = _make_esxi_connection()
-    conn.find_vms_matching = MagicMock(return_value=[MagicMock()])
+
+    existing_vm = MagicMock()
+    existing_vm.name = "VM1"
+    existing_vm.config.hardware.device = []
+    conn.find_vms_matching = MagicMock(return_value=[existing_vm])
+    conn.get_vm_network_names = MagicMock(return_value=["VM1_ens160"])
 
     node = GenericNode("Ubuntu-Server", "VM", "VM1")
-    node.add_interface("ens160")
+    interface = node.add_interface("ens160")
+    interface.vlan = VirtualLan("VM1", "ens160")
 
     with patch(
         "src.connections.esxi_connection.APIHandler.find_esxi_template_file"
@@ -628,6 +638,97 @@ def esxi_connection_022() -> None:
         conn.deploy_virtual_machine(node, "datastore1", incremental=True)
 
     mock_find_file.assert_not_called()
+    existing_vm.ReconfigVM_Task.assert_not_called()
+
+
+@allure.title(
+    "deploy_virtual_machine hängt bei einer bereits existierenden VM im "
+    "incremental-Modus einen fehlenden Netzwerkadapter nach"
+)
+@allure.description(
+    "Real bug gefunden live: deploy_virtual_machine übersprang eine "
+    "bereits existierende VM im incremental-Modus komplett, sodass ein "
+    "später über den incremental add_link-Flow hinzugefügtes Interface "
+    "nie tatsächlich an die VM-Hardware angeschlossen wurde - die VM "
+    "hatte danach im Gast keinen einzigen funktionierenden Netzwerk-"
+    "adapter, auch nach einem Reboot nicht. Überprüft, dass "
+    "deploy_virtual_machine jetzt für jedes Interface ohne passenden "
+    "Adapter einen vmxnet3-Adapter per ReconfigVM_Task an die richtige "
+    "Port-Group anhängt, statt einfach nichts zu tun"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_052() -> None:
+    from pyVmomi import vim
+
+    from src.graph.blocks.generic_node import GenericNode
+    from src.graph.blocks.vlan import VirtualLan
+
+    _reset_settings()
+    Settings.API.LITERAL_API_VALUES = True
+    conn = _make_esxi_connection()
+
+    existing_vm = MagicMock()
+    existing_vm.name = "VM1"
+    existing_vm.config.hardware.device = []
+    task = MagicMock()
+    task.info.state = vim.TaskInfo.State.success
+    existing_vm.ReconfigVM_Task.return_value = task
+    conn.find_vms_matching = MagicMock(return_value=[existing_vm])
+    conn.get_vm_network_names = MagicMock(return_value=[])
+
+    node = GenericNode("Ubuntu-Server", "VM", "VM1")
+    interface = node.add_interface("ens160")
+    interface.vlan = VirtualLan("VM1", "ens160")
+
+    with patch(
+        "src.connections.esxi_connection.APIHandler.find_esxi_template_file"
+    ) as mock_find_file:
+        conn.deploy_virtual_machine(node, "datastore1", incremental=True)
+
+    mock_find_file.assert_not_called()
+    existing_vm.ReconfigVM_Task.assert_called_once()
+    spec = existing_vm.ReconfigVM_Task.call_args.kwargs["spec"]
+    assert len(spec.deviceChange) == 1
+    change = spec.deviceChange[0]
+    assert change.operation == vim.vm.device.VirtualDeviceSpec.Operation.add
+    assert isinstance(change.device, vim.vm.device.VirtualVmxnet3)
+    assert change.device.backing.deviceName == "VM1_ens160"
+
+
+@allure.title(
+    "deploy_virtual_machine wirft ValueError, wenn einem Interface einer "
+    "bereits existierenden VM im incremental-Modus kein VLAN zugewiesen ist"
+)
+@allure.description(
+    "Überprüft, dass die Netzwerkadapter-Abgleichslogik für eine bereits "
+    "existierende VM denselben Fehler wirft wie der normale (nicht-"
+    "incremental) Deploy-Pfad, statt das fehlende VLAN stillschweigend zu "
+    "überspringen"
+)
+@allure.tag("negativ-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_053() -> None:
+    from src.graph.blocks.generic_node import GenericNode
+
+    _reset_settings()
+    Settings.API.LITERAL_API_VALUES = True
+    conn = _make_esxi_connection()
+
+    existing_vm = MagicMock()
+    existing_vm.name = "VM1"
+    conn.find_vms_matching = MagicMock(return_value=[existing_vm])
+    conn.get_vm_network_names = MagicMock(return_value=[])
+
+    node = GenericNode("Ubuntu-Server", "VM", "VM1")
+    node.add_interface("ens160")  # vlan left unset on purpose
+
+    with pytest.raises(ValueError):
+        conn.deploy_virtual_machine(node, "datastore1", incremental=True)
+
+    existing_vm.ReconfigVM_Task.assert_not_called()
 
 
 @allure.title("is_vm_powered_on erkennt eine eingeschaltete VM")
