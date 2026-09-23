@@ -874,8 +874,7 @@ class ESXiConnection(GenericConnection):
         for interface in node.interfaces.values():
             if interface.vlan is None:
                 logger.error(
-                    msg
-                    := f"Something went wrong with the graph initialization. "
+                    msg := f"Something went wrong with the graph initialization. "
                     f"Needed VLAN does not exist on {node.name}.{interface.name}"
                 )
                 raise ValueError(msg)
