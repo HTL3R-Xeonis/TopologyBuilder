@@ -55,6 +55,8 @@ class Settings:
             Settings.LOG_FILE_PATH = data["log_file_path"]
         if "generate_max_retries" in data:
             Settings.GENERATE_MAX_RETRIES = int(data["generate_max_retries"])
+        if "incremental_deploy" in data:
+            Settings.INCREMENTAL_DEPLOY = bool(data["incremental_deploy"])
 
         if "ip" in esxi:
             Settings.ESXI.IP = esxi["ip"]
@@ -112,6 +114,21 @@ class Settings:
     """How many times the `generate` command retries requesting a new
     topology from the Topology Generator API after one fails validation,
     before giving up."""
+    INCREMENTAL_DEPLOY: bool = True
+    """Whether TopologyBackend.deploy_topology (the whole-file deploy
+    path used by TopologyOperator's .topoproj import, and by `deploy`
+    when a project already exists) passes incremental=True through to
+    VMOrchestrator.deploy_graph. True (default) reuses anything already
+    live by name and only creates what's new/changed - a single slow or
+    failing device (e.g. a stuck OVA import) doesn't undo devices that
+    already deployed successfully. False does a full deploy: resets the
+    ESXi vSwitch, deletes ESXi VMs/GNS3 projects not in the current
+    graph (see ESXI.DELETE_UNUSED_VMS), and redeploys everything from
+    scratch even if a same-named node/VM already exists - slower and
+    more disruptive, but guarantees a clean, fully reproducible result
+    with no state left over from a previous deploy. Does not affect
+    add_node/add_link, which are inherently incremental by definition
+    and always pass incremental=True regardless of this setting."""
 
     class ESXI:
         """Settings related to ESXi."""

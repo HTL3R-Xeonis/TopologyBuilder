@@ -118,14 +118,19 @@ class TopologyBackend:
     def deploy_topology(self, topology_file: str, topology_yaml_text: str) -> Graph:
         """
         Deploys every node/edge described by topology_yaml_text live,
-        incrementally (see add_node's own docstring for what
-        incremental means and its VLAN-subinterface caveat) - reuses
-        anything already live by name, creates whatever's new, never
-        removes anything already live that isn't in
-        topology_yaml_text. Only after a successful deploy does it
-        overwrite topology_file with topology_yaml_text - a failed
-        deploy leaves topology_file completely untouched, same
-        guarantee add_node/add_link already give.
+        per Settings.INCREMENTAL_DEPLOY (default True - see add_node's
+        own docstring for what incremental means and its VLAN-
+        subinterface caveat): reuses anything already live by name,
+        creates whatever's new, never removes anything already live
+        that isn't in topology_yaml_text. Set Settings.INCREMENTAL_
+        DEPLOY to False for a full deploy instead - resets the ESXi
+        vSwitch and redeploys everything from scratch, even nodes that
+        already exist by name (see VMOrchestrator.deploy_graph's own
+        `incremental` parameter for the full behavioral difference).
+        Only after a successful deploy does it overwrite topology_file
+        with topology_yaml_text - a failed deploy leaves topology_file
+        completely untouched, same guarantee add_node/add_link already
+        give.
         :param topology_file: path to the topology YAML file to overwrite on success
         :param topology_yaml_text: the new topology's full YAML content (not yet on disk anywhere)
         :return: the freshly deployed Graph
@@ -144,7 +149,10 @@ class TopologyBackend:
 
         self._set_project_name(topology_file)
         self._orchestrator.deploy_graph(
-            graph, self._gns3_username, self._gns3_password, incremental=True
+            graph,
+            self._gns3_username,
+            self._gns3_password,
+            incremental=Settings.INCREMENTAL_DEPLOY,
         )
 
         with open(topology_file, "w") as file:

@@ -20,6 +20,20 @@ topology_file: ./topology_example.yaml
 # giving up.
 generate_max_retries: 3
 
+# Whether a whole-file deploy (TopologyBackend.deploy_topology - the path
+# used by `deploy` when a project already exists, and by TopologyOperator's
+# .topoproj import) is incremental. True (default) reuses anything already
+# live by name and only creates what's new/changed, so one slow or failing
+# device doesn't undo devices that already deployed successfully. Set to
+# false for a full deploy instead: resets the ESXi vSwitch, deletes ESXi
+# VMs/GNS3 projects not in the current graph (see esxi.delete_unused_vms
+# below), and redeploys everything from scratch even if a same-named node
+# already exists - slower and more disruptive, but guarantees a clean
+# result with nothing left over from a previous deploy. Does not affect
+# add_node/add_link, which always deploy incrementally regardless of this
+# setting.
+incremental_deploy: true
+
 esxi:
   ip: 10.20.20.202
   username: root

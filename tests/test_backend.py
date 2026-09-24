@@ -23,6 +23,7 @@ def add_folder_path(path: str) -> str:
 def _reset_settings() -> None:
     Settings.IS_DRY_RUN = False
     Settings.GNS3.PROJECT_NAME = None
+    Settings.INCREMENTAL_DEPLOY = True
 
 
 def _make_backend() -> tuple[TopologyBackend, MagicMock]:
@@ -409,3 +410,27 @@ def backend_012(tmp_path) -> None:
 
     with open(topology_file) as file:
         assert file.read() == original_content
+
+
+@allure.title("deploy_topology passt incremental an Settings.INCREMENTAL_DEPLOY an")
+@allure.description(
+    "Überprüft, dass deploy_topology() bei Settings.INCREMENTAL_DEPLOY "
+    "= False ein incremental=False an VMOrchestrator.deploy_graph "
+    "übergibt, statt fest incremental=True zu verwenden"
+)
+@allure.tag("positiv-test", "backend")
+@allure.feature("backend")
+@allure.severity(allure.severity_level.CRITICAL)
+def backend_013(tmp_path) -> None:
+    _reset_settings()
+    Settings.INCREMENTAL_DEPLOY = False
+    topology_file = _copy_topology(tmp_path)
+    backend, orchestrator = _make_backend()
+
+    try:
+        backend.deploy_topology(topology_file, _NEW_TOPOLOGY_YAML)
+
+        call_args = orchestrator.deploy_graph.call_args
+        assert call_args.kwargs["incremental"] is False
+    finally:
+        _reset_settings()
