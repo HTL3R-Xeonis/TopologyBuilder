@@ -76,6 +76,10 @@ class Settings:
             Settings.ESXI.GNS3_VM_NAME = esxi["gns3_vm_name"]
         if "delete_unused_vms" in esxi:
             Settings.ESXI.DELETE_UNUSED_VMS = bool(esxi["delete_unused_vms"])
+        if "gns3_vm_ova_path" in esxi:
+            Settings.ESXI.GNS3_VM_OVA_PATH = esxi["gns3_vm_ova_path"]
+        if "gns3_vm_mgmt_network" in esxi:
+            Settings.ESXI.GNS3_VM_MGMT_NETWORK = esxi["gns3_vm_mgmt_network"]
 
         if "username" in gns3:
             Settings.GNS3.USERNAME = gns3["username"]
@@ -172,6 +176,19 @@ class Settings:
         (see ESXiConnection.find_gns3_vm) and never deleted, regardless of
         this setting. A VM without the annotation - i.e. anything this
         tool didn't create itself - is never touched either way."""
+        GNS3_VM_OVA_PATH: str | None = None
+        """Local filesystem path to the GNS3 VM's own OVA (an NFS share
+        mounted locally works fine here, it's just a path) - see
+        src.gns3_vm_deploy.deploy_fresh_gns3_vm. None (default) leaves
+        that feature unconfigured; callers that need it (e.g.
+        TopologyOperator's own GNS3-VM-missing recovery) should treat a
+        None here as "not available", not attempt a deploy with no OVA."""
+        GNS3_VM_MGMT_NETWORK: str | None = None
+        """ESXi port group for a freshly deployed GNS3 VM's management NIC
+        (must be the OVA's first-added network adapter) - see
+        src.gns3_vm_deploy.deploy_fresh_gns3_vm. TRUNK_PORT_GROUP above is
+        reused for the second (trunk) NIC, rather than adding a second new
+        setting for it."""
 
     class GNS3:
         """Settings related to GNS3."""

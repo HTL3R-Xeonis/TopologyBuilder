@@ -1421,3 +1421,152 @@ def esxi_connection_051() -> None:
 
     assert result is node
     conn._reconnect.assert_called_once()
+
+
+@allure.title("rename_vm benennt die VM über Rename_Task um")
+@allure.description(
+    "Überprüft, dass rename_vm Rename_Task mit dem neuen Namen aufruft "
+    "und auf dessen Abschluss wartet"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def esxi_connection_052() -> None:
+    from pyVmomi import vim
+
+    conn = _make_esxi_connection()
+    vm = MagicMock()
+    task = MagicMock()
+    task.info.state = vim.TaskInfo.State.success
+    vm.Rename_Task.return_value = task
+
+    conn.rename_vm(vm, "GNS3-backup-20260924120000")
+
+    vm.Rename_Task.assert_called_once_with(newName="GNS3-backup-20260924120000")
+
+
+@allure.title("get_vm_mac_address liefert die MAC des ersten Ethernet-Adapters")
+@allure.description(
+    "Überprüft, dass get_vm_mac_address die MAC-Adresse des ersten "
+    "VirtualEthernetCard-Geräts zurückgibt und andere Gerätetypen "
+    "überspringt"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def esxi_connection_053() -> None:
+    from pyVmomi import vim
+
+    conn = _make_esxi_connection()
+    disk = MagicMock()
+    disk.__class__ = vim.vm.device.VirtualDisk
+    nic = MagicMock()
+    nic.__class__ = vim.vm.device.VirtualEthernetCard
+    nic.macAddress = "00:11:22:33:44:55"
+    vm = MagicMock()
+    vm.config.hardware.device = [disk, nic]
+
+    assert conn.get_vm_mac_address(vm) == "00:11:22:33:44:55"
+
+
+@allure.title("get_vm_mac_address liefert None ohne Ethernet-Adapter")
+@allure.description(
+    "Überprüft, dass get_vm_mac_address None zurückgibt, wenn die VM "
+    "kein VirtualEthernetCard-Gerät hat"
+)
+@allure.tag("negativ-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def esxi_connection_054() -> None:
+    from pyVmomi import vim
+
+    conn = _make_esxi_connection()
+    disk = MagicMock()
+    disk.__class__ = vim.vm.device.VirtualDisk
+    vm = MagicMock()
+    vm.config.hardware.device = [disk]
+
+    assert conn.get_vm_mac_address(vm) is None
+
+
+@allure.title("set_vm_mac_address setzt eine feste MAC über ReconfigVM_Task")
+@allure.description(
+    "Überprüft, dass set_vm_mac_address die MAC-Adresse des ersten "
+    "Ethernet-Adapters auf einen manuellen, festen Wert setzt und "
+    "ReconfigVM_Task aufruft"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_055() -> None:
+    from pyVmomi import vim
+
+    conn = _make_esxi_connection()
+    nic = MagicMock()
+    nic.__class__ = vim.vm.device.VirtualEthernetCard
+    vm = MagicMock()
+    vm.config.hardware.device = [nic]
+    task = MagicMock()
+    task.info.state = vim.TaskInfo.State.success
+    vm.ReconfigVM_Task.return_value = task
+
+    conn.set_vm_mac_address(vm, "00:11:22:33:44:55")
+
+    assert nic.macAddress == "00:11:22:33:44:55"
+    assert nic.addressType == "manual"
+    vm.ReconfigVM_Task.assert_called_once()
+    _, kwargs = vm.ReconfigVM_Task.call_args
+    assert kwargs["spec"].deviceChange[0].device is nic
+
+
+@allure.title("set_vm_mac_address wirft einen Fehler ohne Ethernet-Adapter")
+@allure.description(
+    "Überprüft, dass set_vm_mac_address einen ValueError wirft, wenn "
+    "die VM kein VirtualEthernetCard-Gerät hat, auf dem eine MAC "
+    "gesetzt werden könnte"
+)
+@allure.tag("negativ-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def esxi_connection_056() -> None:
+    conn = _make_esxi_connection()
+    vm = MagicMock()
+    vm.config.hardware.device = []
+
+    with pytest.raises(ValueError, match="no network adapter"):
+        conn.set_vm_mac_address(vm, "00:11:22:33:44:55")
+
+
+@allure.title("add_vm_network_adapters fügt für jeden Netzwerknamen einen Adapter hinzu")
+@allure.description(
+    "Überprüft, dass add_vm_network_adapters einen ReconfigVM_Task mit "
+    "einem neuen VirtualVmxnet3-Gerät pro gegebenem Port-Group-Namen "
+    "aufruft, verbunden mit dem jeweils passenden Netzwerk"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_057() -> None:
+    from pyVmomi import vim
+
+    conn = _make_esxi_connection()
+    vm = MagicMock()
+    task = MagicMock()
+    task.info.state = vim.TaskInfo.State.success
+    vm.ReconfigVM_Task.return_value = task
+    network = MagicMock()
+    network.__class__ = vim.Network
+    conn.find_network = MagicMock(return_value=network)
+
+    conn.add_vm_network_adapters(vm, ["PG-MGMT", "PG_GNS3_TRUNK"])
+
+    vm.ReconfigVM_Task.assert_called_once()
+    _, kwargs = vm.ReconfigVM_Task.call_args
+    device_changes = kwargs["spec"].deviceChange
+    assert len(device_changes) == 2
+    for change in device_changes:
+        assert isinstance(change.device, vim.vm.device.VirtualVmxnet3)
+        assert change.operation == vim.vm.device.VirtualDeviceSpec.Operation.add
+    assert conn.find_network.call_args_list == [
+        (("PG-MGMT",),), (("PG_GNS3_TRUNK",),),
+    ]

@@ -979,6 +979,81 @@ class ESXiConnection(GenericConnection):
         self.power_off_vm(vm)
         self._wait_for_task(vm.Destroy_Task())
 
+    def rename_vm(self, vm: vim.VirtualMachine, new_name: str) -> None:
+        """
+        Renames the given VM.
+        :param vm: the VM to rename
+        :param new_name: new name for the VM
+        :return:
+        """
+        self._wait_for_task(vm.Rename_Task(newName=new_name))
+
+    def get_vm_mac_address(self, vm: vim.VirtualMachine) -> Optional[str]:
+        """
+        Returns the MAC address of the VM's first Ethernet network adapter.
+        :param vm: the VM to inspect
+        :return: MAC address string, or None if it has no network adapter
+        """
+        for device in vm.config.hardware.device:
+            if isinstance(device, vim.vm.device.VirtualEthernetCard):
+                return device.macAddress
+        return None
+
+    def set_vm_mac_address(self, vm: vim.VirtualMachine, mac_address: str) -> None:
+        """
+        Sets the MAC address of the VM's first Ethernet network adapter to a
+        fixed, manually-assigned value.
+        :param vm: the VM to reconfigure
+        :param mac_address: MAC address to assign
+        :return:
+        :raises ValueError: if the VM has no network adapter at all
+        """
+        for device in vm.config.hardware.device:
+            if isinstance(device, vim.vm.device.VirtualEthernetCard):
+                device.macAddress = mac_address
+                device.addressType = "manual"
+                device_spec = vim.vm.device.VirtualDeviceSpec(
+                    operation=vim.vm.device.VirtualDeviceSpec.Operation.edit,
+                    device=device,
+                )
+                config_spec = vim.vm.ConfigSpec(deviceChange=[device_spec])
+                self._wait_for_task(vm.ReconfigVM_Task(spec=config_spec))
+                return
+        logger.error(msg := f"VM '{vm.name}' has no network adapter to set a MAC on")
+        raise ValueError(msg)
+
+    def add_vm_network_adapters(
+        self, vm: vim.VirtualMachine, network_names: list[str]
+    ) -> None:
+        """
+        Adds a new network adapter to the VM for each given port group, in
+        order. Used when an OVA declares fewer networks than the VM
+        ultimately needs, e.g. a single-NIC GNS3 OVA that still needs a
+        second, trunk NIC added on top after import.
+        :param vm: the VM to add adapters to
+        :param network_names: ESXi port group name for each adapter to add, in order
+        :return:
+        """
+        device_changes = []
+        for network_name in network_names:
+            device = vim.vm.device.VirtualVmxnet3()
+            device.backing = vim.vm.device.VirtualEthernetCard.NetworkBackingInfo(
+                network=self.find_network(network_name), deviceName=network_name
+            )
+            device.connectable = vim.vm.device.VirtualDevice.ConnectInfo(
+                startConnected=True, connected=True, allowGuestControl=True
+            )
+            device_changes.append(
+                vim.vm.device.VirtualDeviceSpec(
+                    operation=vim.vm.device.VirtualDeviceSpec.Operation.add,
+                    device=device,
+                )
+            )
+
+        config_spec = vim.vm.ConfigSpec(deviceChange=device_changes)
+        self._wait_for_task(vm.ReconfigVM_Task(spec=config_spec))
+        logger.info(f"Added network adapter(s) to VM '{vm.name}' for: {network_names}")
+
     def delete_port_group(self, name: str) -> None:
         """
         Deletes the named port group if it exists. Requires no VM to still
