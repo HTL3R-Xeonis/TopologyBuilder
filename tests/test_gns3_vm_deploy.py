@@ -155,3 +155,74 @@ def gns3_vm_deploy_003() -> None:
                 "PG_GNS3_TRUNK",
                 ip_wait_timeout_seconds=0,
             )
+
+
+@allure.title("deploy_fresh_gns3_vm löscht die alte VM erst, nachdem die neue eine IP meldet")
+@allure.description(
+    "Überprüft, dass delete_old_vm=True die alte (umbenannte) VM erst "
+    "dann permanent löscht, nachdem die neue VM erfolgreich eine IP-"
+    "Adresse gemeldet hat (siehe gns3_vm_deploy_001 für den Standardfall "
+    "delete_old_vm=False, wo delete_vm gar nicht aufgerufen wird)"
+)
+@allure.tag("positiv-test", "gns3_vm_deploy")
+@allure.feature("gns3_vm_deploy")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_vm_deploy_004() -> None:
+    esxi_connection = MagicMock()
+    old_vm = MagicMock()
+    esxi_connection.get_vm.return_value = old_vm
+    esxi_connection.get_vm_mac_address.return_value = "00:11:22:33:44:55"
+    esxi_connection.get_vm_ip_address.return_value = "10.20.20.233"
+
+    with patch("src.gns3_vm_deploy.OVAImporter") as importer_cls:
+        importer_cls.return_value.import_ova.return_value = MagicMock()
+
+        deploy_fresh_gns3_vm(
+            esxi_connection,
+            "GNS-VM-1",
+            "/mnt/nfs/gns3.ova",
+            "datastore1",
+            "PG-MGMT",
+            "PG_GNS3_TRUNK",
+            delete_old_vm=True,
+        )
+
+    esxi_connection.delete_vm.assert_called_once_with(old_vm)
+
+
+@allure.title("deploy_fresh_gns3_vm löscht die alte VM nicht, wenn die neue keine IP meldet")
+@allure.description(
+    "Überprüft, dass delete_old_vm=True die alte VM NICHT löscht, wenn "
+    "die neu importierte VM innerhalb des Timeouts keine IP meldet - der "
+    "TimeoutError wird trotzdem geworfen, und die alte VM bleibt als "
+    "Backup erhalten, damit ein fehlgeschlagenes Deployment nicht auch "
+    "noch die funktionierende alte VM kostet"
+)
+@allure.tag("negativ-test", "gns3_vm_deploy")
+@allure.feature("gns3_vm_deploy")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_vm_deploy_005() -> None:
+    esxi_connection = MagicMock()
+    old_vm = MagicMock()
+    esxi_connection.get_vm.return_value = old_vm
+    esxi_connection.get_vm_mac_address.return_value = "00:11:22:33:44:55"
+    esxi_connection.get_vm_ip_address.return_value = None
+
+    with patch("src.gns3_vm_deploy.OVAImporter") as importer_cls, patch(
+        "src.gns3_vm_deploy.time.sleep"
+    ):
+        importer_cls.return_value.import_ova.return_value = MagicMock()
+
+        with pytest.raises(TimeoutError):
+            deploy_fresh_gns3_vm(
+                esxi_connection,
+                "GNS-VM-1",
+                "/mnt/nfs/gns3.ova",
+                "datastore1",
+                "PG-MGMT",
+                "PG_GNS3_TRUNK",
+                ip_wait_timeout_seconds=0,
+                delete_old_vm=True,
+            )
+
+    esxi_connection.delete_vm.assert_not_called()

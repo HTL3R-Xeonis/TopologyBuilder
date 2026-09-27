@@ -32,15 +32,17 @@ def deploy_fresh_gns3_vm(
     trunk_network_name: str,
     ip_wait_timeout_seconds: int = 300,
     on_stage: Callable[[str], None] | None = None,
+    delete_old_vm: bool = False,
 ) -> str:
     """
     Replaces the GNS3 VM named ``vm_name`` with a freshly imported one from
     the given OVA. An existing VM by that name (if any) is powered off and
-    renamed as a timestamped backup rather than deleted. The new VM's
-    management NIC gets the old VM's MAC address, so a DHCP server that
-    hands out addresses by MAC (reservation, or a not-yet-expired lease)
-    gives the new VM the same IP as the old one. This does NOT work if the
-    GNS3 VM's IP is a static address configured inside the guest OS.
+    renamed as a timestamped backup rather than deleted immediately. The
+    new VM's management NIC gets the old VM's MAC address, so a DHCP
+    server that hands out addresses by MAC (reservation, or a not-yet-
+    expired lease) gives the new VM the same IP as the old one. This does
+    NOT work if the GNS3 VM's IP is a static address configured inside
+    the guest OS.
     :param esxi_connection: an already-connected ESXi session
     :param vm_name: name the new (and previous, if any) GNS3 VM should have
     :param ova_path: local filesystem path to the GNS3 OVA (an NFS share
@@ -55,8 +57,19 @@ def deploy_fresh_gns3_vm(
         stage name at each major step (e.g. for a caller to surface
         coarse progress - there's no real percentage available, the OVA
         upload's own byte-level progress isn't threaded back out here)
+    :param delete_old_vm: when True and an existing same-named VM was
+        found, permanently deletes it (see ESXiConnection.delete_vm)
+        once - and only once - the new VM has confirmed itself alive by
+        reporting an IP address. Deliberately never attempted before
+        that point: if the new VM never comes up (ip_wait_timeout_seconds
+        elapses, TimeoutError below), the old VM is left exactly as its
+        powered-off, renamed backup - the whole point of that safety net
+        is a path back to a known-working VM, which permanently deleting
+        it before the replacement is proven working would defeat.
     :return: IP address of the new GNS3 VM
-    :raises TimeoutError: if the new VM never reports an IP within ip_wait_timeout_seconds
+    :raises TimeoutError: if the new VM never reports an IP within
+        ip_wait_timeout_seconds - the old VM (if any) is left as its
+        renamed backup, never deleted, regardless of delete_old_vm.
     """
 
     def stage(name: str) -> None:
@@ -98,6 +111,10 @@ def deploy_fresh_gns3_vm(
         ip_address = esxi_connection.get_vm_ip_address(vm_name)
         if ip_address is not None:
             logger.info(f"'{vm_name}' VM is up at {ip_address}")
+            if delete_old_vm and old_vm is not None:
+                stage("deleting old VM")
+                logger.info(f"Deleting old '{vm_name}' VM (backed up as '{backup_name}')")
+                esxi_connection.delete_vm(old_vm)
             return ip_address
         time.sleep(_IP_WAIT_POLL_INTERVAL_SECONDS)
 
