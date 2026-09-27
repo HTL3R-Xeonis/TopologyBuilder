@@ -1431,7 +1431,7 @@ def esxi_connection_051() -> None:
 @allure.tag("positiv-test", "esxi-connection")
 @allure.feature("esxi_connection")
 @allure.severity(allure.severity_level.NORMAL)
-def esxi_connection_052() -> None:
+def esxi_connection_058() -> None:
     from pyVmomi import vim
 
     conn = _make_esxi_connection()
@@ -1454,7 +1454,7 @@ def esxi_connection_052() -> None:
 @allure.tag("positiv-test", "esxi-connection")
 @allure.feature("esxi_connection")
 @allure.severity(allure.severity_level.NORMAL)
-def esxi_connection_053() -> None:
+def esxi_connection_059() -> None:
     from pyVmomi import vim
 
     conn = _make_esxi_connection()
@@ -1537,7 +1537,9 @@ def esxi_connection_056() -> None:
         conn.set_vm_mac_address(vm, "00:11:22:33:44:55")
 
 
-@allure.title("add_vm_network_adapters fügt für jeden Netzwerknamen einen Adapter hinzu")
+@allure.title(
+    "add_vm_network_adapters fügt für jeden Netzwerknamen einen Adapter hinzu"
+)
 @allure.description(
     "Überprüft, dass add_vm_network_adapters einen ReconfigVM_Task mit "
     "einem neuen VirtualVmxnet3-Gerät pro gegebenem Port-Group-Namen "
@@ -1568,5 +1570,6 @@ def esxi_connection_057() -> None:
         assert isinstance(change.device, vim.vm.device.VirtualVmxnet3)
         assert change.operation == vim.vm.device.VirtualDeviceSpec.Operation.add
     assert conn.find_network.call_args_list == [
-        (("PG-MGMT",),), (("PG_GNS3_TRUNK",),),
+        (("PG-MGMT",),),
+        (("PG_GNS3_TRUNK",),),
     ]

@@ -97,8 +97,7 @@ class OVAImporter:
             )
             if len(parse_result.network) > len(network_names):
                 logger.error(
-                    msg
-                    := f"OVF declares {len(parse_result.network)} network(s) "
+                    msg := f"OVF declares {len(parse_result.network)} network(s) "
                     f"({[net.name for net in parse_result.network]}) but only "
                     f"{len(network_names)} ESXi network(s) were given: {network_names}"
                 )
@@ -126,8 +125,7 @@ class OVAImporter:
             )
             if import_spec_result.error:
                 logger.error(
-                    msg
-                    := f"Failed to create import spec for {ova_path}: "
+                    msg := f"Failed to create import spec for {ova_path}: "
                     f"{[str(e.msg) for e in import_spec_result.error]}"
                 )
                 raise RuntimeError(msg)

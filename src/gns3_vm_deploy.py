@@ -136,12 +136,15 @@ def deploy_fresh_gns3_vm(
             logger.info(f"'{vm_name}' VM is up at {ip_address}")
             if delete_old_vm and old_vm is not None:
                 stage("deleting old VM")
-                logger.info(f"Deleting old '{vm_name}' VM (backed up as '{backup_name}')")
+                logger.info(
+                    f"Deleting old '{vm_name}' VM (backed up as '{backup_name}')"
+                )
                 esxi_connection.delete_vm(old_vm)
             return ip_address
         time.sleep(_IP_WAIT_POLL_INTERVAL_SECONDS)
 
     logger.error(
-        msg := f"'{vm_name}' VM did not report an IP address within {ip_wait_timeout_seconds}s"
+        msg
+        := f"'{vm_name}' VM did not report an IP address within {ip_wait_timeout_seconds}s"
     )
     raise TimeoutError(msg)

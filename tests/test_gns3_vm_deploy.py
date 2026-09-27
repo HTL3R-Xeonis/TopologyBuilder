@@ -85,7 +85,9 @@ def gns3_vm_deploy_001() -> None:
     assert rename_args[0] is old_vm
     assert rename_args[1].startswith("GNS-VM-1-backup-")
     esxi_connection.delete_vm.assert_not_called()
-    esxi_connection.set_vm_mac_address.assert_called_once_with(new_vm, "00:11:22:33:44:55")
+    esxi_connection.set_vm_mac_address.assert_called_once_with(
+        new_vm, "00:11:22:33:44:55"
+    )
 
 
 @allure.title("deploy_fresh_gns3_vm meldet Fortschritts-Stages über on_stage")
@@ -141,8 +143,9 @@ def gns3_vm_deploy_003() -> None:
     esxi_connection.get_vm.return_value = None
     esxi_connection.get_vm_ip_address.return_value = None
 
-    with patch("src.gns3_vm_deploy.OVAImporter") as importer_cls, patch(
-        "src.gns3_vm_deploy.time.sleep"
+    with (
+        patch("src.gns3_vm_deploy.OVAImporter") as importer_cls,
+        patch("src.gns3_vm_deploy.time.sleep"),
     ):
         importer_cls.return_value.import_ova.return_value = MagicMock()
 
@@ -158,7 +161,9 @@ def gns3_vm_deploy_003() -> None:
             )
 
 
-@allure.title("deploy_fresh_gns3_vm löscht die alte VM erst, nachdem die neue eine IP meldet")
+@allure.title(
+    "deploy_fresh_gns3_vm löscht die alte VM erst, nachdem die neue eine IP meldet"
+)
 @allure.description(
     "Überprüft, dass delete_old_vm=True die alte (umbenannte) VM erst "
     "dann permanent löscht, nachdem die neue VM erfolgreich eine IP-"
@@ -191,7 +196,9 @@ def gns3_vm_deploy_004() -> None:
     esxi_connection.delete_vm.assert_called_once_with(old_vm)
 
 
-@allure.title("deploy_fresh_gns3_vm löscht die alte VM nicht, wenn die neue keine IP meldet")
+@allure.title(
+    "deploy_fresh_gns3_vm löscht die alte VM nicht, wenn die neue keine IP meldet"
+)
 @allure.description(
     "Überprüft, dass delete_old_vm=True die alte VM NICHT löscht, wenn "
     "die neu importierte VM innerhalb des Timeouts keine IP meldet - der "
@@ -209,8 +216,9 @@ def gns3_vm_deploy_005() -> None:
     esxi_connection.get_vm_mac_address.return_value = "00:11:22:33:44:55"
     esxi_connection.get_vm_ip_address.return_value = None
 
-    with patch("src.gns3_vm_deploy.OVAImporter") as importer_cls, patch(
-        "src.gns3_vm_deploy.time.sleep"
+    with (
+        patch("src.gns3_vm_deploy.OVAImporter") as importer_cls,
+        patch("src.gns3_vm_deploy.time.sleep"),
     ):
         importer_cls.return_value.import_ova.return_value = MagicMock()
 

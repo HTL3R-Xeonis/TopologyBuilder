@@ -51,7 +51,9 @@ def _make_importer(declared_network_names: list[str]) -> tuple[OVAImporter, Magi
     import_spec_result.error = []
     import_spec_result.warning = []
     import_spec_result.fileItem = []
-    esxi_connection.content.ovfManager.CreateImportSpec.return_value = import_spec_result
+    esxi_connection.content.ovfManager.CreateImportSpec.return_value = (
+        import_spec_result
+    )
 
     lease = MagicMock()
     lease.state = vim.HttpNfcLease.State.ready
@@ -77,10 +79,13 @@ def ova_importer_000() -> None:
     importer, esxi_connection = _make_importer(["pvn"])
     ova_bytes = _make_ova_bytes()
 
-    with patch(
-        "src.ova_importer.tarfile.open",
-        return_value=tarfile.open(fileobj=io.BytesIO(ova_bytes), mode="r"),
-    ), patch.object(importer, "_upload_disks"):
+    with (
+        patch(
+            "src.ova_importer.tarfile.open",
+            return_value=tarfile.open(fileobj=io.BytesIO(ova_bytes), mode="r"),
+        ),
+        patch.object(importer, "_upload_disks"),
+    ):
         vm = importer.import_ova(
             "/fake/path.ova", "GNS3-VM", "datastore1", ["PG-MGMT", "PG_GNS3_TRUNK"]
         )
@@ -89,10 +94,14 @@ def ova_importer_000() -> None:
     mapping = create_spec_call.args[3].networkMapping
     assert len(mapping) == 1
     assert mapping[0].name == "pvn"
-    esxi_connection.add_vm_network_adapters.assert_called_once_with(vm, ["PG_GNS3_TRUNK"])
+    esxi_connection.add_vm_network_adapters.assert_called_once_with(
+        vm, ["PG_GNS3_TRUNK"]
+    )
 
 
-@allure.title("import_ova mit mehr deklarierten Netzwerken als übergebenen Namen wirft Fehler")
+@allure.title(
+    "import_ova mit mehr deklarierten Netzwerken als übergebenen Namen wirft Fehler"
+)
 @allure.description(
     "Überprüft, dass import_ova einen ValueError wirft, wenn die OVF mehr "
     "Netzwerke deklariert als ESXi-Port-Group-Namen übergeben wurden, da "
