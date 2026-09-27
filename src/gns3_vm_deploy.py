@@ -49,9 +49,16 @@ def deploy_fresh_gns3_vm(
         mounted locally works fine here, it's just a path)
     :param datastore_name: ESXi datastore to place the new VM on
     :param mgmt_network_name: ESXi port group for the new VM's management NIC.
-        Must be the OVA's FIRST-added network adapter.
+        Must be the OVA's FIRST-added network adapter. Not auto-created if
+        missing - unlike trunk_network_name below, this is an externally-
+        managed network with no safe default to create it with, so a
+        missing one still fails loudly (ValueError from find_network).
     :param trunk_network_name: ESXi port group for the new VM's VLAN trunk
-        NIC. Must be the OVA's SECOND-added network adapter.
+        NIC. Must be the OVA's SECOND-added network adapter. Auto-created
+        (with its vSwitch, if that's missing too) if it doesn't exist yet
+        - the same bootstrapping VMOrchestrator's own deploy path already
+        does, needed here too since this can run before any topology has
+        ever been deployed to this host.
     :param ip_wait_timeout_seconds: how long to wait for the new VM to report an IP
     :param on_stage: optional callback invoked with a short human-readable
         stage name at each major step (e.g. for a caller to surface
@@ -75,6 +82,22 @@ def deploy_fresh_gns3_vm(
     def stage(name: str) -> None:
         if on_stage is not None:
             on_stage(name)
+
+    # A real, self-correctable failure mode: on a genuinely fresh ESXi
+    # host (nothing deployed yet, or after a vSwitch reset), the trunk
+    # network this VM needs doesn't exist yet, and OVAImporter.import_ova
+    # would otherwise fail with a plain ValueError from find_network -
+    # this project already owns and knows how to (re)create both the
+    # vSwitch and the trunk port group (see VMOrchestrator's own
+    # bootstrapping), so do that here too rather than requiring it to
+    # already exist. Both are no-ops if already present. Deliberately
+    # NOT done for mgmt_network_name: that's an externally-managed
+    # network (e.g. the lab's real management VLAN) this project has no
+    # business creating or guessing settings for - a missing mgmt
+    # network still fails loudly via find_network, as it should.
+    stage("ensuring trunk network exists")
+    esxi_connection.ensure_virtual_switch_exists()
+    esxi_connection.ensure_trunk_port_group_exists()
 
     old_vm = esxi_connection.get_vm(vm_name)
     old_mac_address = None

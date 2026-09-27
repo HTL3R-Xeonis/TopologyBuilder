@@ -119,6 +119,7 @@ def gns3_vm_deploy_002() -> None:
         )
 
     assert stages == [
+        "ensuring trunk network exists",
         "powering off existing VM",
         "importing OVA",
         "powering on",
@@ -226,3 +227,36 @@ def gns3_vm_deploy_005() -> None:
             )
 
     esxi_connection.delete_vm.assert_not_called()
+
+
+@allure.title("deploy_fresh_gns3_vm stellt sicher, dass die Trunk-Port-Group existiert")
+@allure.description(
+    "Überprüft, dass deploy_fresh_gns3_vm vor dem Import ensure_virtual_"
+    "switch_exists und ensure_trunk_port_group_exists aufruft - auf einem "
+    "frisch aufgesetzten ESXi-Host, auf dem noch keine Topologie deployt "
+    "wurde, existiert das Trunk-Netzwerk sonst noch gar nicht, und "
+    "OVAImporter.import_ova würde mit einem reinen ValueError aus "
+    "find_network fehlschlagen statt es selbst anzulegen"
+)
+@allure.tag("positiv-test", "gns3_vm_deploy")
+@allure.feature("gns3_vm_deploy")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_vm_deploy_006() -> None:
+    esxi_connection = MagicMock()
+    esxi_connection.get_vm.return_value = None
+    esxi_connection.get_vm_ip_address.return_value = "10.20.20.233"
+
+    with patch("src.gns3_vm_deploy.OVAImporter") as importer_cls:
+        importer_cls.return_value.import_ova.return_value = MagicMock()
+
+        deploy_fresh_gns3_vm(
+            esxi_connection,
+            "GNS-VM-1",
+            "/mnt/nfs/gns3.ova",
+            "datastore1",
+            "PG-MGMT",
+            "PG_GNS3_TRUNK",
+        )
+
+    esxi_connection.ensure_virtual_switch_exists.assert_called_once()
+    esxi_connection.ensure_trunk_port_group_exists.assert_called_once()
