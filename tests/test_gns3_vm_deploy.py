@@ -268,3 +268,160 @@ def gns3_vm_deploy_006() -> None:
 
     esxi_connection.ensure_virtual_switch_exists.assert_called_once()
     esxi_connection.ensure_trunk_port_group_exists.assert_called_once()
+
+
+@allure.title(
+    "deploy_fresh_gns3_vm weist eine MAC aus mac_range zu, wenn keine alte VM existiert"
+)
+@allure.description(
+    "Überprüft, dass deploy_fresh_gns3_vm ohne existierende alte VM eine "
+    "MAC-Adresse innerhalb des übergebenen mac_range auswählt und sie "
+    "der neuen VM zuweist"
+)
+@allure.tag("positiv-test", "gns3_vm_deploy")
+@allure.feature("gns3_vm_deploy")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_vm_deploy_007() -> None:
+    esxi_connection = MagicMock()
+    esxi_connection.get_vm.return_value = None
+    esxi_connection.get_all_vms.return_value = []
+    new_vm = MagicMock()
+    esxi_connection.get_vm_ip_address.return_value = "10.20.20.233"
+
+    with patch("src.gns3_vm_deploy.OVAImporter") as importer_cls:
+        importer_cls.return_value.import_ova.return_value = new_vm
+
+        deploy_fresh_gns3_vm(
+            esxi_connection,
+            "GNS-VM-1",
+            "/mnt/nfs/gns3.ova",
+            "datastore1",
+            "PG-MGMT",
+            "PG_GNS3_TRUNK",
+            mac_range=("00:50:56:00:10:00", "00:50:56:00:10:ff"),
+        )
+
+    esxi_connection.set_vm_mac_address.assert_called_once()
+    args = esxi_connection.set_vm_mac_address.call_args.args
+    assert args[0] is new_vm
+    assert args[1].startswith("00:50:56:00:10:")
+
+
+@allure.title(
+    "deploy_fresh_gns3_vm behält die alte MAC, wenn sie schon im mac_range liegt"
+)
+@allure.description(
+    "Überprüft, dass deploy_fresh_gns3_vm die geerbte MAC der alten VM "
+    "unverändert übernimmt, statt eine neue zu würfeln, wenn diese MAC "
+    "bereits innerhalb des konfigurierten mac_range liegt - erhält so "
+    "dieselbe DHCP-vergebene IP über ein Redeploy hinweg"
+)
+@allure.tag("positiv-test", "gns3_vm_deploy")
+@allure.feature("gns3_vm_deploy")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_vm_deploy_008() -> None:
+    esxi_connection = MagicMock()
+    old_vm = MagicMock()
+    esxi_connection.get_vm.return_value = old_vm
+    esxi_connection.get_vm_mac_address.return_value = "00:50:56:00:10:42"
+    esxi_connection.get_all_vms.return_value = []
+    esxi_connection.get_vm_ip_address.return_value = "10.20.20.233"
+
+    with patch("src.gns3_vm_deploy.OVAImporter") as importer_cls:
+        importer_cls.return_value.import_ova.return_value = MagicMock()
+
+        deploy_fresh_gns3_vm(
+            esxi_connection,
+            "GNS-VM-1",
+            "/mnt/nfs/gns3.ova",
+            "datastore1",
+            "PG-MGMT",
+            "PG_GNS3_TRUNK",
+            mac_range=("00:50:56:00:10:00", "00:50:56:00:10:ff"),
+        )
+
+    esxi_connection.set_vm_mac_address.assert_called_once()
+    args = esxi_connection.set_vm_mac_address.call_args.args
+    assert args[1] == "00:50:56:00:10:42"
+
+
+@allure.title(
+    "deploy_fresh_gns3_vm würfelt eine neue MAC, wenn die alte außerhalb von mac_range liegt"
+)
+@allure.description(
+    "Überprüft, dass deploy_fresh_gns3_vm eine frische MAC aus mac_range "
+    "wählt, statt die geerbte MAC der alten VM zu übernehmen, wenn diese "
+    "außerhalb des konfigurierten Bereichs liegt"
+)
+@allure.tag("positiv-test", "gns3_vm_deploy")
+@allure.feature("gns3_vm_deploy")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_vm_deploy_009() -> None:
+    esxi_connection = MagicMock()
+    old_vm = MagicMock()
+    esxi_connection.get_vm.return_value = old_vm
+    esxi_connection.get_vm_mac_address.return_value = "00:11:22:33:44:55"
+    esxi_connection.get_all_vms.return_value = []
+    esxi_connection.get_vm_ip_address.return_value = "10.20.20.233"
+
+    with patch("src.gns3_vm_deploy.OVAImporter") as importer_cls:
+        importer_cls.return_value.import_ova.return_value = MagicMock()
+
+        deploy_fresh_gns3_vm(
+            esxi_connection,
+            "GNS-VM-1",
+            "/mnt/nfs/gns3.ova",
+            "datastore1",
+            "PG-MGMT",
+            "PG_GNS3_TRUNK",
+            mac_range=("00:50:56:00:10:00", "00:50:56:00:10:ff"),
+        )
+
+    esxi_connection.set_vm_mac_address.assert_called_once()
+    args = esxi_connection.set_vm_mac_address.call_args.args
+    assert args[1] != "00:11:22:33:44:55"
+    assert args[1].startswith("00:50:56:00:10:")
+
+
+@allure.title("deploy_fresh_gns3_vm vermeidet MAC-Adressen anderer VMs auf dem Host")
+@allure.description(
+    "Überprüft, dass deploy_fresh_gns3_vm die MAC-Adressen aller "
+    "anderen VMs auf dem Host abfragt und beim Würfeln aus mac_range "
+    "ausschließt, statt versehentlich eine bereits verwendete MAC "
+    "erneut zu vergeben"
+)
+@allure.tag("positiv-test", "gns3_vm_deploy")
+@allure.feature("gns3_vm_deploy")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_vm_deploy_010() -> None:
+    esxi_connection = MagicMock()
+    esxi_connection.get_vm.return_value = None
+    other_vm = MagicMock()
+    esxi_connection.get_all_vms.return_value = [other_vm]
+    # Stubbed to always return this MAC regardless of which VM is
+    # passed in, simplest way to simulate "the only other VM on the
+    # host already has the range's first address" without needing a
+    # second distinct mock identity.
+    esxi_connection.get_vm_mac_address.return_value = "00:50:56:00:10:00"
+    esxi_connection.get_vm_ip_address.return_value = "10.20.20.233"
+
+    with patch("src.gns3_vm_deploy.OVAImporter") as importer_cls:
+        importer_cls.return_value.import_ova.return_value = MagicMock()
+
+        deploy_fresh_gns3_vm(
+            esxi_connection,
+            "GNS-VM-1",
+            "/mnt/nfs/gns3.ova",
+            "datastore1",
+            "PG-MGMT",
+            "PG_GNS3_TRUNK",
+            # A two-address range whose first address is already "used"
+            # by the other VM - if the exclusion is wired up, the new
+            # VM must always get the second address instead.
+            mac_range=("00:50:56:00:10:00", "00:50:56:00:10:01"),
+        )
+
+    esxi_connection.get_all_vms.assert_called_once()
+    esxi_connection.set_vm_mac_address.assert_called_once()
+    args = esxi_connection.set_vm_mac_address.call_args.args
+    assert args[1] == "00:50:56:00:10:01"

@@ -80,6 +80,16 @@ class Settings:
             Settings.ESXI.GNS3_VM_OVA_PATH = esxi["gns3_vm_ova_path"]
         if "gns3_vm_mgmt_network" in esxi:
             Settings.ESXI.GNS3_VM_MGMT_NETWORK = esxi["gns3_vm_mgmt_network"]
+        if "gns3_vm_mac_range" in esxi:
+            mac_range = esxi["gns3_vm_mac_range"]
+            if mac_range is not None:
+                if len(mac_range) != 2:
+                    raise ValueError(
+                        "esxi.gns3_vm_mac_range must be a list of exactly "
+                        "two MAC addresses: [start, end]"
+                    )
+                mac_range = (mac_range[0], mac_range[1])
+            Settings.ESXI.GNS3_VM_MAC_RANGE = mac_range
 
         if "username" in gns3:
             Settings.GNS3.USERNAME = gns3["username"]
@@ -189,6 +199,17 @@ class Settings:
         src.gns3_vm_deploy.deploy_fresh_gns3_vm. TRUNK_PORT_GROUP above is
         reused for the second (trunk) NIC, rather than adding a second new
         setting for it."""
+        GNS3_VM_MAC_RANGE: tuple[str, str] | None = None
+        """(start_mac, end_mac) - if set, a freshly deployed GNS3 VM's
+        management NIC gets a MAC address from this inclusive range
+        instead of inheriting the old VM's own MAC (see
+        src.gns3_vm_deploy.deploy_fresh_gns3_vm's own mac_range parameter
+        for the exact rule, and src.mac_range for the picking logic) -
+        e.g. so a DHCP server can be configured to only hand out IP
+        addresses to devices whose MAC falls in this range. None
+        (default) leaves the GNS3 VM's MAC exactly as before this
+        setting existed: inherited from the old VM if there is one,
+        otherwise whatever ESXi auto-assigns."""
 
     class GNS3:
         """Settings related to GNS3."""

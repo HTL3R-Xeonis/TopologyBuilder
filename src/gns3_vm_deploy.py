@@ -18,6 +18,7 @@ from typing import Callable
 from loguru import logger
 
 from src.connections.esxi_connection import ESXiConnection
+from src.mac_range import mac_in_range, pick_mac_in_range
 from src.ova_importer import OVAImporter
 
 _IP_WAIT_POLL_INTERVAL_SECONDS = 5
@@ -33,6 +34,7 @@ def deploy_fresh_gns3_vm(
     ip_wait_timeout_seconds: int = 300,
     on_stage: Callable[[str], None] | None = None,
     delete_old_vm: bool = False,
+    mac_range: tuple[str, str] | None = None,
 ) -> str:
     """
     Replaces the GNS3 VM named ``vm_name`` with a freshly imported one from
@@ -73,6 +75,19 @@ def deploy_fresh_gns3_vm(
         powered-off, renamed backup - the whole point of that safety net
         is a path back to a known-working VM, which permanently deleting
         it before the replacement is proven working would defeat.
+    :param mac_range: (start_mac, end_mac) - if given, the new VM's
+        management NIC gets a MAC address from this inclusive range
+        instead of the old VM's own MAC (e.g. so a DHCP server can be
+        configured to only hand out addresses to MACs in this range).
+        If the old VM's own MAC already falls within the range, it's
+        kept as-is (preserves the same DHCP-leased IP across a
+        redeploy, same as when mac_range isn't given at all) - a fresh
+        MAC is only picked when there's no old VM, or its MAC falls
+        outside the range. The picked MAC avoids every other VM
+        currently on the host, but does NOT check anything outside
+        this ESXi host (e.g. a real device out in the lab already using
+        a MAC in this range) - keep the range dedicated to VMs this
+        tool manages.
     :return: IP address of the new GNS3 VM
     :raises TimeoutError: if the new VM never reports an IP within
         ip_wait_timeout_seconds - the old VM (if any) is left as its
@@ -119,9 +134,29 @@ def deploy_fresh_gns3_vm(
         [mgmt_network_name, trunk_network_name],
     )
 
-    if old_mac_address is not None:
-        esxi_connection.set_vm_mac_address(new_vm, old_mac_address)
-        logger.info(f"Set new '{vm_name}' VM's MAC to {old_mac_address}")
+    final_mac_address = old_mac_address
+    if mac_range is not None:
+        range_start, range_end = mac_range
+        if old_mac_address is None or not mac_in_range(
+            old_mac_address, range_start, range_end
+        ):
+            stage("assigning a MAC address from the configured range")
+            excluded = {
+                mac
+                for mac in (
+                    esxi_connection.get_vm_mac_address(vm)
+                    for vm in esxi_connection.get_all_vms()
+                )
+                if mac is not None
+            }
+            final_mac_address = pick_mac_in_range(range_start, range_end, excluded)
+            logger.info(
+                f"Assigning '{vm_name}' VM a MAC from the configured range: {final_mac_address}"
+            )
+
+    if final_mac_address is not None:
+        esxi_connection.set_vm_mac_address(new_vm, final_mac_address)
+        logger.info(f"Set new '{vm_name}' VM's MAC to {final_mac_address}")
 
     stage("powering on")
     logger.info(f"Powering on '{vm_name}' VM")

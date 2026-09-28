@@ -29,6 +29,7 @@ def _reset_esxi_gns3_defaults() -> None:
     Settings.ESXI.DELETE_UNUSED_VMS = True
     Settings.ESXI.GNS3_VM_OVA_PATH = None
     Settings.ESXI.GNS3_VM_MGMT_NETWORK = None
+    Settings.ESXI.GNS3_VM_MAC_RANGE = None
     Settings.GNS3.USERNAME = "gns3"
     Settings.GNS3.PROJECT_NAME = None
     Settings.GNS3.PORT = 80
@@ -66,6 +67,7 @@ def settings_000(tmp_path) -> None:
                 "delete_unused_vms": False,
                 "gns3_vm_ova_path": "/mnt/nfs/gns3.ova",
                 "gns3_vm_mgmt_network": "PG-MGMT",
+                "gns3_vm_mac_range": ["00:50:56:00:10:00", "00:50:56:00:10:ff"],
             },
             "gns3": {
                 "username": "gns3user",
@@ -97,6 +99,10 @@ def settings_000(tmp_path) -> None:
         assert Settings.ESXI.DELETE_UNUSED_VMS is False
         assert Settings.ESXI.GNS3_VM_OVA_PATH == "/mnt/nfs/gns3.ova"
         assert Settings.ESXI.GNS3_VM_MGMT_NETWORK == "PG-MGMT"
+        assert Settings.ESXI.GNS3_VM_MAC_RANGE == (
+            "00:50:56:00:10:00",
+            "00:50:56:00:10:ff",
+        )
         assert Settings.GNS3.USERNAME == "gns3user"
         assert Settings.GNS3.PROJECT_NAME == "my_lab"
         assert Settings.GNS3.PORT == 8080
@@ -181,6 +187,23 @@ def settings_004(tmp_path) -> None:
         assert Settings.GENERATE_MAX_RETRIES == 3
     finally:
         _reset_esxi_gns3_defaults()
+
+
+@allure.title("initialise_settings lehnt gns3_vm_mac_range ohne genau zwei Einträge ab")
+@allure.description(
+    "Überprüft, dass initialise_settings einen ValueError wirft, wenn "
+    "esxi.gns3_vm_mac_range keine Liste mit genau zwei MAC-Adressen ist"
+)
+@allure.tag("negativ-test", "settings")
+@allure.feature("settings")
+@allure.severity(allure.severity_level.CRITICAL)
+def settings_006(tmp_path) -> None:
+    path = _write_settings(
+        tmp_path, {"esxi": {"gns3_vm_mac_range": ["00:50:56:00:10:00"]}}
+    )
+
+    with pytest.raises(ValueError, match=r"exactly two MAC addresses"):
+        Settings.initialise_settings(path)
 
 
 @allure.title("initialise_settings wirft einen Fehler, wenn die Datei nicht existiert")
