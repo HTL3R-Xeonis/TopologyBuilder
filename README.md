@@ -98,6 +98,22 @@ anything this tool didn't create:
 Both cleanup steps (and the vSwitch reset itself) are skipped entirely in
 `--incremental` mode, which never removes anything.
 
+## GNS3 VM Deploy (used by TopologyOperator, not the CLI)
+
+`src.gns3_vm_deploy.deploy_fresh_gns3_vm` replaces the configured GNS3 VM
+with a freshly imported one from its own OVA - no CLI command calls this
+directly (it's exposed as a GUI action and startup auto-recovery in
+[TopologyOperator](https://github.com/HTL3R-Xeonis/TopologyOperator)),
+but the settings it reads live here: `esxi.gns3_vm_ova_path`,
+`esxi.gns3_vm_mgmt_network`, and optionally `esxi.gns3_vm_mac_range`
+(`[start_mac, end_mac]` - pins a freshly deployed GNS3 VM's MAC to that
+range instead of inheriting the old VM's own, e.g. so a DHCP server can
+be set up to only hand out addresses in that range; the old VM's MAC is
+kept as-is if it's already in range). Not yet in this repo's own
+[`settings.example.yml`](settings.example.yml) since the CLI never reads
+them - see TopologyOperator's own `settings.example.yml` and README for
+the full picture, including the GUI's delete-old-VM option.
+
 ## Topology Config File
 
 The topology itself (what `validate`/`visualize`/`deploy` operate on) is a
