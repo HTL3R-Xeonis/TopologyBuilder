@@ -564,6 +564,184 @@ class VMOrchestrator:
 
         return results
 
+    def find_orphans(self, graph: Graph, project_name: str) -> list[dict[str, str]]:
+        """
+        Detects live GNS3 nodes and ESXi VMs that don't correspond to any
+        node in the given graph - the state a live node/link delete
+        (TopologyBackend.remove_node/remove_link, used by TopologyOperator)
+        can leave behind when it partially fails, e.g. the GNS3-side
+        delete succeeds but the following ESXi VM delete times out (or
+        vice versa): the topology YAML gets updated either way only once
+        both steps succeed, so a partial failure leaves a real, live
+        resource with nothing in the topology file describing it anymore.
+        Read-only - see delete_orphans to actually remove what this finds.
+        :param graph: the topology that should currently be deployed
+        :param project_name: name of the GNS3 project to check
+        :return: list of {"type": "gns3_node" | "esxi_vm", "name": ..., "reason": ...}
+        """
+        orphans: list[dict[str, str]] = []
+        known_names = set(graph.nodes)
+
+        project = next(
+            (
+                p
+                for p in GNS3Connection.list_all_projects(
+                    self.gns3_vm_ip, Settings.GNS3.PORT
+                )
+                if p.get("name") == project_name
+            ),
+            None,
+        )
+        if project is not None:
+            for gns3_node in GNS3Connection.list_project_nodes(
+                self.gns3_vm_ip, Settings.GNS3.PORT, project["project_id"]
+            ):
+                name = gns3_node.get("name")
+                if name not in known_names:
+                    orphans.append(
+                        {
+                            "type": "gns3_node",
+                            "name": name,
+                            "reason": f"GNS3 node '{name}' exists in project "
+                            f"'{project_name}' but has no matching node in "
+                            f"the topology file",
+                        }
+                    )
+
+        gns3_vm = self.esxi_connection.find_gns3_vm()
+        gns3_vm_name = gns3_vm.name if gns3_vm is not None else None
+        for vm in self.esxi_connection.get_all_vms():
+            if vm.name == gns3_vm_name:
+                continue
+            annotation = vm.config.annotation or ""
+            if not annotation.startswith("topologybuilder-image:"):
+                continue
+            base_name = re.sub(r"[ _]\(?\d+\)?$", "", vm.name)
+            if base_name in known_names:
+                continue
+            orphans.append(
+                {
+                    "type": "esxi_vm",
+                    "name": vm.name,
+                    "reason": f"ESXi VM '{vm.name}' is tagged as created by "
+                    f"this tool but has no matching node in the topology "
+                    f"file",
+                }
+            )
+        return orphans
+
+    def delete_orphans(self, orphans: list[dict[str, str]], project_name: str) -> None:
+        """
+        Deletes every orphan find_orphans previously reported. Re-resolves
+        the live project/node/VM list itself rather than trusting any
+        node_id captured by an earlier find_orphans call, since an orphan
+        list is often reviewed by a human (or held by a CLI's --fix flag
+        for a moment) before anything is actually deleted, and live state
+        can move in between.
+        :param orphans: exactly what find_orphans returned (or a subset of it)
+        :param project_name: name of the GNS3 project the gns3_node orphans belong to
+        :return:
+        """
+        gns3_orphan_names = {o["name"] for o in orphans if o["type"] == "gns3_node"}
+        if gns3_orphan_names:
+            project = next(
+                (
+                    p
+                    for p in GNS3Connection.list_all_projects(
+                        self.gns3_vm_ip, Settings.GNS3.PORT
+                    )
+                    if p.get("name") == project_name
+                ),
+                None,
+            )
+            if project is not None:
+                for gns3_node in GNS3Connection.list_project_nodes(
+                    self.gns3_vm_ip, Settings.GNS3.PORT, project["project_id"]
+                ):
+                    if gns3_node.get("name") in gns3_orphan_names:
+                        GNS3Connection.delete_node(
+                            self.gns3_vm_ip,
+                            Settings.GNS3.PORT,
+                            project["project_id"],
+                            gns3_node["node_id"],
+                        )
+
+        esxi_orphan_names = {o["name"] for o in orphans if o["type"] == "esxi_vm"}
+        if esxi_orphan_names:
+            for vm in self.esxi_connection.get_all_vms():
+                if vm.name in esxi_orphan_names:
+                    self.esxi_connection.delete_vm(vm)
+
+    def repair_graph(self, graph: Graph, project_name: str) -> list[str]:
+        """
+        Applies a curated, low-risk subset of automatic fixes for issues
+        verify_graph can detect: powers on an ESXi VM that exists but
+        isn't powered on, starts a GNS3 node that exists but isn't
+        started, and creates a missing port group for an interface whose
+        VLAN doesn't have one yet. Deliberately does NOT attempt anything
+        that would require redeploying a genuinely missing VM/node or
+        recreating a missing Cloud-node bridge - those need a real
+        OVA/template import, which is too consequential to trigger from a
+        read-mostly repair pass; run `deploy --incremental` for that
+        instead, or find_orphans/delete_orphans above for genuinely
+        leftover (rather than missing) resources.
+        :param graph: the topology that should currently be deployed
+        :param project_name: name of the GNS3 project to check
+        :return: human-readable description of each fix actually applied, in order
+        """
+        actions: list[str] = []
+
+        project = next(
+            (
+                p
+                for p in GNS3Connection.list_all_projects(
+                    self.gns3_vm_ip, Settings.GNS3.PORT
+                )
+                if p.get("name") == project_name
+            ),
+            None,
+        )
+        gns3_nodes_by_name: dict[str, dict] = {}
+        if project is not None:
+            gns3_nodes_by_name = {
+                gns3_node.get("name"): gns3_node
+                for gns3_node in GNS3Connection.list_project_nodes(
+                    self.gns3_vm_ip, Settings.GNS3.PORT, project["project_id"]
+                )
+            }
+
+        for name, node in graph.nodes.items():
+            if node.env == Environment.ON_GNS3:
+                gns3_node = gns3_nodes_by_name.get(name)
+                if gns3_node is not None and gns3_node.get("status") != "started":
+                    GNS3Connection.start_node(
+                        self.gns3_vm_ip,
+                        Settings.GNS3.PORT,
+                        project["project_id"],
+                        gns3_node["node_id"],
+                    )
+                    actions.append(f"Started GNS3 node '{name}'")
+            elif node.env == Environment.ON_ESXI:
+                vm = self.esxi_connection.get_vm(name)
+                if vm is not None and not self.esxi_connection.is_vm_powered_on(vm):
+                    self.esxi_connection.power_on_vm(vm)
+                    actions.append(f"Powered on ESXi VM '{name}'")
+
+        seen_vlan_ids: set[int] = set()
+        for node in graph.nodes.values():
+            for interface in node.interfaces.values():
+                vlan = interface.vlan
+                if vlan is None or vlan.id in seen_vlan_ids:
+                    continue
+                seen_vlan_ids.add(vlan.id)
+                if self.esxi_connection.find_port_group(vlan.name) is None:
+                    self.esxi_connection._add_port_group(vlan)
+                    actions.append(
+                        f"Created missing port group '{vlan.name}' (VLAN {vlan.id})"
+                    )
+
+        return actions
+
     @staticmethod
     def _partially_link_gns3_nodes(gns3_connection: GNS3Connection, node) -> None:
         """

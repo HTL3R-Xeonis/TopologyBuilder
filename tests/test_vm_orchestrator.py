@@ -1073,3 +1073,182 @@ def vm_orchestrator_032() -> None:
         results = orchestrator.verify_graph(graph, "lab")
 
     assert any(ok and "VM1" in d and "no IP reported" in d for ok, d in results)
+
+
+@allure.title("find_orphans findet einen GNS3-Node ohne passende Topologie-Node")
+@allure.description(
+    "Überprüft, dass find_orphans einen live GNS3-Node meldet, dessen "
+    "Name in keiner aktuellen Graph-Node vorkommt - der Zustand, den ein "
+    "teilweise fehlgeschlagenes live Delete hinterlassen kann"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_033() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.find_gns3_vm.return_value = None
+    esxi_connection.get_all_vms.return_value = []
+
+    graph = MagicMock()
+    graph.nodes = {"R1": MagicMock()}
+
+    with patch("src.vm_orchestrator.vm_orchestrator.GNS3Connection") as gns3_cls:
+        gns3_cls.list_all_projects.return_value = [{"project_id": "p1", "name": "lab"}]
+        gns3_cls.list_project_nodes.return_value = [
+            {"node_id": "n1", "name": "R1", "status": "started"},
+            {"node_id": "n2", "name": "LEFTOVER", "status": "started"},
+        ]
+        found = orchestrator.find_orphans(graph, "lab")
+
+    assert len(found) == 1
+    assert found[0]["type"] == "gns3_node"
+    assert found[0]["name"] == "LEFTOVER"
+
+
+@allure.title("find_orphans findet eine getaggte ESXi-VM ohne passende Topologie-Node")
+@allure.description(
+    "Überprüft, dass find_orphans eine ESXi-VM mit "
+    "'topologybuilder-image:'-Annotation meldet, deren (um eine "
+    "Auto-Rename-Nummer bereinigter) Name in keiner aktuellen Graph-Node "
+    "vorkommt, die GNS3-VM selbst aber niemals als Orphan gemeldet wird"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_034() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+
+    gns3_vm = MagicMock()
+    gns3_vm.name = "GNS3"
+    esxi_connection.find_gns3_vm.return_value = gns3_vm
+
+    leftover_vm = MagicMock()
+    leftover_vm.name = "VM1_1"
+    leftover_vm.config.annotation = "topologybuilder-image:Ubuntu-Server"
+
+    untagged_vm = MagicMock()
+    untagged_vm.name = "SomeoneElsesVM"
+    untagged_vm.config.annotation = ""
+
+    esxi_connection.get_all_vms.return_value = [gns3_vm, leftover_vm, untagged_vm]
+
+    graph = MagicMock()
+    graph.nodes = {}
+
+    with patch("src.vm_orchestrator.vm_orchestrator.GNS3Connection") as gns3_cls:
+        gns3_cls.list_all_projects.return_value = []
+        found = orchestrator.find_orphans(graph, "lab")
+
+    assert len(found) == 1
+    assert found[0]["type"] == "esxi_vm"
+    assert found[0]["name"] == "VM1_1"
+
+
+@allure.title("delete_orphans löscht sowohl GNS3-Node- als auch ESXi-VM-Orphans")
+@allure.description(
+    "Überprüft, dass delete_orphans für einen gns3_node-Orphan "
+    "GNS3Connection.delete_node mit der live aufgelösten Node-ID aufruft, "
+    "und für einen esxi_vm-Orphan esxi_connection.delete_vm mit dem "
+    "passenden VM-Objekt - und dabei live erneut auflöst statt der vom "
+    "Aufrufer übergebenen Liste blind zu vertrauen"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_035() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+
+    leftover_vm = MagicMock()
+    leftover_vm.name = "LEFTOVER_VM"
+    esxi_connection.get_all_vms.return_value = [leftover_vm]
+
+    orphans = [
+        {"type": "gns3_node", "name": "LEFTOVER", "reason": "..."},
+        {"type": "esxi_vm", "name": "LEFTOVER_VM", "reason": "..."},
+    ]
+
+    with patch("src.vm_orchestrator.vm_orchestrator.GNS3Connection") as gns3_cls:
+        gns3_cls.list_all_projects.return_value = [{"project_id": "p1", "name": "lab"}]
+        gns3_cls.list_project_nodes.return_value = [
+            {"node_id": "n2", "name": "LEFTOVER", "status": "started"},
+        ]
+        orchestrator.delete_orphans(orphans, "lab")
+
+        gns3_cls.delete_node.assert_called_once_with(
+            orchestrator.gns3_vm_ip, Settings.GNS3.PORT, "p1", "n2"
+        )
+    esxi_connection.delete_vm.assert_called_once_with(leftover_vm)
+
+
+@allure.title(
+    "repair_graph startet einen gestoppten GNS3-Node und schaltet eine ausgeschaltete ESXi-VM ein"
+)
+@allure.description(
+    "Überprüft, dass repair_graph für einen live existierenden, aber "
+    "nicht gestarteten GNS3-Node GNS3Connection.start_node aufruft, und "
+    "für eine live existierende, aber nicht eingeschaltete ESXi-VM "
+    "esxi_connection.power_on_vm - und jede angewendete Reparatur als "
+    "menschenlesbaren String zurückgibt"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_036() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+
+    vm = MagicMock()
+    esxi_connection.get_vm.return_value = vm
+    esxi_connection.is_vm_powered_on.return_value = False
+    esxi_connection.find_port_group.return_value = MagicMock()
+
+    graph = Graph(
+        [
+            {"image": "VPCS", "role": "ROUTER", "names": ["R1"]},
+            {"image": "Ubuntu-Server", "role": "VM", "names": ["VM1"]},
+        ],
+        [],
+    )
+
+    with patch("src.vm_orchestrator.vm_orchestrator.GNS3Connection") as gns3_cls:
+        gns3_cls.list_all_projects.return_value = [{"project_id": "p1", "name": "lab"}]
+        gns3_cls.list_project_nodes.return_value = [
+            {"node_id": "n1", "name": "R1", "status": "stopped"},
+        ]
+        actions = orchestrator.repair_graph(graph, "lab")
+
+        gns3_cls.start_node.assert_called_once_with(
+            orchestrator.gns3_vm_ip, Settings.GNS3.PORT, "p1", "n1"
+        )
+    esxi_connection.power_on_vm.assert_called_once_with(vm)
+    assert any("Started GNS3 node 'R1'" in a for a in actions)
+    assert any("Powered on ESXi VM 'VM1'" in a for a in actions)
+
+
+@allure.title("repair_graph erstellt eine fehlende Port-Group für ein VLAN")
+@allure.description(
+    "Überprüft, dass repair_graph für ein Interface, dessen VLAN noch "
+    "keine Port-Group auf dem ESXi-Host hat, esxi_connection._add_port_group "
+    "aufruft und die Aktion im Ergebnis meldet"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.NORMAL)
+def vm_orchestrator_037() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.get_vm.return_value = None
+    esxi_connection.find_port_group.return_value = None
+
+    graph = Graph(
+        [
+            {"image": "Ubuntu-Server", "role": "VM", "names": ["VM1"]},
+            {"image": "Rocky 9.2", "role": "VM", "names": ["VM2"]},
+        ],
+        [["VM1", "ens160", "VM2", "ens160"]],
+    )
+
+    with patch("src.vm_orchestrator.vm_orchestrator.GNS3Connection") as gns3_cls:
+        gns3_cls.list_all_projects.return_value = []
+        actions = orchestrator.repair_graph(graph, "lab")
+
+    esxi_connection._add_port_group.assert_called_once()
+    assert any("Created missing port group" in a for a in actions)

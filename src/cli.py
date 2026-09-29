@@ -507,6 +507,17 @@ def verify(
     datastore: str = ESXI_DATASTORE_OPTION,
     virtual_switch: str = ESXI_VIRTUAL_SWITCH_OPTION,
     trunk_port_group: str = ESXI_TRUNK_PORT_GROUP_OPTION,
+    fix: bool = typer.Option(
+        False,
+        "--fix",
+        help="Before checking, apply a curated set of low-risk automatic "
+        "fixes: power on an ESXi VM that exists but isn't powered on, "
+        "start a GNS3 node that exists but isn't started, and create a "
+        "missing port group. Never redeploys a genuinely missing VM/node "
+        "or recreates a missing Cloud-node bridge - use 'deploy "
+        "--incremental' for that. Then re-runs the same checks so the "
+        "report reflects what's still wrong afterward.",
+    ),
 ) -> None:
     """
     Runs a structural health check against a deployed topology: confirms
@@ -533,7 +544,17 @@ def verify(
     graph = Graph(validator.nodes, validator.edges)
 
     orchestrator = _make_orchestrator()
-    results = orchestrator.verify_graph(graph, _resolve_project_name())
+    project_name = _resolve_project_name()
+
+    if fix:
+        actions = orchestrator.repair_graph(graph, project_name)
+        if actions:
+            for action in actions:
+                typer.secho(f"[FIXED] {action}", fg=typer.colors.YELLOW)
+        else:
+            typer.echo("No automatic fixes were applicable.")
+
+    results = orchestrator.verify_graph(graph, project_name)
 
     passed = 0
     for ok, description in results:
@@ -543,6 +564,66 @@ def verify(
     typer.echo(f"{passed}/{len(results)} checks passed")
     if passed != len(results):
         raise typer.Exit(code=1)
+
+
+@app.command()
+def orphans(
+    address: str = ESXI_ADDRESS_OPTION,
+    esxi_username: str = ESXI_USERNAME_OPTION,
+    esxi_password: str = ESXI_PASSWORD_OPTION,
+    gns3_vm_name: str = GNS3_VM_NAME_OPTION,
+    datastore: str = ESXI_DATASTORE_OPTION,
+    virtual_switch: str = ESXI_VIRTUAL_SWITCH_OPTION,
+    trunk_port_group: str = ESXI_TRUNK_PORT_GROUP_OPTION,
+    fix: bool = typer.Option(
+        False,
+        "--fix",
+        help="Permanently delete every orphan found, instead of only "
+        "listing them. Irreversible - review the plain listing first.",
+    ),
+) -> None:
+    """
+    Lists live GNS3 nodes and ESXi VMs that don't correspond to any node
+    in the topology file - typically left behind when a live node/link
+    delete (as used by TopologyOperator) partially fails, e.g. the GNS3
+    side is deleted but the following ESXi VM delete times out, or vice
+    versa, before the topology file itself is updated either way. Exits
+    with a non-zero status if any orphans were found (or remain after
+    --fix), so this is safe to run unattended as a periodic health check.
+    """
+    _apply_esxi_options(
+        address,
+        esxi_username,
+        esxi_password,
+        gns3_vm_name,
+        datastore,
+        virtual_switch,
+        trunk_port_group,
+    )
+
+    validator = TopologyFileValidation(Settings.TOPOLOGY_FILE)
+    validator.validate_file()
+
+    graph = Graph(validator.nodes, validator.edges)
+
+    orchestrator = _make_orchestrator()
+    project_name = _resolve_project_name()
+    found = orchestrator.find_orphans(graph, project_name)
+
+    if not found:
+        typer.secho("No orphans found.", fg=typer.colors.GREEN)
+        return
+
+    for orphan in found:
+        typer.echo(f"[{orphan['type']}] {orphan['reason']}")
+
+    if fix:
+        orchestrator.delete_orphans(found, project_name)
+        typer.secho(f"Deleted {len(found)} orphan(s).", fg=typer.colors.YELLOW)
+        return
+
+    typer.echo(f"{len(found)} orphan(s) found. Re-run with --fix to delete them.")
+    raise typer.Exit(code=1)
 
 
 @app.command()

@@ -10,3 +10,7 @@ logs/*
 build/
 dist/
 tmp_ova/
+
+# HANDOFF.md lives here as its own independently-tracked git repo, on
+# purpose never part of this repo's own history - see handoff/.git.
+handoff/
