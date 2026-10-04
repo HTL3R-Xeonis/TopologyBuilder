@@ -1,4 +1,5 @@
 import atexit
+import re
 import ssl
 
 import pyVmomi
@@ -99,7 +100,7 @@ class ESXiConnection(GenericConnection):
             for obj in view.view:
                 if name is None:
                     return obj
-                if obj.name == name:
+                if re.match(rf"^{re.escape(name)}( \(\d+\))?$", obj.name):
                     return obj
             return None
         finally:
@@ -244,13 +245,13 @@ class ESXiConnection(GenericConnection):
             logger.error(msg := f"Port group {port_group_name} not found on host: {self.ip}")
             raise RuntimeError(msg) from fault
         except vim.fault.ResourceInUse as fault:
-            logger.error(msg := f"Port group is currently in use on host: {self.ip}")
+            logger.error(msg := f"Port group {port_group_name} is currently in use on host: {self.ip}")
             raise RuntimeError(msg) from fault
         except Exception as exc:
             logger.error(msg := f"Something went wrong while removing port group {port_group_name} on host: {self.ip}")
             raise RuntimeError(msg) from exc
 
-    def get_vm(self, vm_name: str) -> vim.VirtualMachine | None:
+    def get_virtual_machine(self, vm_name: str) -> vim.VirtualMachine | None:
         """
         Searches for a VM with given name.
         :param vm_name: Name of VM to look for.
@@ -265,9 +266,23 @@ class ESXiConnection(GenericConnection):
         :param vm_name: Name of VM to look on.
         :return: Returns a IPv4 address if a valid one was found, else None
         """
-        vm = self.get_vm(vm_name)
+        vm = self.get_virtual_machine(vm_name)
         for nic in [] if vm is None else vm.guest.net:
             for address in nic.ipAddress or []:
                 if self.is_valid_ipv4_address(address):
                     return address
         return None
+
+    @staticmethod
+    def get_virtual_machine_nics(virtual_machine: vim.VirtualMachine) -> list[vim.vm.device.VirtualEthernetCard]:
+        """
+        Creates a list of backing information of the NICs of given virtual machine.
+        :param virtual_machine: Virtual machine to get the NIC backings from.
+        :return: A list with the NIC backings.
+        """
+        nics_backings = []
+        for device in virtual_machine.config.hardware.device:
+            if not isinstance(device, vim.vm.device.VirtualEthernetCard):
+                continue
+            nics_backings.append(device)
+        return nics_backings

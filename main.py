@@ -6,7 +6,7 @@ import sys
 
 from loguru import logger
 
-from src.cli import Settings, Verbosity, app
+from src.cli.cli import Settings, Verbosity, app
 
 __autor__ = "Leon Eiböck"
 __date__ = "21/07/2026"
@@ -15,7 +15,6 @@ __status__ = "In development"
 
 
 def main():
-
     logger.remove()
     file_format = (
         "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "

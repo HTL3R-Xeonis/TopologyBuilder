@@ -9,7 +9,7 @@ esxi:
   virtual_switch: "internal_network_2"
   datastore: "datastore1 (2)"
   gns3_vm_name: "GNS3 (1)"
-  trunk_port_group: "PG_GNS3_TRUNK_OTHER"
+  trunk_port_group: "PG_GNS3_TRUNK"
   management_port_group: "VM Network"
   ignore_virtual_switches:
     - "vSwitch0"

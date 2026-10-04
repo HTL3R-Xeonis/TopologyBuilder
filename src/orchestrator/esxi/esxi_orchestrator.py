@@ -114,7 +114,7 @@ class ESXiOrchestrator:
         :param trunk_port_group: Name of the trunk-portgroup. This portgroup should have a vlanID of 4095. This will be assigned to the second NIC.
         :return: Returns a ``vim.Task`` object if changes were made, ``None`` otherwise.
         """
-        gns3_vm = self.esxi_connection.get_vm(gns3_vm_name)
+        gns3_vm = self.esxi_connection.get_virtual_machine(gns3_vm_name)
         device_changes = []
         for device in gns3_vm.config.hardware.device:
             if not isinstance(device, vim.vm.device.VirtualEthernetCard):
@@ -160,7 +160,7 @@ class ESXiOrchestrator:
         """
         tasks = []
         for vm_name in vm_names:
-            vm = self.esxi_connection.get_vm(vm_name)
+            vm = self.esxi_connection.get_virtual_machine(vm_name)
             if vm is None:
                 continue
 
