@@ -98,6 +98,15 @@ anything this tool didn't create:
 Both cleanup steps (and the vSwitch reset itself) are skipped entirely in
 `--incremental` mode, which never removes anything.
 
+Both mechanisms above only ever run as part of a non-incremental `deploy`.
+For a live, one-node/one-link-at-a-time consumer of this library (like
+TopologyOperator), a delete can partially fail - e.g. the GNS3 side is
+removed but the matching ESXi VM delete times out, or vice versa - leaving
+a real, live resource with nothing in the topology file describing it
+anymore. Run `topologybuilder orphans` at any time (no deploy needed) to
+find exactly that kind of leftover, or `orphans --fix` to delete it. See
+the command table below.
+
 ## GNS3 VM Deploy (used by TopologyOperator, not the CLI)
 
 `src.gns3_vm_deploy.deploy_fresh_gns3_vm` replaces the configured GNS3 VM
