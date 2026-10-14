@@ -271,6 +271,47 @@ class TopologyBackend:
         validator.remove_node(name)
         validator.save()
 
+    def verify(
+        self, topology_file: str, fix: bool = False
+    ) -> tuple[list[str], list[tuple[bool, str]]]:
+        """
+        Runs VMOrchestrator.verify_graph against topology_file's graph and
+        its GNS3 project. With fix=True, first applies
+        VMOrchestrator.repair_graph's curated low-risk repairs (start a
+        stopped GNS3 node, power on a stopped ESXi VM, create a missing
+        port group) and verifies afterwards, so the result reflects what's
+        still wrong after the repairs.
+        :param topology_file: path to the topology YAML file
+        :param fix: apply the automatic repairs before verifying
+        :return: (descriptions of the repairs applied - empty unless fix, [(passed, description), ...])
+        """
+        _, graph = self._load(topology_file)
+        project_name = self._set_project_name(topology_file)
+        actions = self._orchestrator.repair_graph(graph, project_name) if fix else []
+        return actions, self._orchestrator.verify_graph(graph, project_name)
+
+    def find_orphans(self, topology_file: str) -> list[dict[str, str]]:
+        """
+        Live GNS3 nodes / tool-created ESXi VMs with no matching node in
+        topology_file - see VMOrchestrator.find_orphans.
+        :param topology_file: path to the topology YAML file
+        :return: [{"type": "gns3_node" | "esxi_vm", "name": ..., "reason": ...}, ...]
+        """
+        _, graph = self._load(topology_file)
+        project_name = self._set_project_name(topology_file)
+        return self._orchestrator.find_orphans(graph, project_name)
+
+    def delete_orphans(self, topology_file: str, orphans: list[dict[str, str]]) -> None:
+        """
+        Permanently deletes the given orphans (as returned by
+        find_orphans) - see VMOrchestrator.delete_orphans, which
+        re-resolves live state itself.
+        :param topology_file: path to the topology YAML file (only used to resolve the GNS3 project name)
+        :param orphans: orphans to delete
+        """
+        project_name = self._set_project_name(topology_file)
+        self._orchestrator.delete_orphans(orphans, project_name)
+
     def remove_link(self, topology_file: str, node1: str, node2: str) -> None:
         """
         Deletes the live GNS3 link directly connecting node1 and node2

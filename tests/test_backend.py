@@ -434,3 +434,77 @@ def backend_013(tmp_path) -> None:
         assert call_args.kwargs["incremental"] is False
     finally:
         _reset_settings()
+
+
+@allure.title("verify ohne fix ruft nur verify_graph auf")
+@allure.description(
+    "Überprüft, dass verify(fix=False) VMOrchestrator.verify_graph mit dem "
+    "aus der Datei gebauten Graphen und dem Projektnamen aufruft, "
+    "repair_graph nicht anfasst und eine leere Aktionsliste zurückgibt"
+)
+@allure.tag("positiv-test", "backend")
+@allure.feature("backend")
+@allure.severity(allure.severity_level.CRITICAL)
+def backend_014(tmp_path) -> None:
+    _reset_settings()
+    topology_file = _copy_topology(tmp_path)
+    backend, orchestrator = _make_backend()
+    orchestrator.verify_graph.return_value = [(True, "ok")]
+
+    actions, results = backend.verify(topology_file)
+
+    assert actions == []
+    assert results == [(True, "ok")]
+    orchestrator.repair_graph.assert_not_called()
+    assert orchestrator.verify_graph.call_args.args[1] == "topology"
+
+
+@allure.title("verify mit fix repariert zuerst und prüft danach")
+@allure.description(
+    "Überprüft, dass verify(fix=True) erst repair_graph und danach "
+    "verify_graph aufruft und beide Ergebnisse zurückgibt"
+)
+@allure.tag("positiv-test", "backend")
+@allure.feature("backend")
+@allure.severity(allure.severity_level.CRITICAL)
+def backend_015(tmp_path) -> None:
+    _reset_settings()
+    topology_file = _copy_topology(tmp_path)
+    backend, orchestrator = _make_backend()
+    calls = []
+    orchestrator.repair_graph.side_effect = lambda *a: (
+        calls.append("repair") or ["Started GNS3 node 'R1'"]
+    )
+    orchestrator.verify_graph.side_effect = lambda *a: (
+        calls.append("verify") or [(True, "ok")]
+    )
+
+    actions, results = backend.verify(topology_file, fix=True)
+
+    assert calls == ["repair", "verify"]
+    assert actions == ["Started GNS3 node 'R1'"]
+    assert results == [(True, "ok")]
+
+
+@allure.title("find_orphans und delete_orphans reichen Graph bzw. Projektnamen durch")
+@allure.description(
+    "Überprüft, dass find_orphans den Graphen und Projektnamen an "
+    "VMOrchestrator.find_orphans übergibt und dessen Liste zurückgibt, und "
+    "delete_orphans die Liste samt Projektnamen an "
+    "VMOrchestrator.delete_orphans weiterreicht"
+)
+@allure.tag("positiv-test", "backend")
+@allure.feature("backend")
+@allure.severity(allure.severity_level.CRITICAL)
+def backend_016(tmp_path) -> None:
+    _reset_settings()
+    topology_file = _copy_topology(tmp_path)
+    backend, orchestrator = _make_backend()
+    orphan = {"type": "gns3_node", "name": "LEFTOVER", "reason": "..."}
+    orchestrator.find_orphans.return_value = [orphan]
+
+    assert backend.find_orphans(topology_file) == [orphan]
+    assert orchestrator.find_orphans.call_args.args[1] == "topology"
+
+    backend.delete_orphans(topology_file, [orphan])
+    orchestrator.delete_orphans.assert_called_once_with([orphan], "topology")
