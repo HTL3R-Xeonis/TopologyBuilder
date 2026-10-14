@@ -43,6 +43,13 @@ _TRANSIENT_ESXI_ERRORS: tuple[type[BaseException], ...] = (
 )
 
 
+# See ESXiConnection.find_gns3_vm. The backup pattern matches the name
+# src.gns3_vm_deploy gives the VM it replaces ('<name>-backup-<timestamp>').
+_GNS3_VM_NAME_FRAGMENT = "gns"
+_GNS3_VM_GUEST_ID = "ubuntu64Guest"
+_BACKUP_VM_NAME_PATTERN = re.compile(r"-backup-\d{14}")
+
+
 class ESXiConnection(GenericConnection):
     """
     Object which manages the communication between APIs regarding ESXi.
@@ -264,15 +271,19 @@ class ESXiConnection(GenericConnection):
 
     def find_gns3_vm(self) -> vim.VirtualMachine | None:
         """
-        Searches for a VM whose name contains 'gns3' (case-insensitive) -
-        used to auto-detect the GNS3 VM without relying on
+        Searches for the GNS3 VM: a VM whose name contains 'gns'
+        (case-insensitive - the real one is called e.g. 'GNS-VM-1') AND
+        whose guest OS is Ubuntu Linux (64-bit), excluding the powered-off
+        backups a GNS3 VM redeploy leaves behind ('<name>-backup-<14-digit
+        timestamp>'). Used to auto-detect the GNS3 VM without relying on
         ``Settings.ESXI.GNS3_VM_NAME`` being exactly right, since a stale
         or misconfigured name there must never cause the real GNS3 VM to
         be auto-deleted as an 'unused' leftover by delete_unused_vms.
+        Same rule as the template collector in Docker-Server-Files.
         :return: the matching VM if exactly one was found, else None
-        :raises ValueError: Is thrown when more than one VM's name contains 'gns3', since it's then not safe to guess which one is the real GNS3 VM.
+        :raises ValueError: Is thrown when more than one VM matches, since it's then not safe to guess which one is the real GNS3 VM.
         """
-        matches = [vm for vm in self.get_all_vms() if "gns3" in vm.name.lower()]
+        matches = [vm for vm in self.get_all_vms() if self._is_gns3_vm_candidate(vm)]
         if len(matches) > 1:
             names = [vm.name for vm in matches]
             logger.error(
@@ -281,6 +292,21 @@ class ESXiConnection(GenericConnection):
             )
             raise ValueError(msg)
         return matches[0] if matches else None
+
+    @staticmethod
+    def _is_gns3_vm_candidate(vm: vim.VirtualMachine) -> bool:
+        """
+        True if the VM's name contains 'gns' (case-insensitive), it isn't a
+        timestamped redeploy backup, and ESXi reports its guest OS as
+        Ubuntu Linux (64-bit). ``vm.config`` is None for a VM whose config
+        can't be read (e.g. an orphaned one), which never matches.
+        """
+        if _GNS3_VM_NAME_FRAGMENT not in vm.name.lower():
+            return False
+        if _BACKUP_VM_NAME_PATTERN.search(vm.name):
+            return False
+        config = vm.config
+        return config is not None and config.guestId == _GNS3_VM_GUEST_ID
 
     def set_vm_annotation(self, vm: vim.VirtualMachine, annotation: str) -> None:
         """

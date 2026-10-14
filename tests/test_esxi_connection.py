@@ -811,11 +811,11 @@ def esxi_connection_026() -> None:
     container_view.Destroy.assert_called_once()
 
 
-@allure.title("find_gns3_vm findet die einzige VM mit 'gns3' im Namen")
+@allure.title("find_gns3_vm findet die einzige Ubuntu-64-bit-VM mit 'gns' im Namen")
 @allure.description(
     "Überprüft, dass find_gns3_vm die einzige VM zurückgibt, deren Name "
-    "'gns3' enthält (Groß-/Kleinschreibung wird ignoriert), und andere VMs "
-    "ignoriert"
+    "'gns' enthält (Groß-/Kleinschreibung wird ignoriert) und deren "
+    "Gast-OS Ubuntu Linux (64-bit) ist, und andere VMs ignoriert"
 )
 @allure.tag("positiv-test", "esxi-connection")
 @allure.feature("esxi_connection")
@@ -826,8 +826,10 @@ def esxi_connection_027() -> None:
 
     gns3_vm = MagicMock()
     gns3_vm.name = "GNS3-VM (1)"
+    gns3_vm.config.guestId = "ubuntu64Guest"
     other_vm = MagicMock()
     other_vm.name = "PC4"
+    other_vm.config.guestId = "ubuntu64Guest"
     container_view = MagicMock()
     container_view.view = [other_vm, gns3_vm]
     conn.view_manager.CreateContainerView.return_value = container_view
@@ -837,8 +839,7 @@ def esxi_connection_027() -> None:
 
 @allure.title("find_gns3_vm gibt None zurück, wenn keine VM passt")
 @allure.description(
-    "Überprüft, dass find_gns3_vm None zurückgibt, wenn keine VM 'gns3' im "
-    "Namen enthält"
+    "Überprüft, dass find_gns3_vm None zurückgibt, wenn keine VM 'gns' im Namen enthält"
 )
 @allure.tag("negativ-test", "esxi-connection")
 @allure.feature("esxi_connection")
@@ -859,8 +860,8 @@ def esxi_connection_028() -> None:
 @allure.title("find_gns3_vm wirft einen Fehler bei mehreren passenden VMs")
 @allure.description(
     "Überprüft, dass find_gns3_vm einen ValueError wirft, wenn mehr als "
-    "eine VM 'gns3' im Namen enthält, da dann nicht sicher geraten werden "
-    "kann, welche die echte GNS3-VM ist"
+    "eine Ubuntu-64-bit-VM 'gns' im Namen enthält, da dann nicht sicher "
+    "geraten werden kann, welche die echte GNS3-VM ist"
 )
 @allure.tag("negativ-test", "esxi-connection")
 @allure.feature("esxi_connection")
@@ -871,8 +872,10 @@ def esxi_connection_029() -> None:
 
     vm_a = MagicMock()
     vm_a.name = "GNS3-VM (1)"
+    vm_a.config.guestId = "ubuntu64Guest"
     vm_b = MagicMock()
     vm_b.name = "GNS3-VM-backup"
+    vm_b.config.guestId = "ubuntu64Guest"
     container_view = MagicMock()
     container_view.view = [vm_a, vm_b]
     conn.view_manager.CreateContainerView.return_value = container_view
@@ -1573,3 +1576,80 @@ def esxi_connection_057() -> None:
         (("PG-MGMT",),),
         (("PG_GNS3_TRUNK",),),
     ]
+
+
+@allure.title("find_gns3_vm findet eine VM wie 'GNS-VM-1' ohne '3' im Namen")
+@allure.description(
+    "Überprüft, dass find_gns3_vm eine echte VM mit dem Namen 'GNS-VM-1' "
+    "findet - der Name enthält 'gns', aber nicht 'gns3'"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_060() -> None:
+    conn = _make_esxi_connection()
+    conn.content = MagicMock()
+
+    gns3_vm = MagicMock()
+    gns3_vm.name = "GNS-VM-1"
+    gns3_vm.config.guestId = "ubuntu64Guest"
+    container_view = MagicMock()
+    container_view.view = [gns3_vm]
+    conn.view_manager.CreateContainerView.return_value = container_view
+
+    assert conn.find_gns3_vm() is gns3_vm
+
+
+@allure.title(
+    "find_gns3_vm ignoriert VMs mit 'gns' im Namen, die kein Ubuntu 64-bit sind"
+)
+@allure.description(
+    "Überprüft, dass find_gns3_vm eine VM mit passendem Namen, aber einem "
+    "anderen Gast-OS (oder gar keiner lesbaren Konfiguration), nicht als "
+    "GNS3-VM behandelt"
+)
+@allure.tag("negativ-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_061() -> None:
+    conn = _make_esxi_connection()
+    conn.content = MagicMock()
+
+    wrong_os = MagicMock()
+    wrong_os.name = "GNS-Windows"
+    wrong_os.config.guestId = "windows9Server64Guest"
+    unreadable = MagicMock()
+    unreadable.name = "GNS-orphaned"
+    unreadable.config = None
+    container_view = MagicMock()
+    container_view.view = [wrong_os, unreadable]
+    conn.view_manager.CreateContainerView.return_value = container_view
+
+    assert conn.find_gns3_vm() is None
+
+
+@allure.title("find_gns3_vm ignoriert das Backup einer neu deployten GNS3-VM")
+@allure.description(
+    "Überprüft, dass find_gns3_vm das nach einem GNS3-VM-Redeploy "
+    "zurückbleibende Backup ('<name>-backup-<Zeitstempel>') nicht als "
+    "zweiten Treffer zählt, sondern nur die echte VM zurückgibt, statt "
+    "einen ValueError zu werfen"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_062() -> None:
+    conn = _make_esxi_connection()
+    conn.content = MagicMock()
+
+    live = MagicMock()
+    live.name = "GNS-VM-1"
+    live.config.guestId = "ubuntu64Guest"
+    backup = MagicMock()
+    backup.name = "GNS-VM-1-backup-20260929150338"
+    backup.config.guestId = "ubuntu64Guest"
+    container_view = MagicMock()
+    container_view.view = [backup, live]
+    conn.view_manager.CreateContainerView.return_value = container_view
+
+    assert conn.find_gns3_vm() is live

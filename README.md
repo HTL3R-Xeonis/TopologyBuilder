@@ -88,9 +88,11 @@ anything this tool didn't create:
   cleaning up leftovers from an earlier deploy of a *different* topology,
   which would otherwise sit there indefinitely and could even block a
   port-group reset outright (ESXi refuses to delete a port group a VM's NIC
-  is still attached to). The GNS3 VM is always auto-detected by name (any VM
-  whose name contains `gns3`, case-insensitive) and is never deleted, no
-  matter what `esxi.gns3_vm_name` is set to. A VM without the annotation -
+  is still attached to). The GNS3 VM is always auto-detected (any VM whose
+  name contains `gns`, case-insensitive, whose guest OS is Ubuntu Linux
+  (64-bit); the timestamped `-backup-<14 digits>` VMs a GNS3 VM redeploy
+  leaves behind don't count) and is never deleted, no matter what
+  `esxi.gns3_vm_name` is set to. A VM without the annotation -
   i.e. anything not created by this tool - is never touched, so this is safe
   to run on a shared ESXi host. Set `delete_unused_vms: false` in
   `settings.yml` to disable this cleanup entirely.
