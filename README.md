@@ -109,6 +109,21 @@ anymore. Run `topologybuilder orphans` at any time (no deploy needed) to
 find exactly that kind of leftover, or `orphans --fix` to delete it. See
 the command table below.
 
+## Library use: `TopologyBackend`
+
+[TopologyOperator](https://github.com/HTL3R-Xeonis/TopologyOperator) uses this project as a library, not through the
+CLI. `src.backend.TopologyBackend` is the stable surface for operating an already deployed topology one step at a
+time, keeping the topology YAML in sync - a change is deployed live first and written to the file only once that
+succeeded, so a failure leaves the file describing what is really there:
+
+| Method | Purpose |
+|---|---|
+| `deploy_topology(file, yaml_text)` | Validate, then deploy a whole topology (incremental per `Settings.INCREMENTAL_DEPLOY`) |
+| `add_node` / `remove_node` | Deploy / delete one node live and update the file |
+| `add_link` / `remove_link` | Connect / disconnect two nodes live and update the file |
+| `verify(file, fix=False)` | The `verify` checks; with `fix=True` first the low-risk repairs. Returns `(repairs, [(passed, description)])` |
+| `find_orphans(file)` / `delete_orphans(file, orphans)` | Live resources no node in the file describes (and their permanent deletion) |
+
 ## GNS3 VM Deploy (used by TopologyOperator, not the CLI)
 
 `src.gns3_vm_deploy.deploy_fresh_gns3_vm` replaces the configured GNS3 VM
