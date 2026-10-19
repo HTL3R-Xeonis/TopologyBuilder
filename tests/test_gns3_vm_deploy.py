@@ -425,3 +425,71 @@ def gns3_vm_deploy_010() -> None:
     esxi_connection.set_vm_mac_address.assert_called_once()
     args = esxi_connection.set_vm_mac_address.call_args.args
     assert args[1] == "00:50:56:00:10:01"
+
+
+@allure.title(
+    "deploy_fresh_gns3_vm importiert über den OVA-Deploy-Dienst, wenn ova_filename gesetzt ist"
+)
+@allure.description(
+    "Mit ova_filename wird die OVA nicht lokal gelesen, sondern vom Deploy-Dienst "
+    "serverseitig importiert; die Reihenfolge Management- dann Trunk-NIC bleibt erhalten"
+)
+@allure.tag("positiv-test", "gns3_vm_deploy")
+@allure.feature("gns3_vm_deploy")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_vm_deploy_900() -> None:
+    esxi_connection = MagicMock()
+    new_vm = MagicMock(name="new_vm")
+    esxi_connection.get_vm.side_effect = [None, new_vm]
+    esxi_connection.get_vm_ip_address.return_value = "10.20.20.233"
+
+    with (
+        patch("src.gns3_vm_deploy.OVAImporter") as importer_cls,
+        patch("src.gns3_vm_deploy.APIHandler.deploy_ova") as deploy_ova,
+    ):
+        ip = deploy_fresh_gns3_vm(
+            esxi_connection,
+            "GNS-VM-1",
+            "",
+            "datastore1",
+            "PG-MGMT",
+            "PG_GNS3_TRUNK",
+            ova_filename="GNS3_VM_26.04_ABC.ova",
+        )
+
+    assert ip == "10.20.20.233"
+    importer_cls.return_value.import_ova.assert_not_called()
+    args = deploy_ova.call_args.args
+    assert args[2:5] == ("GNS-VM-1", "GNS3_VM_26.04_ABC.ova", "datastore1")
+    assert list(args[5].items()) == [
+        ("management", "PG-MGMT"),
+        ("trunk", "PG_GNS3_TRUNK"),
+    ]
+    esxi_connection.power_on_vm.assert_called_once_with(new_vm)
+
+
+@allure.title(
+    "deploy_fresh_gns3_vm meldet, wenn der Deploy-Dienst Erfolg meldet, die VM aber fehlt"
+)
+@allure.description(
+    "Eine nach dem Dienstaufruf nicht auffindbare VM ist ein Fehler, kein stilles Weitermachen"
+)
+@allure.tag("negativ-test", "gns3_vm_deploy")
+@allure.feature("gns3_vm_deploy")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_vm_deploy_901() -> None:
+    esxi_connection = MagicMock()
+    esxi_connection.get_vm.return_value = None
+
+    with patch("src.gns3_vm_deploy.APIHandler.deploy_ova"):
+        with pytest.raises(RuntimeError, match="no VM 'GNS-VM-1'"):
+            deploy_fresh_gns3_vm(
+                esxi_connection,
+                "GNS-VM-1",
+                "",
+                "datastore1",
+                "PG-MGMT",
+                "PG_GNS3_TRUNK",
+                ova_filename="x.ova",
+            )
+    esxi_connection.power_on_vm.assert_not_called()

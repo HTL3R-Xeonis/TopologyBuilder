@@ -17,9 +17,11 @@ from typing import Callable
 
 from loguru import logger
 
+from src.connections.api_handler import APIHandler
 from src.connections.esxi_connection import ESXiConnection
 from src.mac_range import mac_in_range, pick_mac_in_range
 from src.ova_importer import OVAImporter
+from src.settings import Settings
 
 _IP_WAIT_POLL_INTERVAL_SECONDS = 5
 
@@ -35,6 +37,7 @@ def deploy_fresh_gns3_vm(
     on_stage: Callable[[str], None] | None = None,
     delete_old_vm: bool = False,
     mac_range: tuple[str, str] | None = None,
+    ova_filename: str | None = None,
 ) -> str:
     """
     Replaces the GNS3 VM named ``vm_name`` with a freshly imported one from
@@ -75,6 +78,14 @@ def deploy_fresh_gns3_vm(
         powered-off, renamed backup - the whole point of that safety net
         is a path back to a known-working VM, which permanently deleting
         it before the replacement is proven working would defeat.
+    :param ova_filename: when given, the OVA is NOT read from ``ova_path`` but
+        imported by the OVA deploy service (``Settings.API.OVA_DEPLOY_URL``)
+        straight from its NFS share onto the ESXi host - no multi-GB download
+        or upload hop on this machine, thin provisioned. This is the exact
+        filename on that share (the template catalog's ``file`` field). The
+        service builds the VM's NICs itself from an ordered mapping, so the
+        first one is the management NIC and the second the trunk NIC, same
+        as the local importer's order.
     :param mac_range: (start_mac, end_mac) - if given, the new VM's
         management NIC gets a MAC address from this inclusive range
         instead of the old VM's own MAC (e.g. so a DHCP server can be
@@ -126,13 +137,30 @@ def deploy_fresh_gns3_vm(
         logger.info(f"Renamed existing '{vm_name}' VM to '{backup_name}'")
 
     stage("importing OVA")
-    importer = OVAImporter(esxi_connection)
-    new_vm = importer.import_ova(
-        ova_path,
-        vm_name,
-        datastore_name,
-        [mgmt_network_name, trunk_network_name],
-    )
+    if ova_filename is not None:
+        # Order matters: dict order = NIC order (management first, then trunk).
+        APIHandler.deploy_ova(
+            Settings.ESXI.IP,
+            Settings.ESXI.PORT,
+            vm_name,
+            ova_filename,
+            datastore_name,
+            {"management": mgmt_network_name, "trunk": trunk_network_name},
+        )
+        new_vm = esxi_connection.get_vm(vm_name)
+        if new_vm is None:
+            raise RuntimeError(
+                f"The OVA deploy service reported success, but no VM '{vm_name}' "
+                f"exists on the ESXi host"
+            )
+    else:
+        importer = OVAImporter(esxi_connection)
+        new_vm = importer.import_ova(
+            ova_path,
+            vm_name,
+            datastore_name,
+            [mgmt_network_name, trunk_network_name],
+        )
 
     final_mac_address = old_mac_address
     if mac_range is not None:
