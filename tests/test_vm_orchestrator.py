@@ -1252,3 +1252,98 @@ def vm_orchestrator_037() -> None:
 
     esxi_connection._add_port_group.assert_called_once()
     assert any("Created missing port group" in a for a in actions)
+
+
+def _graph_with_one_esxi_bridge():
+    from src.graph import Environment
+
+    VirtualLan.reset()
+    node = GenericNode("Ubuntu-Server", "VM", "PC_A")
+    node.add_interface("ens160").vlan = VirtualLan("PC_A", "ens160")
+    node.env = Environment.ON_ESXI
+    graph = MagicMock()
+    graph.nodes = {"PC_A": node}
+    return graph, node.interfaces["ens160"].vlan.subinterface_name
+
+
+@allure.title(
+    "verify_vlan_subinterfaces meldet fehlende VLAN-Subinterfaces der GNS3-VM"
+)
+@allure.description(
+    "Überprüft, dass verify_vlan_subinterfaces fehlschlägt und die fehlenden "
+    "Subinterfaces nennt, bestanden meldet wenn alle da sind, und bei einem "
+    "SSH-Fehler nicht abstürzt sondern 'could not be checked' meldet"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_subinterfaces_verify() -> None:
+    Settings.ONLY_ON_ESXI = False
+    orchestrator, _ = _make_orchestrator()
+    graph, name = _graph_with_one_esxi_bridge()
+
+    setup = MagicMock()
+    setup.expected_subinterfaces.return_value = {name: 7}
+    setup.missing_subinterfaces.return_value = {name: 7}
+    with patch.object(orchestrator, "_open_gns3_interface_setup", return_value=setup):
+        ok, text = orchestrator.verify_vlan_subinterfaces(graph, "u", "p")
+        assert not ok and name in text and "no traffic" in text
+
+        setup.missing_subinterfaces.return_value = {}
+        ok, text = orchestrator.verify_vlan_subinterfaces(graph, "u", "p")
+        assert ok and "all 1 present" in text
+
+    with patch.object(
+        orchestrator, "_open_gns3_interface_setup", side_effect=RuntimeError("ssh down")
+    ):
+        ok, text = orchestrator.verify_vlan_subinterfaces(graph, "u", "p")
+        assert not ok and "could not be checked" in text and "ssh down" in text
+
+
+@allure.title(
+    "repair_vlan_subinterfaces legt Fehlendes an und startet die Cloud-Nodes neu"
+)
+@allure.description(
+    "Überprüft, dass repair_vlan_subinterfaces die fehlenden Subinterfaces "
+    "anlegt und danach genau die Cloud-Nodes der ESXi-VMs stoppt und startet "
+    "(sie binden das Interface beim Start), und bei nichts Fehlendem nichts tut"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_subinterfaces_repair() -> None:
+    Settings.ONLY_ON_ESXI = False
+    orchestrator, _ = _make_orchestrator()
+    graph, name = _graph_with_one_esxi_bridge()
+    setup = MagicMock()
+
+    with (
+        patch.object(orchestrator, "_open_gns3_interface_setup", return_value=setup),
+        patch.object(
+            GNS3Connection,
+            "list_all_projects",
+            return_value=[{"name": "proj", "project_id": "p1"}],
+        ),
+        patch.object(
+            GNS3Connection,
+            "list_project_nodes",
+            return_value=[
+                {"name": "PC_A", "node_id": "n1", "node_type": "cloud"},
+                {"name": "SW", "node_id": "n2", "node_type": "qemu"},
+            ],
+        ),
+        patch.object(GNS3Connection, "stop_node") as stop,
+        patch.object(GNS3Connection, "start_node") as start,
+    ):
+        setup.create_missing_subinterfaces.return_value = []
+        assert orchestrator.repair_vlan_subinterfaces(graph, "proj", "u", "p") == []
+        stop.assert_not_called()
+
+        setup.create_missing_subinterfaces.return_value = [name]
+        actions = orchestrator.repair_vlan_subinterfaces(graph, "proj", "u", "p")
+
+    assert actions == [
+        f"Re-created VLAN subinterface {name} on the GNS3 VM",
+        "Restarted the Cloud node of 'PC_A'",
+    ]
+    assert stop.call_args.args[3] == "n1" and start.call_args.args[3] == "n1"

@@ -450,12 +450,14 @@ def backend_014(tmp_path) -> None:
     topology_file = _copy_topology(tmp_path)
     backend, orchestrator = _make_backend()
     orchestrator.verify_graph.return_value = [(True, "ok")]
+    orchestrator.verify_vlan_subinterfaces.return_value = (True, "subinterfaces ok")
 
     actions, results = backend.verify(topology_file)
 
     assert actions == []
-    assert results == [(True, "ok")]
+    assert results == [(True, "ok"), (True, "subinterfaces ok")]
     orchestrator.repair_graph.assert_not_called()
+    orchestrator.repair_vlan_subinterfaces.assert_not_called()
     assert orchestrator.verify_graph.call_args.args[1] == "topology"
 
 
@@ -475,15 +477,22 @@ def backend_015(tmp_path) -> None:
     orchestrator.repair_graph.side_effect = lambda *a: (
         calls.append("repair") or ["Started GNS3 node 'R1'"]
     )
+    orchestrator.repair_vlan_subinterfaces.side_effect = lambda *a: (
+        calls.append("subinterfaces") or ["Re-created VLAN subinterface eth1.7"]
+    )
     orchestrator.verify_graph.side_effect = lambda *a: (
         calls.append("verify") or [(True, "ok")]
     )
+    orchestrator.verify_vlan_subinterfaces.return_value = (True, "subinterfaces ok")
 
     actions, results = backend.verify(topology_file, fix=True)
 
-    assert calls == ["repair", "verify"]
-    assert actions == ["Started GNS3 node 'R1'"]
-    assert results == [(True, "ok")]
+    assert calls == ["repair", "subinterfaces", "verify"]
+    assert actions == [
+        "Started GNS3 node 'R1'",
+        "Re-created VLAN subinterface eth1.7",
+    ]
+    assert results == [(True, "ok"), (True, "subinterfaces ok")]
 
 
 @allure.title("find_orphans und delete_orphans reichen Graph bzw. Projektnamen durch")
@@ -508,3 +517,26 @@ def backend_016(tmp_path) -> None:
 
     backend.delete_orphans(topology_file, [orphan])
     orchestrator.delete_orphans.assert_called_once_with([orphan], "topology")
+
+
+@allure.title("Ein Fehler beim Reparieren der Subinterfaces bricht verify nicht ab")
+@allure.description(
+    "Überprüft, dass verify(fix=True) weiterläuft und weiterhin prüft, wenn "
+    "das Wiederanlegen der VLAN-Subinterfaces (z. B. SSH) fehlschlägt"
+)
+@allure.tag("negativ-test", "backend")
+@allure.feature("backend")
+@allure.severity(allure.severity_level.NORMAL)
+def backend_subinterface_repair_failure(tmp_path) -> None:
+    _reset_settings()
+    topology_file = _copy_topology(tmp_path)
+    backend, orchestrator = _make_backend()
+    orchestrator.repair_graph.return_value = []
+    orchestrator.repair_vlan_subinterfaces.side_effect = RuntimeError("ssh down")
+    orchestrator.verify_graph.return_value = []
+    orchestrator.verify_vlan_subinterfaces.return_value = (False, "missing")
+
+    actions, results = backend.verify(topology_file, fix=True)
+
+    assert actions == []
+    assert results == [(False, "missing")]

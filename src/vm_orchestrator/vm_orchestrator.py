@@ -787,16 +787,109 @@ class VMOrchestrator:
         if Settings.ONLY_ON_ESXI:
             return
 
+        gns3_interface_setup = self._open_gns3_interface_setup(
+            gns3_username, gns3_password
+        )
+        gns3_interface_setup.initialize_commands(graph)
+        gns3_interface_setup.execute_script()
+
+    def _open_gns3_interface_setup(
+        self, gns3_username: str, gns3_password: str | None
+    ) -> GNS3VMInterfaceSetup:
         port = 22
 
         gns3_connection = SSHConnection(
             self.gns3_vm_ip, port, gns3_username, gns3_password
         )
         parent_interface = self._resolve_gns3_parent_interface(gns3_connection)
-        gns3_interface_setup = GNS3VMInterfaceSetup(gns3_connection, parent_interface)
+        return GNS3VMInterfaceSetup(gns3_connection, parent_interface)
 
-        gns3_interface_setup.initialize_commands(graph)
-        gns3_interface_setup.execute_script()
+    def verify_vlan_subinterfaces(
+        self, graph: Graph, gns3_username: str, gns3_password: str | None
+    ) -> tuple[bool, str]:
+        """
+        Checks that every VLAN subinterface the graph needs exists on the GNS3 VM. They are lost
+        when that VM reboots (plain ``ip link`` objects), and without them every link between a
+        GNS3 node and an ESXi VM carries no traffic although all other checks pass.
+        :return: (passed, description)
+        """
+        if Settings.ONLY_ON_ESXI:
+            return True, "GNS3 VM VLAN subinterfaces: not needed (ESXi only)"
+        try:
+            setup = self._open_gns3_interface_setup(gns3_username, gns3_password)
+            missing = setup.missing_subinterfaces(graph)
+            total = len(setup.expected_subinterfaces(graph))
+        except Exception as exc:
+            return False, f"GNS3 VM VLAN subinterfaces: could not be checked ({exc})"
+        if missing:
+            return (
+                False,
+                f"GNS3 VM VLAN subinterfaces: {len(missing)} of {total} missing "
+                f"({', '.join(missing)}) - links to ESXi VMs carry no traffic",
+            )
+        return True, f"GNS3 VM VLAN subinterfaces: all {total} present"
+
+    def repair_vlan_subinterfaces(
+        self,
+        graph: Graph,
+        project_name: str,
+        gns3_username: str,
+        gns3_password: str | None,
+    ) -> list[str]:
+        """
+        Re-creates the missing VLAN subinterfaces on the GNS3 VM (see verify_vlan_subinterfaces)
+        and restarts the Cloud nodes of the ESXi VMs so they bind to them again. Existing
+        subinterfaces are left alone.
+        :return: human-readable description of what was done (empty if nothing was missing)
+        """
+        if Settings.ONLY_ON_ESXI:
+            return []
+        setup = self._open_gns3_interface_setup(gns3_username, gns3_password)
+        created = setup.create_missing_subinterfaces(graph)
+        if not created:
+            return []
+        actions = [
+            f"Re-created VLAN subinterface {name} on the GNS3 VM" for name in created
+        ]
+        actions.extend(self._restart_cloud_nodes(graph, project_name))
+        return actions
+
+    def _restart_cloud_nodes(self, graph: Graph, project_name: str) -> list[str]:
+        """Stops and starts the Cloud node of every ESXi VM that is bridged to a GNS3 node (it binds its interface when it starts)."""
+        project = next(
+            (
+                p
+                for p in GNS3Connection.list_all_projects(
+                    self.gns3_vm_ip, Settings.GNS3.PORT
+                )
+                if p.get("name") == project_name
+            ),
+            None,
+        )
+        if project is None:
+            return []
+        nodes_by_name = {
+            n.get("name"): n
+            for n in GNS3Connection.list_project_nodes(
+                self.gns3_vm_ip, Settings.GNS3.PORT, project["project_id"]
+            )
+        }
+        actions: list[str] = []
+        for name, node in graph.nodes.items():
+            if node.env != Environment.ON_ESXI:
+                continue
+            cloud = nodes_by_name.get(name)
+            if cloud is None or cloud.get("node_type") != "cloud":
+                continue
+            for method in (GNS3Connection.stop_node, GNS3Connection.start_node):
+                method(
+                    self.gns3_vm_ip,
+                    Settings.GNS3.PORT,
+                    project["project_id"],
+                    cloud["node_id"],
+                )
+            actions.append(f"Restarted the Cloud node of '{name}'")
+        return actions
 
     def _resolve_gns3_parent_interface(self, gns3_ssh_connection: SSHConnection) -> str:
         """

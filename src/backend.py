@@ -15,6 +15,7 @@ import tempfile
 from pathlib import Path
 
 import yaml
+from loguru import logger
 
 from src.connections.gns3_connection import GNS3Connection
 from src.graph import Environment, Graph
@@ -288,7 +289,36 @@ class TopologyBackend:
         _, graph = self._load(topology_file)
         project_name = self._set_project_name(topology_file)
         actions = self._orchestrator.repair_graph(graph, project_name) if fix else []
-        return actions, self._orchestrator.verify_graph(graph, project_name)
+        if fix:
+            actions += self._repair_vlan_subinterfaces(graph, project_name)
+        results = self._orchestrator.verify_graph(graph, project_name)
+        results.append(
+            self._orchestrator.verify_vlan_subinterfaces(
+                graph, self._gns3_username, self._gns3_password
+            )
+        )
+        return actions, results
+
+    def _repair_vlan_subinterfaces(self, graph, project_name: str) -> list[str]:
+        try:
+            return self._orchestrator.repair_vlan_subinterfaces(
+                graph, project_name, self._gns3_username, self._gns3_password
+            )
+        except Exception as exc:
+            logger.warning(f"Could not repair the GNS3 VM's VLAN subinterfaces: {exc}")
+            return []
+
+    def repair_vlan_subinterfaces(self, topology_file: str) -> list[str]:
+        """
+        Re-creates the VLAN subinterfaces a rebooted GNS3 VM lost, and re-binds the Cloud
+        nodes - the one repair that is cheap and safe enough to run by itself.
+        :return: what was done, empty if nothing was missing
+        """
+        _, graph = self._load(topology_file)
+        project_name = self._set_project_name(topology_file)
+        return self._orchestrator.repair_vlan_subinterfaces(
+            graph, project_name, self._gns3_username, self._gns3_password
+        )
 
     def find_orphans(self, topology_file: str) -> list[dict[str, str]]:
         """

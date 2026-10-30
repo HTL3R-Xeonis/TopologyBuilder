@@ -66,9 +66,10 @@ class GNS3VMInterfaceSetup:
             # ----------------------------------------------------------------------------------------------------------
             self.script += f"ip link delete {subinterface}\n"
 
-    def _create_subinterface_creation_commands(self, graph: Graph) -> None:
+    @staticmethod
+    def expected_subinterfaces(graph: Graph) -> dict[str, int]:
         """
-        Creates the commands for the creation of subinterfaces, on the ``self.parent_interface`` interface.
+        The subinterfaces the graph needs on the GNS3 VM, as {name: vlan id}.
         A direct ESXi-to-ESXi link's two interfaces share the exact same
         VirtualLan object (see Graph._assign_vlans), so without deduping
         here, the same subinterface name would be created twice - the
@@ -78,10 +79,11 @@ class GNS3VMInterfaceSetup:
         also needs no subinterface at all - both vNICs already share the
         port group directly at the ESXi layer, so nothing on this VLAN
         ever needs to reach the GNS3 VM's trunk NIC.
-        :return:
+        :return: {subinterface name: vlan id}, in graph order
         """
         from src.graph import Environment
 
+        expected: dict[str, int] = {}
         seen_vlan_ids: set[int] = set()
         for node in graph.nodes.values():
             for interface in node.interfaces.values():
@@ -92,24 +94,65 @@ class GNS3VMInterfaceSetup:
                 if neighbour is not None and neighbour.env == Environment.ON_ESXI:
                     continue
                 seen_vlan_ids.add(vlan.id)
+                expected[vlan.subinterface_name] = vlan.id
+        return expected
 
-                # ----------------------------------------------------------------------------------------------------------
-                if Settings.IS_DRY_RUN:
-                    Verbosity.volumatic_print(
-                        Verbosity.NORMAL,
-                        f"Would create subinterface {vlan.subinterface_name} with vlan {vlan.id}",
-                    )
-                    continue
+    def missing_subinterfaces(self, graph: Graph) -> dict[str, int]:
+        """
+        The needed subinterfaces that do not exist on the GNS3 VM right now - they
+        are plain ``ip link`` objects, lost whenever that VM reboots, which silently
+        cuts every link between a GNS3 node and an ESXi VM.
+        :raises RuntimeError: Is thrown when the existing subinterfaces cannot be read.
+        """
+        existing = set(self._get_existing_subinterfaces())
+        return {
+            name: vlan_id
+            for name, vlan_id in self.expected_subinterfaces(graph).items()
+            if name not in existing
+        }
+
+    def create_missing_subinterfaces(self, graph: Graph) -> list[str]:
+        """
+        Creates only the subinterfaces that are missing - nothing existing is deleted or
+        touched, so running links stay up.
+        :return: the names that were created
+        :raises RuntimeError: Is thrown when the creation fails.
+        """
+        missing = self.missing_subinterfaces(graph)
+        if not missing or Settings.IS_DRY_RUN:
+            return list(missing) if Settings.IS_DRY_RUN else []
+        self.script = "set -e\n"
+        for name, vlan_id in missing.items():
+            self.script += (
+                f"ip link add link {self.parent_interface} name {name} type vlan id {vlan_id}\n"
+                f"ip link set {name} up\n"
+            )
+        self.execute_script()
+        return list(missing)
+
+    def _create_subinterface_creation_commands(self, graph: Graph) -> None:
+        """
+        Creates the commands for the creation of subinterfaces, on the ``self.parent_interface`` interface.
+        :return:
+        """
+        for name, vlan_id in self.expected_subinterfaces(graph).items():
+            # ----------------------------------------------------------------------------------------------------------
+            if Settings.IS_DRY_RUN:
                 Verbosity.volumatic_print(
                     Verbosity.NORMAL,
-                    f"Creates subinterface {vlan.subinterface_name} with vlan {vlan.id}",
+                    f"Would create subinterface {name} with vlan {vlan_id}",
                 )
-                # ----------------------------------------------------------------------------------------------------------
+                continue
+            Verbosity.volumatic_print(
+                Verbosity.NORMAL,
+                f"Creates subinterface {name} with vlan {vlan_id}",
+            )
+            # ----------------------------------------------------------------------------------------------------------
 
-                self.script += (
-                    f"ip link add link {self.parent_interface} name {vlan.subinterface_name} type vlan id {vlan.id}\n"
-                    + f"ip link set {vlan.subinterface_name} up\n"
-                )
+            self.script += (
+                f"ip link add link {self.parent_interface} name {name} type vlan id {vlan_id}\n"
+                + f"ip link set {name} up\n"
+            )
 
     def initialize_commands(self, graph: Graph) -> None:
         """

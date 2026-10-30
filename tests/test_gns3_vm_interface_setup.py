@@ -181,3 +181,74 @@ def gns3_vm_interface_setup_004() -> None:
 
     assert f"name {vlan.subinterface_name} type vlan" in setup.script
     assert vlan.name not in setup.script
+
+
+def _graph_with_two_gns3_bridges():
+    VirtualLan.reset()
+    node_a = GenericNode("Ubuntu-Server", "VM", "PC_A")
+    node_a.add_interface("ens160").vlan = VirtualLan("PC_A", "ens160")
+    node_b = GenericNode("Ubuntu-Server", "VM", "PC_B")
+    node_b.add_interface("ens160").vlan = VirtualLan("PC_B", "ens160")
+    graph = MagicMock()
+    graph.nodes = {"PC_A": node_a, "PC_B": node_b}
+    return graph, node_a, node_b
+
+
+def _setup_with_existing(existing):
+    setup = GNS3VMInterfaceSetup(MagicMock(), "eth1")
+    setup._get_existing_subinterfaces = lambda: list(existing)
+    return setup
+
+
+@allure.title("missing_subinterfaces nennt nur die fehlenden Subinterfaces")
+@allure.description(
+    "Überprüft, dass missing_subinterfaces die vom Graphen benötigten, auf der "
+    "GNS3-VM aber nicht vorhandenen Subinterfaces liefert (sie gehen bei einem "
+    "Neustart der VM verloren)"
+)
+@allure.tag("positiv-test", "gns3-vm-interface-setup")
+@allure.feature("gns3_vm_interface_setup")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_vm_interface_setup_missing() -> None:
+    _reset_settings()
+    graph, node_a, node_b = _graph_with_two_gns3_bridges()
+    name_a = node_a.interfaces["ens160"].vlan.subinterface_name
+    name_b = node_b.interfaces["ens160"].vlan.subinterface_name
+
+    assert set(_setup_with_existing([]).missing_subinterfaces(graph)) == {
+        name_a,
+        name_b,
+    }
+    assert set(_setup_with_existing([name_a]).missing_subinterfaces(graph)) == {name_b}
+    assert _setup_with_existing([name_a, name_b]).missing_subinterfaces(graph) == {}
+
+
+@allure.title("create_missing_subinterfaces legt nur Fehlendes an und löscht nichts")
+@allure.description(
+    "Überprüft, dass create_missing_subinterfaces nur die fehlenden Subinterfaces "
+    "per 'ip link add' anlegt, kein 'ip link delete' ausführt und nichts tut, "
+    "wenn alles vorhanden ist"
+)
+@allure.tag("positiv-test", "gns3-vm-interface-setup")
+@allure.feature("gns3_vm_interface_setup")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_vm_interface_setup_create_missing() -> None:
+    _reset_settings()
+    graph, node_a, node_b = _graph_with_two_gns3_bridges()
+    name_a = node_a.interfaces["ens160"].vlan.subinterface_name
+    name_b = node_b.interfaces["ens160"].vlan.subinterface_name
+    scripts = []
+
+    setup = _setup_with_existing([name_a])
+    setup.execute_script = lambda: scripts.append(setup.script) or (0, "", "")
+
+    assert setup.create_missing_subinterfaces(graph) == [name_b]
+    assert f"name {name_b} type vlan" in scripts[0]
+    assert f"name {name_a} type vlan" not in scripts[0]
+    assert "delete" not in scripts[0]
+
+    scripts.clear()
+    complete = _setup_with_existing([name_a, name_b])
+    complete.execute_script = lambda: scripts.append("ran") or (0, "", "")
+    assert complete.create_missing_subinterfaces(graph) == []
+    assert scripts == []
