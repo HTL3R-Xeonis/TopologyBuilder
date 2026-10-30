@@ -124,6 +124,7 @@ def gns3_vm_deploy_002() -> None:
         "ensuring trunk network exists",
         "powering off existing VM",
         "importing OVA",
+        "setting CPU and memory",
         "powering on",
         "waiting for an IP address",
     ]
@@ -493,3 +494,45 @@ def gns3_vm_deploy_901() -> None:
                 ova_filename="x.ova",
             )
     esxi_connection.power_on_vm.assert_not_called()
+
+
+@allure.title(
+    "deploy_fresh_gns3_vm gibt der neuen VM standardmäßig 4 vCPUs und 8 GB RAM"
+)
+@allure.description(
+    "Überprüft, dass die frisch importierte GNS3-VM vor dem Einschalten auf "
+    "4 vCPUs und 8192 MB gesetzt wird, egal was die OVA selbst vorgibt, und "
+    "dass beide Werte überschrieben werden können"
+)
+@allure.tag("positiv-test", "gns3_vm_deploy")
+@allure.feature("gns3_vm_deploy")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_vm_deploy_resources() -> None:
+    for kwargs, expected in (
+        ({}, (4, 8192)),
+        ({"cpus": 2, "memory_mb": 4096}, (2, 4096)),
+    ):
+        esxi_connection = MagicMock()
+        esxi_connection.get_vm.return_value = None
+        esxi_connection.get_vm_ip_address.return_value = "10.20.20.233"
+        new_vm = MagicMock()
+        calls = []
+        esxi_connection.set_vm_resources.side_effect = lambda *a: calls.append(
+            "resources"
+        )
+        esxi_connection.power_on_vm.side_effect = lambda *a: calls.append("power on")
+
+        with patch("src.gns3_vm_deploy.OVAImporter") as importer_cls:
+            importer_cls.return_value.import_ova.return_value = new_vm
+            deploy_fresh_gns3_vm(
+                esxi_connection,
+                "GNS-VM-1",
+                "/mnt/nfs/gns3.ova",
+                "datastore1",
+                "PG-MGMT",
+                "PG_GNS3_TRUNK",
+                **kwargs,
+            )
+
+        esxi_connection.set_vm_resources.assert_called_once_with(new_vm, *expected)
+        assert calls == ["resources", "power on"]

@@ -1048,6 +1048,19 @@ class ESXiConnection(GenericConnection):
         logger.error(msg := f"VM '{vm.name}' has no network adapter to set a MAC on")
         raise ValueError(msg)
 
+    def set_vm_resources(
+        self, vm: vim.VirtualMachine, cpus: int, memory_mb: int
+    ) -> None:
+        """
+        Sets the VM's number of virtual CPUs and its memory. The VM has to be
+        powered off (ESXi refuses the change on a running one).
+        :param vm: the VM to reconfigure
+        :param cpus: number of virtual CPUs
+        :param memory_mb: memory in MB
+        """
+        config_spec = vim.vm.ConfigSpec(numCPUs=cpus, memoryMB=memory_mb)
+        self._wait_for_task(vm.ReconfigVM_Task(spec=config_spec))
+
     def add_vm_network_adapters(
         self, vm: vim.VirtualMachine, network_names: list[str]
     ) -> None:

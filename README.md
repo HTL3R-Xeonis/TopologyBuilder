@@ -138,7 +138,10 @@ be set up to only hand out addresses in that range; the old VM's MAC is
 kept as-is if it's already in range). Not yet in this repo's own
 [`settings.example.yml`](settings.example.yml) since the CLI never reads
 them - see TopologyOperator's own `settings.example.yml` and README for
-the full picture, including the GUI's delete-old-VM option.
+the full picture, including the GUI's delete-old-VM option. A freshly deployed
+GNS3 VM always gets **4 vCPUs and 8 GB RAM** (the stock OVA's 1 vCPU / 2 GB is far
+too little for a few IOSv nodes); `deploy_fresh_gns3_vm` takes `cpus` and
+`memory_mb` to choose otherwise.
 
 ## Topology Config File
 

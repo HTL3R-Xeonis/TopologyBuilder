@@ -25,6 +25,11 @@ from src.settings import Settings
 
 _IP_WAIT_POLL_INTERVAL_SECONDS = 5
 
+# What a freshly deployed GNS3 VM gets, whatever the OVA itself declares (the stock
+# GNS3 VM OVA comes with 1 vCPU / 2 GB, far too little for a handful of IOSv nodes).
+DEFAULT_GNS3_VM_CPUS = 4
+DEFAULT_GNS3_VM_MEMORY_MB = 8192
+
 
 def deploy_fresh_gns3_vm(
     esxi_connection: ESXiConnection,
@@ -38,6 +43,8 @@ def deploy_fresh_gns3_vm(
     delete_old_vm: bool = False,
     mac_range: tuple[str, str] | None = None,
     ova_filename: str | None = None,
+    cpus: int = DEFAULT_GNS3_VM_CPUS,
+    memory_mb: int = DEFAULT_GNS3_VM_MEMORY_MB,
 ) -> str:
     """
     Replaces the GNS3 VM named ``vm_name`` with a freshly imported one from
@@ -99,6 +106,9 @@ def deploy_fresh_gns3_vm(
         this ESXi host (e.g. a real device out in the lab already using
         a MAC in this range) - keep the range dedicated to VMs this
         tool manages.
+    :param cpus: number of virtual CPUs the new VM gets (default 4), set after
+        the import and before the VM is powered on
+    :param memory_mb: memory the new VM gets in MB (default 8192 = 8 GB)
     :return: IP address of the new GNS3 VM
     :raises TimeoutError: if the new VM never reports an IP within
         ip_wait_timeout_seconds - the old VM (if any) is left as its
@@ -185,6 +195,10 @@ def deploy_fresh_gns3_vm(
     if final_mac_address is not None:
         esxi_connection.set_vm_mac_address(new_vm, final_mac_address)
         logger.info(f"Set new '{vm_name}' VM's MAC to {final_mac_address}")
+
+    stage("setting CPU and memory")
+    logger.info(f"Setting '{vm_name}' VM to {cpus} vCPU(s) and {memory_mb} MB memory")
+    esxi_connection.set_vm_resources(new_vm, cpus, memory_mb)
 
     stage("powering on")
     logger.info(f"Powering on '{vm_name}' VM")

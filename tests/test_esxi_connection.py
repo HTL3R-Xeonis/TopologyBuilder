@@ -1540,6 +1540,30 @@ def esxi_connection_056() -> None:
         conn.set_vm_mac_address(vm, "00:11:22:33:44:55")
 
 
+@allure.title("set_vm_resources setzt vCPUs und RAM über ReconfigVM_Task")
+@allure.description(
+    "Überprüft, dass set_vm_resources die Anzahl der vCPUs und den "
+    "Arbeitsspeicher in einer ConfigSpec an ReconfigVM_Task übergibt"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def esxi_connection_set_vm_resources() -> None:
+    from pyVmomi import vim
+
+    conn = _make_esxi_connection()
+    vm = MagicMock()
+    task = MagicMock()
+    task.info.state = vim.TaskInfo.State.success
+    vm.ReconfigVM_Task.return_value = task
+
+    conn.set_vm_resources(vm, 4, 8192)
+
+    _, kwargs = vm.ReconfigVM_Task.call_args
+    assert kwargs["spec"].numCPUs == 4
+    assert kwargs["spec"].memoryMB == 8192
+
+
 @allure.title(
     "add_vm_network_adapters fügt für jeden Netzwerknamen einen Adapter hinzu"
 )
