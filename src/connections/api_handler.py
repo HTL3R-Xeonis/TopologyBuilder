@@ -31,11 +31,16 @@ class APIHandler:
         self.port = port
 
     @staticmethod
-    def get(url: str, parsing_method: str = "json", **kwargs) -> dict | None:
+    def get(
+        url: str, parsing_method: str = "json", timeout: int = 5, **kwargs
+    ) -> dict | None:
         """
         General method to make an API GET request
         :param parsing_method: Method of parsing the response.
         :param url: url to the API endpoint
+        :param timeout: seconds to wait for a response before raising
+            TimeoutError. Defaults to 5 - pass a larger value for a call
+            expected to legitimately take longer.
         :param kwargs: Keyword arguments for the get request.
         :return: The parsed response from the GET request.
         :raises HTTPError: Is thrown when something went wrong with the API call.
@@ -43,7 +48,7 @@ class APIHandler:
         :raises RuntimeError: Is thrown when the response is not parseable to JSON.
         """
         try:
-            response = requests.get(url, timeout=5, **kwargs)
+            response = requests.get(url, timeout=timeout, **kwargs)
             response.raise_for_status()
             return APIHandler.parse_response(response, parsing_method)
         except requests.Timeout:

@@ -373,6 +373,62 @@ class VMOrchestrator:
 
         return results
 
+    def _verify_trunk_security_policy(self) -> tuple[bool, str] | None:
+        """
+        Checks that the trunk port group accepts promiscuous mode, MAC address
+        changes and forged transmits. With ESXi's default policy (reject) all
+        traffic bridged between a GNS3 node and an ESXi VM is dropped silently,
+        although every other check passes.
+        :return: (passed, description), or None if there is no ESXi side to check (``Settings.ONLY_ON_GNS3``)
+        """
+        if Settings.ONLY_ON_GNS3:
+            return None
+        name = Settings.ESXI.TRUNK_PORT_GROUP
+        try:
+            port_group = self.esxi_connection.find_port_group(name)
+            if port_group is None:
+                return False, f"Trunk port group '{name}': does not exist"
+            if self.esxi_connection.bridging_security_policy_ok(port_group):
+                return True, (
+                    f"Trunk port group '{name}': promiscuous mode, MAC address "
+                    f"changes and forged transmits are accepted"
+                )
+        except Exception as exc:
+            return (
+                False,
+                f"Trunk port group '{name}': security policy could not be checked ({exc})",
+            )
+        return False, (
+            f"Trunk port group '{name}': security policy rejects promiscuous mode, "
+            f"MAC address changes or forged transmits - bridged traffic between GNS3 "
+            f"nodes and ESXi VMs is dropped"
+        )
+
+    def _repair_trunk_security_policy(self) -> list[str]:
+        """
+        Sets the trunk port group's security policy to accept promiscuous mode, MAC address
+        changes and forged transmits - only if that port group exists and deviates (a
+        missing port group is a matter for a deploy, not for this cheap repair).
+        :return: what was done (empty if nothing was needed or possible)
+        """
+        if Settings.ONLY_ON_GNS3 or Settings.IS_DRY_RUN:
+            return []
+        name = Settings.ESXI.TRUNK_PORT_GROUP
+        try:
+            port_group = self.esxi_connection.find_port_group(name)
+            if port_group is None or self.esxi_connection.bridging_security_policy_ok(
+                port_group
+            ):
+                return []
+            self.esxi_connection.ensure_bridging_security_policy(name)
+        except Exception as exc:
+            logger.warning(f"Could not repair the security policy of '{name}': {exc}")
+            return []
+        return [
+            f"Set the security policy of trunk port group '{name}' to accept "
+            f"promiscuous mode, MAC address changes and forged transmits"
+        ]
+
     def verify_graph(self, graph: Graph, project_name: str) -> list[tuple[bool, str]]:
         """
         Runs a structural health check against real infrastructure. This is
@@ -386,7 +442,9 @@ class VMOrchestrator:
         failure); both sides of a direct ESXi-ESXi link agree on
         VLAN ID; an ESXi<->GNS3 bridge's Cloud node exists (named after the
         ESXi node, per create_node's own convention); and a GNS3-internal
-        link actually exists between the two node IDs.
+        link actually exists between the two node IDs; and the trunk port
+        group accepts promiscuous mode, MAC address changes and forged
+        transmits (skipped with ``Settings.ONLY_ON_GNS3``).
         :param graph: built topology to verify
         :param project_name: name of the GNS3 project to check
         :return: list of (passed, description) tuples, one per check
@@ -441,6 +499,10 @@ class VMOrchestrator:
                     f"'{Settings.ESXI.TRUNK_PORT_GROUP}' (connected to: {network_names})",
                 )
             )
+
+        policy_result = self._verify_trunk_security_policy()
+        if policy_result is not None:
+            results.append(policy_result)
 
         for name, node in graph.nodes.items():
             if node.env == Environment.ON_GNS3:
@@ -677,8 +739,10 @@ class VMOrchestrator:
         Applies a curated, low-risk subset of automatic fixes for issues
         verify_graph can detect: powers on an ESXi VM that exists but
         isn't powered on, starts a GNS3 node that exists but isn't
-        started, and creates a missing port group for an interface whose
-        VLAN doesn't have one yet. Deliberately does NOT attempt anything
+        started, creates a missing port group for an interface whose
+        VLAN doesn't have one yet, and sets an existing trunk port group's
+        security policy to accept promiscuous mode/MAC changes/forged
+        transmits if it deviates. Deliberately does NOT attempt anything
         that would require redeploying a genuinely missing VM/node or
         recreating a missing Cloud-node bridge - those need a real
         OVA/template import, which is too consequential to trigger from a
@@ -740,6 +804,7 @@ class VMOrchestrator:
                         f"Created missing port group '{vlan.name}' (VLAN {vlan.id})"
                     )
 
+        actions.extend(self._repair_trunk_security_policy())
         return actions
 
     @staticmethod
@@ -816,6 +881,8 @@ class VMOrchestrator:
         if Settings.ONLY_ON_ESXI:
             return True, "GNS3 VM VLAN subinterfaces: not needed (ESXi only)"
         try:
+            if not GNS3VMInterfaceSetup.expected_subinterfaces(graph):
+                return True, "GNS3 VM VLAN subinterfaces: none needed by this topology"
             setup = self._open_gns3_interface_setup(gns3_username, gns3_password)
             missing = setup.missing_subinterfaces(graph)
             total = len(setup.expected_subinterfaces(graph))
@@ -844,10 +911,17 @@ class VMOrchestrator:
         """
         if Settings.ONLY_ON_ESXI:
             return []
+        if not GNS3VMInterfaceSetup.expected_subinterfaces(graph):
+            return []
         setup = self._open_gns3_interface_setup(gns3_username, gns3_password)
         created = setup.create_missing_subinterfaces(graph)
         if not created:
             return []
+        if Settings.IS_DRY_RUN:
+            return [
+                f"Would re-create VLAN subinterface {name} on the GNS3 VM"
+                for name in created
+            ]
         actions = [
             f"Re-created VLAN subinterface {name} on the GNS3 VM" for name in created
         ]
@@ -881,13 +955,20 @@ class VMOrchestrator:
             cloud = nodes_by_name.get(name)
             if cloud is None or cloud.get("node_type") != "cloud":
                 continue
-            for method in (GNS3Connection.stop_node, GNS3Connection.start_node):
-                method(
-                    self.gns3_vm_ip,
-                    Settings.GNS3.PORT,
-                    project["project_id"],
-                    cloud["node_id"],
-                )
+            try:
+                for method in (GNS3Connection.stop_node, GNS3Connection.start_node):
+                    method(
+                        self.gns3_vm_ip,
+                        Settings.GNS3.PORT,
+                        project["project_id"],
+                        cloud["node_id"],
+                    )
+            except Exception as exc:
+                # One stuck Cloud node must not hide that the subinterfaces
+                # were already re-created, nor stop the others from restarting.
+                logger.warning(f"Could not restart the Cloud node of '{name}': {exc}")
+                actions.append(f"Could not restart the Cloud node of '{name}': {exc}")
+                continue
             actions.append(f"Restarted the Cloud node of '{name}'")
         return actions
 

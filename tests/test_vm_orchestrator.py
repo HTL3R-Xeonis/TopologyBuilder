@@ -1260,7 +1260,7 @@ def _graph_with_one_esxi_bridge():
     VirtualLan.reset()
     node = GenericNode("Ubuntu-Server", "VM", "PC_A")
     node.add_interface("ens160").vlan = VirtualLan("PC_A", "ens160")
-    node.env = Environment.ON_ESXI
+    node._env = Environment.ON_ESXI
     graph = MagicMock()
     graph.nodes = {"PC_A": node}
     return graph, node.interfaces["ens160"].vlan.subinterface_name
@@ -1277,7 +1277,7 @@ def _graph_with_one_esxi_bridge():
 @allure.tag("positiv-test", "vm-orchestrator")
 @allure.feature("vm_orchestrator")
 @allure.severity(allure.severity_level.CRITICAL)
-def vm_orchestrator_subinterfaces_verify() -> None:
+def vm_orchestrator_038() -> None:
     Settings.ONLY_ON_ESXI = False
     orchestrator, _ = _make_orchestrator()
     graph, name = _graph_with_one_esxi_bridge()
@@ -1311,7 +1311,7 @@ def vm_orchestrator_subinterfaces_verify() -> None:
 @allure.tag("positiv-test", "vm-orchestrator")
 @allure.feature("vm_orchestrator")
 @allure.severity(allure.severity_level.CRITICAL)
-def vm_orchestrator_subinterfaces_repair() -> None:
+def vm_orchestrator_039() -> None:
     Settings.ONLY_ON_ESXI = False
     orchestrator, _ = _make_orchestrator()
     graph, name = _graph_with_one_esxi_bridge()
@@ -1347,3 +1347,183 @@ def vm_orchestrator_subinterfaces_repair() -> None:
         "Restarted the Cloud node of 'PC_A'",
     ]
     assert stop.call_args.args[3] == "n1" and start.call_args.args[3] == "n1"
+
+
+@allure.title(
+    "_verify_trunk_security_policy prüft die Sicherheitsrichtlinie der Trunk-Port-Gruppe"
+)
+@allure.description(
+    "Überprüft, dass die Prüfung bestanden meldet, wenn die Richtlinie stimmt, "
+    "fehlschlägt, wenn sie abweicht oder die Port-Gruppe fehlt, bei einem Fehler "
+    "der ESXi-Abfrage nicht abstürzt und mit ONLY_ON_GNS3 übersprungen wird"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_040(monkeypatch) -> None:
+    monkeypatch.setattr(Settings, "ONLY_ON_GNS3", False)
+    orchestrator, esxi = _make_orchestrator()
+
+    esxi.find_port_group.return_value = MagicMock()
+    esxi.bridging_security_policy_ok.return_value = True
+    ok, text = orchestrator._verify_trunk_security_policy()
+    assert ok and "accepted" in text
+
+    esxi.bridging_security_policy_ok.return_value = False
+    ok, text = orchestrator._verify_trunk_security_policy()
+    assert not ok and "dropped" in text
+
+    esxi.find_port_group.return_value = None
+    ok, text = orchestrator._verify_trunk_security_policy()
+    assert not ok and "does not exist" in text
+
+    esxi.find_port_group.side_effect = RuntimeError("session gone")
+    ok, text = orchestrator._verify_trunk_security_policy()
+    assert not ok and "could not be checked" in text and "session gone" in text
+
+    monkeypatch.setattr(Settings, "ONLY_ON_GNS3", True)
+    assert orchestrator._verify_trunk_security_policy() is None
+
+
+@allure.title("verify_graph nimmt die Trunk-Richtlinie in die Ergebnisse auf")
+@allure.description(
+    "Überprüft, dass verify_graph die Trunk-Port-Gruppen-Prüfung als Ergebnis "
+    "liefert und ein Verstoß als fehlgeschlagener Check erscheint"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_041(monkeypatch) -> None:
+    monkeypatch.setattr(Settings, "ONLY_ON_GNS3", False)
+    orchestrator, esxi = _make_orchestrator()
+    esxi.list_port_groups.return_value = []
+    esxi.get_vm.return_value = None
+    esxi.find_port_group.return_value = MagicMock()
+    esxi.bridging_security_policy_ok.return_value = False
+
+    with patch("src.vm_orchestrator.vm_orchestrator.GNS3Connection") as gns3_cls:
+        gns3_cls.list_all_projects.return_value = []
+        results = orchestrator.verify_graph(Graph([], []), "lab")
+
+    assert any(not ok and "security policy rejects" in text for ok, text in results)
+
+
+@allure.title("repair_graph korrigiert die Sicherheitsrichtlinie der Trunk-Port-Gruppe")
+@allure.description(
+    "Überprüft, dass repair_graph die Richtlinie nur setzt, wenn die Port-Gruppe "
+    "existiert und abweicht - nicht bei korrekter Richtlinie, fehlender "
+    "Port-Gruppe, Dry-Run oder ONLY_ON_GNS3 - und einen ESXi-Fehler schluckt"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_042(monkeypatch) -> None:
+    monkeypatch.setattr(Settings, "ONLY_ON_GNS3", False)
+    monkeypatch.setattr(Settings, "IS_DRY_RUN", False)
+    orchestrator, esxi = _make_orchestrator()
+    name = Settings.ESXI.TRUNK_PORT_GROUP
+
+    esxi.find_port_group.return_value = MagicMock()
+    esxi.bridging_security_policy_ok.return_value = False
+    actions = orchestrator._repair_trunk_security_policy()
+    esxi.ensure_bridging_security_policy.assert_called_once_with(name)
+    assert len(actions) == 1 and name in actions[0]
+
+    esxi.reset_mock()
+    esxi.bridging_security_policy_ok.return_value = True
+    assert orchestrator._repair_trunk_security_policy() == []
+    esxi.ensure_bridging_security_policy.assert_not_called()
+
+    esxi.bridging_security_policy_ok.return_value = False
+    esxi.find_port_group.return_value = None
+    assert orchestrator._repair_trunk_security_policy() == []
+    esxi.ensure_bridging_security_policy.assert_not_called()
+
+    esxi.find_port_group.return_value = MagicMock()
+    monkeypatch.setattr(Settings, "IS_DRY_RUN", True)
+    assert orchestrator._repair_trunk_security_policy() == []
+    monkeypatch.setattr(Settings, "IS_DRY_RUN", False)
+    monkeypatch.setattr(Settings, "ONLY_ON_GNS3", True)
+    assert orchestrator._repair_trunk_security_policy() == []
+    esxi.ensure_bridging_security_policy.assert_not_called()
+
+    monkeypatch.setattr(Settings, "ONLY_ON_GNS3", False)
+    esxi.ensure_bridging_security_policy.side_effect = RuntimeError("boom")
+    assert orchestrator._repair_trunk_security_policy() == []
+
+
+@allure.title("repair_graph führt die Trunk-Reparatur am Ende mit aus")
+@allure.description(
+    "Überprüft, dass repair_graph die Aktion der Trunk-Richtlinien-Reparatur "
+    "in seine Ergebnisliste übernimmt"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.NORMAL)
+def vm_orchestrator_043(monkeypatch) -> None:
+    monkeypatch.setattr(Settings, "ONLY_ON_GNS3", False)
+    monkeypatch.setattr(Settings, "IS_DRY_RUN", False)
+    orchestrator, esxi = _make_orchestrator()
+    esxi.get_vm.return_value = None
+    esxi.find_port_group.return_value = MagicMock()
+    esxi.bridging_security_policy_ok.return_value = False
+
+    with patch("src.vm_orchestrator.vm_orchestrator.GNS3Connection") as gns3_cls:
+        gns3_cls.list_all_projects.return_value = []
+        actions = orchestrator.repair_graph(Graph([], []), "lab")
+
+    assert any("security policy of trunk port group" in a for a in actions)
+
+
+@allure.title(
+    "VLAN-Subinterfaces: nichts Erwartetes bedeutet kein SSH, Dry-Run startet nichts neu"
+)
+@allure.description(
+    "Überprüft, dass verify_/repair_vlan_subinterfaces ohne erwartete "
+    "Subinterfaces gar nicht erst per SSH auf die GNS3-VM gehen, dass ein Dry-Run "
+    "nur 'Would re-create' meldet und keine Cloud-Nodes neu startet, und dass ein "
+    "hängender Cloud-Node die übrigen Aktionen nicht verschluckt"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_044(monkeypatch) -> None:
+    monkeypatch.setattr(Settings, "ONLY_ON_ESXI", False)
+    monkeypatch.setattr(Settings, "IS_DRY_RUN", False)
+    orchestrator, _ = _make_orchestrator()
+
+    with patch.object(orchestrator, "_open_gns3_interface_setup") as opener:
+        empty = Graph([], [])
+        ok, text = orchestrator.verify_vlan_subinterfaces(empty, "u", None)
+        assert ok and "none needed" in text
+        assert orchestrator.repair_vlan_subinterfaces(empty, "lab", "u", None) == []
+        opener.assert_not_called()
+
+    graph, name = _graph_with_one_esxi_bridge()
+    setup = MagicMock()
+    setup.create_missing_subinterfaces.return_value = [name]
+    with (
+        patch.object(orchestrator, "_open_gns3_interface_setup", return_value=setup),
+        patch.object(
+            GNS3Connection,
+            "list_all_projects",
+            return_value=[{"name": "lab", "project_id": "p1"}],
+        ),
+        patch.object(
+            GNS3Connection,
+            "list_project_nodes",
+            return_value=[{"name": "PC_A", "node_id": "n1", "node_type": "cloud"}],
+        ),
+        patch.object(GNS3Connection, "stop_node", side_effect=RuntimeError("busy")),
+        patch.object(GNS3Connection, "start_node") as start,
+    ):
+        monkeypatch.setattr(Settings, "IS_DRY_RUN", True)
+        actions = orchestrator.repair_vlan_subinterfaces(graph, "lab", "u", None)
+        assert actions == [f"Would re-create VLAN subinterface {name} on the GNS3 VM"]
+        start.assert_not_called()
+
+        monkeypatch.setattr(Settings, "IS_DRY_RUN", False)
+        actions = orchestrator.repair_vlan_subinterfaces(graph, "lab", "u", None)
+
+    assert actions[0] == f"Re-created VLAN subinterface {name} on the GNS3 VM"
+    assert actions[1].startswith("Could not restart the Cloud node of 'PC_A'")

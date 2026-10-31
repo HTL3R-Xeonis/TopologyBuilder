@@ -527,7 +527,7 @@ def backend_016(tmp_path) -> None:
 @allure.tag("negativ-test", "backend")
 @allure.feature("backend")
 @allure.severity(allure.severity_level.NORMAL)
-def backend_subinterface_repair_failure(tmp_path) -> None:
+def backend_017(tmp_path) -> None:
     _reset_settings()
     topology_file = _copy_topology(tmp_path)
     backend, orchestrator = _make_backend()

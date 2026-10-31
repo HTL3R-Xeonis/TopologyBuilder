@@ -280,8 +280,9 @@ class TopologyBackend:
         its GNS3 project. With fix=True, first applies
         VMOrchestrator.repair_graph's curated low-risk repairs (start a
         stopped GNS3 node, power on a stopped ESXi VM, create a missing
-        port group) and verifies afterwards, so the result reflects what's
-        still wrong after the repairs.
+        port group, fix the trunk port group's security policy, re-create
+        the GNS3 VM's lost VLAN subinterfaces) and verifies afterwards, so
+        the result reflects what's still wrong after the repairs.
         :param topology_file: path to the topology YAML file
         :param fix: apply the automatic repairs before verifying
         :return: (descriptions of the repairs applied - empty unless fix, [(passed, description), ...])

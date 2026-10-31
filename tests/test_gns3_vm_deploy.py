@@ -507,7 +507,7 @@ def gns3_vm_deploy_901() -> None:
 @allure.tag("positiv-test", "gns3_vm_deploy")
 @allure.feature("gns3_vm_deploy")
 @allure.severity(allure.severity_level.NORMAL)
-def gns3_vm_deploy_resources() -> None:
+def gns3_vm_deploy_902() -> None:
     for kwargs, expected in (
         ({}, (4, 8192)),
         ({"cpus": 2, "memory_mb": 4096}, (2, 4096)),

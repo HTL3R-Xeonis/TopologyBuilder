@@ -209,7 +209,7 @@ def _setup_with_existing(existing):
 @allure.tag("positiv-test", "gns3-vm-interface-setup")
 @allure.feature("gns3_vm_interface_setup")
 @allure.severity(allure.severity_level.CRITICAL)
-def gns3_vm_interface_setup_missing() -> None:
+def gns3_vm_interface_setup_005() -> None:
     _reset_settings()
     graph, node_a, node_b = _graph_with_two_gns3_bridges()
     name_a = node_a.interfaces["ens160"].vlan.subinterface_name
@@ -232,7 +232,7 @@ def gns3_vm_interface_setup_missing() -> None:
 @allure.tag("positiv-test", "gns3-vm-interface-setup")
 @allure.feature("gns3_vm_interface_setup")
 @allure.severity(allure.severity_level.CRITICAL)
-def gns3_vm_interface_setup_create_missing() -> None:
+def gns3_vm_interface_setup_006() -> None:
     _reset_settings()
     graph, node_a, node_b = _graph_with_two_gns3_bridges()
     name_a = node_a.interfaces["ens160"].vlan.subinterface_name

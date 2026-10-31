@@ -217,3 +217,25 @@ def api_handler_008() -> None:
         APIHandler.delete("http://example.com/thing", timeout=300)
 
     assert mock_delete.call_args.kwargs["timeout"] == 300
+
+
+@allure.title("get verwendet standardmäßig 5 Sekunden und lässt sich überschreiben")
+@allure.description(
+    "Überprüft, dass APIHandler.get() ohne timeout-Parameter weiterhin 5 "
+    "Sekunden an requests.get übergibt und einen expliziten timeout "
+    "durchreicht (vorher war der Wert fest eingebaut, wie bei delete früher)"
+)
+@allure.tag("positiv-test", "api-handler")
+@allure.feature("api_handler")
+@allure.severity(allure.severity_level.NORMAL)
+def api_handler_009() -> None:
+    response = MagicMock()
+    response.raise_for_status = MagicMock()
+
+    with patch(
+        "src.connections.api_handler.requests.get", return_value=response
+    ) as mock_get:
+        APIHandler.get("http://example.com/thing")
+        APIHandler.get("http://example.com/thing", timeout=60)
+
+    assert [call.kwargs["timeout"] for call in mock_get.call_args_list] == [5, 60]

@@ -1548,7 +1548,7 @@ def esxi_connection_056() -> None:
 @allure.tag("positiv-test", "esxi-connection")
 @allure.feature("esxi_connection")
 @allure.severity(allure.severity_level.NORMAL)
-def esxi_connection_set_vm_resources() -> None:
+def esxi_connection_063() -> None:
     from pyVmomi import vim
 
     conn = _make_esxi_connection()

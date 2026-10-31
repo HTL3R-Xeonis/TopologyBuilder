@@ -512,17 +512,23 @@ def verify(
         "--fix",
         help="Before checking, apply a curated set of low-risk automatic "
         "fixes: power on an ESXi VM that exists but isn't powered on, "
-        "start a GNS3 node that exists but isn't started, and create a "
-        "missing port group. Never redeploys a genuinely missing VM/node "
-        "or recreates a missing Cloud-node bridge - use 'deploy "
-        "--incremental' for that. Then re-runs the same checks so the "
-        "report reflects what's still wrong afterward.",
+        "start a GNS3 node that exists but isn't started, create a "
+        "missing port group, fix the trunk port group's security policy, "
+        "and re-create the VLAN subinterfaces a rebooted GNS3 VM lost "
+        "(restarting the Cloud nodes of the ESXi VMs). Never redeploys a "
+        "genuinely missing VM/node or recreates a missing Cloud-node "
+        "bridge - use 'deploy --incremental' for that. Then re-runs the "
+        "same checks so the report reflects what's still wrong afterward.",
     ),
 ) -> None:
     """
     Runs a structural health check against a deployed topology: confirms
     every GNS3 node is started, every ESXi VM is powered on, the trunk NIC
-    is wired correctly, and both sides of a link agree on VLAN ID. This is
+    is wired correctly, the trunk port group accepts promiscuous mode/MAC
+    changes/forged transmits, the GNS3 VM has all its VLAN subinterfaces
+    (they are lost on a reboot of that VM; the GNS3 VM's SSH login comes
+    from the GNS3_PASSWORD environment variable), and both sides of a
+    link agree on VLAN ID. This is
     NOT a connectivity/ping test - this project never assigns an IP address
     to any node from its own config, so there is no address to ping; an
     ESXi VM's IP (if VMware Tools reports one) is shown for information
@@ -548,6 +554,15 @@ def verify(
 
     if fix:
         actions = orchestrator.repair_graph(graph, project_name)
+        try:
+            actions += orchestrator.repair_vlan_subinterfaces(
+                graph, project_name, Settings.GNS3.USERNAME, Settings.GNS3.PASSWORD
+            )
+        except Exception as exc:
+            typer.secho(
+                f"Could not repair the GNS3 VM's VLAN subinterfaces: {exc}",
+                fg=typer.colors.RED,
+            )
         if actions:
             for action in actions:
                 typer.secho(f"[FIXED] {action}", fg=typer.colors.YELLOW)
@@ -555,6 +570,11 @@ def verify(
             typer.echo("No automatic fixes were applicable.")
 
     results = orchestrator.verify_graph(graph, project_name)
+    results.append(
+        orchestrator.verify_vlan_subinterfaces(
+            graph, Settings.GNS3.USERNAME, Settings.GNS3.PASSWORD
+        )
+    )
 
     passed = 0
     for ok, description in results:

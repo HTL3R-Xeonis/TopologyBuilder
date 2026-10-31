@@ -374,6 +374,10 @@ def cli_011() -> None:
             (True, "R1: started"),
             (True, "VM1: powered on"),
         ]
+        orchestrator_cls.return_value.verify_vlan_subinterfaces.return_value = (
+            True,
+            "GNS3 VM VLAN subinterfaces: all 1 present",
+        )
 
         result = runner.invoke(
             app,
@@ -390,7 +394,8 @@ def cli_011() -> None:
 
     assert result.exit_code == 0, result.output
     assert "[OK]" in result.output
-    assert "2/2 checks passed" in result.output
+    assert "3/3 checks passed" in result.output
+    assert "VLAN subinterfaces" in result.output
 
 
 @allure.title("verify-Befehl bricht mit Exit-Code 1 ab, wenn ein Check fehlschlägt")
@@ -412,6 +417,10 @@ def cli_012() -> None:
             (True, "R1: started"),
             (False, "VM1: not found"),
         ]
+        orchestrator_cls.return_value.verify_vlan_subinterfaces.return_value = (
+            True,
+            "GNS3 VM VLAN subinterfaces: all 1 present",
+        )
 
         result = runner.invoke(
             app,
@@ -428,7 +437,7 @@ def cli_012() -> None:
 
     assert result.exit_code == 1
     assert "[FAIL]" in result.output
-    assert "1/2 checks passed" in result.output
+    assert "2/3 checks passed" in result.output
 
 
 @allure.title(
@@ -1010,3 +1019,42 @@ def cli_027(tmp_path) -> None:
 
     assert result.exit_code == 0, result.output
     assert project_name_during_run == "generated_lab"
+
+
+@allure.title(
+    "verify --fix repariert die VLAN-Subinterfaces und meldet einen Reparaturfehler, ohne abzustürzen"
+)
+@allure.description(
+    "Überprüft, dass verify --fix repair_vlan_subinterfaces aufruft und die "
+    "Aktionen als [FIXED] ausgibt, und dass ein Fehler dieser Reparatur (z. B. "
+    "SSH nicht erreichbar) gemeldet wird, der Befehl aber weiterprüft"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.NORMAL)
+def cli_028() -> None:
+    args = ["verify", "--address", "10.20.20.202", "--esxi_username", "root"]
+    args += ["--esxi_password", "pw", "--fix"]
+    for repair in (
+        {"return_value": ["Re-created VLAN subinterface eth1.7 on the GNS3 VM"]},
+        {"side_effect": RuntimeError("ssh down")},
+    ):
+        with (
+            patch("src.cli.TopologyFileValidation"),
+            patch("src.cli.Graph"),
+            patch("src.cli.VMOrchestrator") as orchestrator_cls,
+        ):
+            orchestrator = orchestrator_cls.return_value
+            orchestrator.repair_graph.return_value = []
+            orchestrator.repair_vlan_subinterfaces.configure_mock(**repair)
+            orchestrator.verify_graph.return_value = [(True, "R1: started")]
+            orchestrator.verify_vlan_subinterfaces.return_value = (True, "ok")
+
+            result = runner.invoke(app, args)
+
+        assert result.exit_code == 0, result.output
+        assert "2/2 checks passed" in result.output
+        if "return_value" in repair:
+            assert "[FIXED] Re-created VLAN subinterface eth1.7" in result.output
+        else:
+            assert "Could not repair the GNS3 VM's VLAN subinterfaces" in result.output
