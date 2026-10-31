@@ -273,24 +273,31 @@ class TopologyBackend:
         validator.save()
 
     def verify(
-        self, topology_file: str, fix: bool = False
+        self,
+        topology_file: str,
+        fix: bool = False,
+        fix_vlan_subinterfaces: bool = False,
     ) -> tuple[list[str], list[tuple[bool, str]]]:
         """
         Runs VMOrchestrator.verify_graph against topology_file's graph and
         its GNS3 project. With fix=True, first applies
         VMOrchestrator.repair_graph's curated low-risk repairs (start a
         stopped GNS3 node, power on a stopped ESXi VM, create a missing
-        port group, fix the trunk port group's security policy, re-create
-        the GNS3 VM's lost VLAN subinterfaces) and verifies afterwards, so
-        the result reflects what's still wrong after the repairs.
+        port group, fix the trunk port group's security policy) and verifies
+        afterwards, so the result reflects what's still wrong after the
+        repairs. Re-creating the GNS3 VM's lost VLAN subinterfaces is NOT
+        part of fix: on the project's lab that step (it also restarts the
+        Cloud nodes) twice took the ESXi host's network down within seconds,
+        so it only runs when asked for with fix_vlan_subinterfaces.
         :param topology_file: path to the topology YAML file
         :param fix: apply the automatic repairs before verifying
+        :param fix_vlan_subinterfaces: additionally re-create the lost VLAN subinterfaces (see above)
         :return: (descriptions of the repairs applied - empty unless fix, [(passed, description), ...])
         """
         _, graph = self._load(topology_file)
         project_name = self._set_project_name(topology_file)
         actions = self._orchestrator.repair_graph(graph, project_name) if fix else []
-        if fix:
+        if fix_vlan_subinterfaces:
             actions += self._repair_vlan_subinterfaces(graph, project_name)
         results = self._orchestrator.verify_graph(graph, project_name)
         results.append(
@@ -312,7 +319,8 @@ class TopologyBackend:
     def repair_vlan_subinterfaces(self, topology_file: str) -> list[str]:
         """
         Re-creates the VLAN subinterfaces a rebooted GNS3 VM lost, and re-binds the Cloud
-        nodes - the one repair that is cheap and safe enough to run by itself.
+        nodes. Never run it unattended: on the project's lab it twice took the ESXi
+        host's network down within seconds (cause not yet understood).
         :return: what was done, empty if nothing was missing
         """
         _, graph = self._load(topology_file)

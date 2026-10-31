@@ -485,7 +485,9 @@ def backend_015(tmp_path) -> None:
     )
     orchestrator.verify_vlan_subinterfaces.return_value = (True, "subinterfaces ok")
 
-    actions, results = backend.verify(topology_file, fix=True)
+    actions, results = backend.verify(
+        topology_file, fix=True, fix_vlan_subinterfaces=True
+    )
 
     assert calls == ["repair", "subinterfaces", "verify"]
     assert actions == [
@@ -536,7 +538,31 @@ def backend_017(tmp_path) -> None:
     orchestrator.verify_graph.return_value = []
     orchestrator.verify_vlan_subinterfaces.return_value = (False, "missing")
 
-    actions, results = backend.verify(topology_file, fix=True)
+    actions, results = backend.verify(
+        topology_file, fix=True, fix_vlan_subinterfaces=True
+    )
 
     assert actions == []
     assert results == [(False, "missing")]
+
+
+@allure.title("verify(fix=True) legt die VLAN-Subinterfaces nicht von selbst an")
+@allure.description(
+    "Überprüft, dass verify(fix=True) die Subinterfaces nicht repariert (diese "
+    "Reparatur hat im Lab zweimal den ESXi-Host vom Netz getrennt) und dass nur "
+    "fix_vlan_subinterfaces=True sie auslöst"
+)
+@allure.tag("positiv-test", "backend")
+@allure.feature("backend")
+@allure.severity(allure.severity_level.CRITICAL)
+def backend_018(tmp_path) -> None:
+    _reset_settings()
+    topology_file = _copy_topology(tmp_path)
+    backend, orchestrator = _make_backend()
+    orchestrator.repair_graph.return_value = []
+    orchestrator.verify_graph.return_value = []
+    orchestrator.verify_vlan_subinterfaces.return_value = (False, "9 of 9 missing")
+
+    backend.verify(topology_file, fix=True)
+
+    orchestrator.repair_vlan_subinterfaces.assert_not_called()

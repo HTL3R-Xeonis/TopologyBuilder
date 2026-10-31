@@ -513,12 +513,19 @@ def verify(
         help="Before checking, apply a curated set of low-risk automatic "
         "fixes: power on an ESXi VM that exists but isn't powered on, "
         "start a GNS3 node that exists but isn't started, create a "
-        "missing port group, fix the trunk port group's security policy, "
-        "and re-create the VLAN subinterfaces a rebooted GNS3 VM lost "
-        "(restarting the Cloud nodes of the ESXi VMs). Never redeploys a "
+        "missing port group, fix the trunk port group's security policy. "
+        "Never redeploys a "
         "genuinely missing VM/node or recreates a missing Cloud-node "
         "bridge - use 'deploy --incremental' for that. Then re-runs the "
         "same checks so the report reflects what's still wrong afterward.",
+    ),
+    fix_vlan_subinterfaces: bool = typer.Option(
+        False,
+        "--fix-vlan-subinterfaces",
+        help="ALSO re-create the VLAN subinterfaces a rebooted GNS3 VM lost "
+        "and restart the Cloud nodes of the ESXi VMs. WARNING: on the "
+        "project's lab this twice took the ESXi host's network down within "
+        "seconds; only use it with someone ready to restart the blade.",
     ),
 ) -> None:
     """
@@ -552,17 +559,18 @@ def verify(
     orchestrator = _make_orchestrator()
     project_name = _resolve_project_name()
 
-    if fix:
-        actions = orchestrator.repair_graph(graph, project_name)
-        try:
-            actions += orchestrator.repair_vlan_subinterfaces(
-                graph, project_name, Settings.GNS3.USERNAME, Settings.GNS3.PASSWORD
-            )
-        except Exception as exc:
-            typer.secho(
-                f"Could not repair the GNS3 VM's VLAN subinterfaces: {exc}",
-                fg=typer.colors.RED,
-            )
+    if fix or fix_vlan_subinterfaces:
+        actions = orchestrator.repair_graph(graph, project_name) if fix else []
+        if fix_vlan_subinterfaces:
+            try:
+                actions += orchestrator.repair_vlan_subinterfaces(
+                    graph, project_name, Settings.GNS3.USERNAME, Settings.GNS3.PASSWORD
+                )
+            except Exception as exc:
+                typer.secho(
+                    f"Could not repair the GNS3 VM's VLAN subinterfaces: {exc}",
+                    fg=typer.colors.RED,
+                )
         if actions:
             for action in actions:
                 typer.secho(f"[FIXED] {action}", fg=typer.colors.YELLOW)

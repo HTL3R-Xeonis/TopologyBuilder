@@ -892,7 +892,8 @@ class VMOrchestrator:
             return (
                 False,
                 f"GNS3 VM VLAN subinterfaces: {len(missing)} of {total} missing "
-                f"({', '.join(missing)}) - links to ESXi VMs carry no traffic",
+                f"({', '.join(missing)}) - links to ESXi VMs carry no traffic; re-creating them is a separate, "
+                f"explicit step (--fix-vlan-subinterfaces), see the warning there",
             )
         return True, f"GNS3 VM VLAN subinterfaces: all {total} present"
 

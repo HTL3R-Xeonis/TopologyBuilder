@@ -1022,10 +1022,10 @@ def cli_027(tmp_path) -> None:
 
 
 @allure.title(
-    "verify --fix repariert die VLAN-Subinterfaces und meldet einen Reparaturfehler, ohne abzustürzen"
+    "verify --fix-vlan-subinterfaces repariert die VLAN-Subinterfaces und meldet einen Reparaturfehler, ohne abzustürzen"
 )
 @allure.description(
-    "Überprüft, dass verify --fix repair_vlan_subinterfaces aufruft und die "
+    "Überprüft, dass verify --fix-vlan-subinterfaces repair_vlan_subinterfaces aufruft und die "
     "Aktionen als [FIXED] ausgibt, und dass ein Fehler dieser Reparatur (z. B. "
     "SSH nicht erreichbar) gemeldet wird, der Befehl aber weiterprüft"
 )
@@ -1034,7 +1034,7 @@ def cli_027(tmp_path) -> None:
 @allure.severity(allure.severity_level.NORMAL)
 def cli_028() -> None:
     args = ["verify", "--address", "10.20.20.202", "--esxi_username", "root"]
-    args += ["--esxi_password", "pw", "--fix"]
+    args += ["--esxi_password", "pw", "--fix-vlan-subinterfaces"]
     for repair in (
         {"return_value": ["Re-created VLAN subinterface eth1.7 on the GNS3 VM"]},
         {"side_effect": RuntimeError("ssh down")},
@@ -1058,3 +1058,39 @@ def cli_028() -> None:
             assert "[FIXED] Re-created VLAN subinterface eth1.7" in result.output
         else:
             assert "Could not repair the GNS3 VM's VLAN subinterfaces" in result.output
+
+
+@allure.title("verify --fix legt die VLAN-Subinterfaces nicht mehr von selbst an")
+@allure.description(
+    "Überprüft, dass verify --fix die Subinterfaces nicht anfasst (die Reparatur "
+    "hat im Lab zweimal das Netz des ESXi-Hosts lahmgelegt) und nur die ausdrückliche "
+    "Option --fix-vlan-subinterfaces sie auslöst"
+)
+@allure.tag("positiv-test", "cli")
+@allure.feature("cli")
+@allure.severity(allure.severity_level.CRITICAL)
+def cli_029() -> None:
+    args = [
+        "verify",
+        "--address",
+        "10.20.20.202",
+        "--esxi_username",
+        "root",
+        "--esxi_password",
+        "pw",
+    ]
+    with (
+        patch("src.cli.TopologyFileValidation"),
+        patch("src.cli.Graph"),
+        patch("src.cli.VMOrchestrator") as orchestrator_cls,
+    ):
+        orchestrator = orchestrator_cls.return_value
+        orchestrator.repair_graph.return_value = []
+        orchestrator.verify_graph.return_value = [(True, "R1: started")]
+        orchestrator.verify_vlan_subinterfaces.return_value = (True, "ok")
+
+        result = runner.invoke(app, args + ["--fix"])
+
+    assert result.exit_code == 0, result.output
+    orchestrator.repair_graph.assert_called_once()
+    orchestrator.repair_vlan_subinterfaces.assert_not_called()
