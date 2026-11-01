@@ -582,3 +582,131 @@ def backend_018(tmp_path) -> None:
     backend.verify(topology_file, fix=True)
 
     orchestrator.repair_vlan_subinterfaces.assert_not_called()
+
+
+def _parallel_live_setup():
+    live_nodes = [
+        {
+            "name": "R1",
+            "node_id": "n-r1",
+            "ports": [
+                {"name": "Gi0/0", "adapter_number": 0, "port_number": 0},
+                {"name": "Gi0/1", "adapter_number": 1, "port_number": 0},
+            ],
+        },
+        {
+            "name": "R2",
+            "node_id": "n-r2",
+            "ports": [
+                {"name": "Gi0/0", "adapter_number": 0, "port_number": 0},
+                {"name": "Gi0/1", "adapter_number": 1, "port_number": 0},
+            ],
+        },
+    ]
+    live_links = [
+        {
+            "link_id": "link-a",
+            "nodes": [
+                {"node_id": "n-r1", "adapter_number": 0, "port_number": 0},
+                {"node_id": "n-r2", "adapter_number": 0, "port_number": 0},
+            ],
+        },
+        {
+            "link_id": "link-b",
+            "nodes": [
+                {"node_id": "n-r1", "adapter_number": 1, "port_number": 0},
+                {"node_id": "n-r2", "adapter_number": 1, "port_number": 0},
+            ],
+        },
+    ]
+    return live_nodes, live_links
+
+
+def _remove_parallel(tmp_path, live_nodes, live_links, **interfaces):
+    topology_file = _copy_topology(tmp_path)
+    backend, _ = _make_backend()
+    with (
+        patch(
+            "src.backend.GNS3Connection.list_all_projects",
+            return_value=[{"name": "topology", "project_id": "proj-1"}],
+        ),
+        patch("src.backend.GNS3Connection.list_project_nodes", return_value=live_nodes),
+        patch("src.backend.GNS3Connection.list_project_links", return_value=live_links),
+        patch("src.backend.GNS3Connection.delete_link") as mock_delete_link,
+    ):
+        backend.remove_link(topology_file, "R1", "R2", **interfaces)
+    return mock_delete_link
+
+
+@allure.title(
+    "remove_link löscht von mehreren parallelen Links nur den mit den angegebenen Interfaces"
+)
+@allure.description(
+    "Überprüft, dass remove_link() mit if1/if2 aus zwei live Links zwischen denselben "
+    "Knoten genau den mit den passenden GNS3-Portnamen löscht, auch bei vertauschten "
+    "Endpunkten, und bei mehrdeutigen Angaben nichts rät"
+)
+@allure.tag("positiv-test", "backend")
+@allure.feature("backend")
+@allure.severity(allure.severity_level.CRITICAL)
+def backend_019(tmp_path) -> None:
+    _reset_settings()
+    nodes, links = _parallel_live_setup()
+
+    deleted = _remove_parallel(tmp_path, nodes, links, if1="Gi0/1", if2="Gi0/1")
+    deleted.assert_called_once_with("10.20.20.231", 80, "proj-1", "link-b")
+
+    links[0]["nodes"].reverse()  # endpoint order in GNS3's link must not matter
+    deleted = _remove_parallel(tmp_path, nodes, links, if1="Gi0/0", if2="Gi0/0")
+    deleted.assert_called_once_with("10.20.20.231", 80, "proj-1", "link-a")
+
+    with pytest.raises(ValueError, match="cannot tell which one|no live link"):
+        _remove_parallel(tmp_path, nodes, links, if1="Gi9/9", if2="Gi9/9")
+
+
+@allure.title(
+    "remove_link nimmt bei nur einem Link immer diesen, auch bei abweichendem Interface-Namen"
+)
+@allure.description(
+    "Überprüft, dass bei genau einem Link zwischen zwei Knoten dieser gelöscht wird, auch wenn "
+    "der Interface-Name der YAML nicht zum Portnamen des Cloud-Knotens passt (VM-Interface "
+    "ens160 gegen Port eth0), und dass ohne Interface-Angaben wie früher der erste Link gilt"
+)
+@allure.tag("positiv-test", "backend")
+@allure.feature("backend")
+@allure.severity(allure.severity_level.CRITICAL)
+def backend_020(tmp_path) -> None:
+    _reset_settings()
+    nodes, links = _parallel_live_setup()
+    nodes[1]["node_type"] = (
+        "cloud"  # the GNS3 side of an ESXi VM: its port is named after the host NIC
+    )
+    nodes[1]["ports"] = [{"name": "eth0", "adapter_number": 0, "port_number": 0}]
+
+    deleted = _remove_parallel(tmp_path, nodes, links[:1], if1="Gi0/0", if2="ens160")
+    deleted.assert_called_once_with("10.20.20.231", 80, "proj-1", "link-a")
+
+    deleted = _remove_parallel(
+        tmp_path, nodes, links
+    )  # no interfaces: first link, like before
+    deleted.assert_called_once_with("10.20.20.231", 80, "proj-1", "link-a")
+
+
+@allure.title(
+    "remove_link löscht keinen anderen Link, wenn der gemeinte live gar nicht existiert"
+)
+@allure.description(
+    "Überprüft, dass remove_link() bei genau einem live Link zwischen zwei GNS3-Nodes nichts live löscht, "
+    "wenn die angegebenen Interfaces nicht zu seinen Ports passen (die YAML führt einen zweiten Link, den "
+    "GNS3 nie bekommen hat), die Kante aber trotzdem aus der YAML entfernt wird"
+)
+@allure.tag("negativ-test", "backend")
+@allure.feature("backend")
+@allure.severity(allure.severity_level.CRITICAL)
+def backend_021(tmp_path) -> None:
+    _reset_settings()
+    nodes, links = _parallel_live_setup()
+
+    deleted = _remove_parallel(tmp_path, nodes, links[:1], if1="Gi0/1", if2="Gi0/1")
+
+    deleted.assert_not_called()

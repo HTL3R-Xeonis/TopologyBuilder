@@ -595,7 +595,9 @@ def vm_orchestrator_017() -> None:
     gns3_connection = MagicMock()
     VMOrchestrator._partially_link_gns3_nodes(gns3_connection, esxi_node)
 
-    gns3_connection.connect_nodes.assert_called_once_with(esxi_node, gns3_node)
+    gns3_connection.connect_nodes.assert_called_once_with(
+        esxi_node, gns3_node, esxi_if, None
+    )
 
 
 @allure.title("deploy_graph stellt die vSwitch in beiden Modi sicher")
@@ -1567,3 +1569,60 @@ def vm_orchestrator_045(monkeypatch) -> None:
     monkeypatch.setattr(Settings, "ONLY_ON_ESXI", True)
     assert orchestrator.install_persistent_vlan_config(graph, "u", None) == []
     assert orchestrator.verify_persistent_vlan_config(graph, "u", None)[0]
+
+
+@allure.title(
+    "_partially_link_gns3_nodes verlinkt jede parallele Kante mit ihren eigenen Interfaces"
+)
+@allure.description(
+    "Überprüft, dass bei zwei Kanten zwischen denselben Nodes connect_nodes zweimal mit den jeweils "
+    "richtigen Interface-Paaren aufgerufen wird (nicht zweimal mit dem ersten Interface)"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_046() -> None:
+    Settings.API.LITERAL_API_VALUES = True
+    graph = Graph(
+        [{"image": "VPCS", "role": "ROUTER", "names": ["R1", "R2"]}],
+        [["R1", "gi0/0", "R2", "gi0/0"], ["R1", "gi0/1", "R2", "gi0/1"]],
+    )
+    r1, r2 = graph.nodes["R1"], graph.nodes["R2"]
+    r1.gns3_node_info = {"node_id": "n1"}
+    r2.gns3_node_info = {"node_id": "n2"}
+    gns3_connection = MagicMock()
+
+    VMOrchestrator._partially_link_gns3_nodes(gns3_connection, r2)
+
+    calls = gns3_connection.connect_nodes.call_args_list
+    assert [(c.args[2].name, c.args[3].name) for c in calls] == [
+        ("gi0/0", "gi0/0"),
+        ("gi0/1", "gi0/1"),
+    ]
+    assert calls[1].args[3] is r1.interfaces["gi0/1"]
+
+
+@allure.title("_wanted_link_ports findet die Endpunkte eines Links über die Portnamen")
+@allure.description(
+    "Überprüft, dass die verify-Hilfsfunktion für zwei Interfaces die (node_id, adapter, port)-Endpunkte "
+    "über die GNS3-Portnamen bestimmt, ohne Beachtung der Groß-/Kleinschreibung, und None liefert, wenn "
+    "ein Port nicht über den Namen zu finden ist"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.NORMAL)
+def vm_orchestrator_047() -> None:
+    ports = [
+        {"name": "Gi0/0", "adapter_number": 0, "port_number": 0},
+        {"name": "Gi0/1", "adapter_number": 1, "port_number": 0},
+    ]
+    a = {"node_id": "n1", "ports": ports}
+    b = {"node_id": "n2", "ports": ports}
+
+    assert VMOrchestrator._wanted_link_ports(a, "gi0/1", b, "Gi0/1") == {
+        ("n1", 1, 0),
+        ("n2", 1, 0),
+    }
+    assert (
+        VMOrchestrator._wanted_link_ports(a, "gi0/1", {"node_id": "n2"}, "eth0") is None
+    )

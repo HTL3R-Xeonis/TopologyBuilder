@@ -28,6 +28,7 @@ class Interface:
         self._name: str = if_name
         self._parent: GenericNode = node
         self._neighbour: GenericNode | None = None
+        self._peer: Interface | None = None
         self._vlan: VirtualLan | None = None
 
     @property
@@ -78,13 +79,27 @@ class Interface:
         """
         return self._neighbour
 
-    def connect_to(self, new_neighbour: GenericNode) -> None:
+    @property
+    def peer(self) -> Interface | None:
+        """
+        The interface on the other end of this link. Two nodes can be linked more than once over different
+        interfaces, which ``neighbour`` (only a node) cannot express - ``GenericNode.get_interface`` returns
+        just the first one.
+        :return: Returns this attribute; None if unknown (an interface connected without a peer)
+        """
+        return self._peer
+
+    def connect_to(
+        self, new_neighbour: GenericNode, peer: Interface | None = None
+    ) -> None:
         """
         Connects this interface to the given neighbour Node.
         :param new_neighbour: Node to which this interface will be connected to.
+        :param peer: The interface of the neighbour that this one is linked with (optional)
         :return:
         """
         self._neighbour = new_neighbour
+        self._peer = peer
 
     def __str__(self) -> str:
         """

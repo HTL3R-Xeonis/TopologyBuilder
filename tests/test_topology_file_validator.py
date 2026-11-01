@@ -538,3 +538,34 @@ def conf_file_031(tmp_path) -> None:
     )
     assert "PC99" in pc_group["names"]
     assert ["PC99", "gi0/0", "SW-C1", "gi0/9"] in reloaded.edges
+
+
+@allure.title(
+    "remove_edge entfernt mit Interfaces nur die eine von mehreren parallelen Edges"
+)
+@allure.description(
+    "Überprüft, dass remove_edge() mit if1/if2 nur die Edge entfernt, die genau diese "
+    "Interfaces benutzt (auch bei vertauschter Knotenreihenfolge), und dass ein Interface "
+    "allein schon reicht; ohne Interfaces bleibt das alte Verhalten (alle Edges des Paars)"
+)
+@allure.tag("positiv-test", "config-file")
+@allure.feature("config_file")
+@allure.severity(allure.severity_level.CRITICAL)
+def conf_file_032() -> None:
+    first = ["PC1", "gi0/1", "PC2", "gi0/1"]
+    second = ["PC1", "gi0/2", "PC2", "gi0/2"]
+
+    c = TopologyFileValidation(add_folder_path("config_file_003.yml"))
+    c.validate_file()
+    c.add_edge(*first)
+    c.add_edge(*second)
+    c.remove_edge("PC2", "PC1", "gi0/2", "gi0/2")  # reversed order on purpose
+    assert first in c.edges and second not in c.edges
+
+    c.add_edge(*second)
+    c.remove_edge("PC1", "PC2", if1="gi0/1")  # one interface is enough
+    assert first not in c.edges and second in c.edges
+
+    c.add_edge(*first)
+    c.remove_edge("PC1", "PC2")  # no interfaces: every edge between the two
+    assert first not in c.edges and second not in c.edges

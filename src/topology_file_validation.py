@@ -272,14 +272,32 @@ class TopologyFileValidation:
         """Adds an edge to self.edges. Does not validate or save."""
         self.edges.append([node1, if1, node2, if2])
 
-    def remove_edge(self, node1: str, node2: str) -> None:
+    def remove_edge(
+        self,
+        node1: str,
+        node2: str,
+        if1: str | None = None,
+        if2: str | None = None,
+    ) -> None:
         """
-        Removes any edge directly connecting node1 and node2 (regardless
-        of which side is listed first). Does not validate or save.
+        Removes the edge(s) directly connecting node1 and node2 (regardless
+        of which side is listed first). Without interfaces that is every
+        edge between the two nodes; with ``if1`` (interface on node1) and/or
+        ``if2`` (interface on node2) only the edge using exactly those
+        interfaces, so one of several parallel links can be removed.
+        Does not validate or save.
         """
-        self.edges = [
-            edge for edge in self.edges if {edge[0], edge[2]} != {node1, node2}
-        ]
+
+        def matches(edge: list[str]) -> bool:
+            if edge[0] == node1 and edge[2] == node2:
+                near, far = edge[1], edge[3]
+            elif edge[0] == node2 and edge[2] == node1:
+                near, far = edge[3], edge[1]
+            else:
+                return False
+            return (if1 is None or near == if1) and (if2 is None or far == if2)
+
+        self.edges = [edge for edge in self.edges if not matches(edge)]
 
     def save(self) -> None:
         """

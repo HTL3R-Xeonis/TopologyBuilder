@@ -550,7 +550,7 @@ class VMOrchestrator:
                 if neighbour is None:
                     continue
 
-                neighbour_interface = neighbour.get_interface(node)
+                neighbour_interface = interface.peer or neighbour.get_interface(node)
                 neighbour_if_name = (
                     neighbour_interface.name if neighbour_interface else "?"
                 )
@@ -613,8 +613,23 @@ class VMOrchestrator:
                         )
                         continue
                     ids = {node_gns3.get("node_id"), neighbour_gns3.get("node_id")}
+                    wanted_ports = self._wanted_link_ports(
+                        node_gns3, if_name, neighbour_gns3, neighbour_if_name
+                    )
                     linked = any(
                         {endpoint["node_id"] for endpoint in link["nodes"]} == ids
+                        and (
+                            wanted_ports is None
+                            or {
+                                (
+                                    endpoint["node_id"],
+                                    endpoint.get("adapter_number"),
+                                    endpoint.get("port_number"),
+                                )
+                                for endpoint in link["nodes"]
+                            }
+                            == wanted_ports
+                        )
                         for link in gns3_links
                     )
                     results.append(
@@ -625,6 +640,30 @@ class VMOrchestrator:
                     )
 
         return results
+
+    @staticmethod
+    def _wanted_link_ports(
+        node_gns3: dict, if_name: str, neighbour_gns3: dict, neighbour_if_name: str
+    ) -> set[tuple] | None:
+        """
+        The (node_id, adapter, port) endpoints a link between these two interfaces has, found by GNS3
+        port name, so that of several links between the same two nodes the right one is checked.
+        None if a port cannot be found by name (the check then only compares the two nodes).
+        """
+
+        def endpoint(gns3_node: dict, name: str):
+            for port in gns3_node.get("ports", []):
+                if str(port.get("name", "")).lower() == name.lower():
+                    return (
+                        gns3_node.get("node_id"),
+                        port.get("adapter_number"),
+                        port.get("port_number"),
+                    )
+            return None
+
+        first = endpoint(node_gns3, if_name)
+        second = endpoint(neighbour_gns3, neighbour_if_name)
+        return {first, second} if first and second else None
 
     def find_orphans(self, graph: Graph, project_name: str) -> list[dict[str, str]]:
         """
@@ -833,7 +872,12 @@ class VMOrchestrator:
                 continue
             if node.env == Environment.ON_ESXI and neighbour.env == Environment.ON_ESXI:
                 continue
-            gns3_connection.connect_nodes(node, neighbour)
+            gns3_connection.connect_nodes(
+                node,
+                neighbour,
+                node.interfaces[interface],
+                node.interfaces[interface].peer,
+            )
 
     def _configure_gns3_interfaces(
         self, graph: Graph, gns3_username: str, gns3_password: str | None

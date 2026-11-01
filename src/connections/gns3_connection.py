@@ -785,28 +785,63 @@ class GNS3Connection(APIHandler):
             f"Interface {intf.name} on {intf.parent.name} cannot be associated to any adapter of the {gns3_node_info['name']} template."
         )
 
-    def _link_exists(self, node_id_a: str, node_id_b: str) -> bool:
+    def _link_exists(
+        self,
+        node_id_a: str,
+        node_id_b: str,
+        port_a: tuple[int, int] | None = None,
+        port_b: tuple[int, int] | None = None,
+    ) -> bool:
         """
         Checks whether a link already exists between the two given nodes,
         based on the links collected at construction time (incremental
-        mode only).
+        mode only). Two nodes can be linked more than once over different
+        ports: with ``port_a``/``port_b`` ((adapter_number, port_number) on
+        each node) only a link using exactly those ports counts.
         :param node_id_a: GNS3 node_id of one endpoint
         :param node_id_b: GNS3 node_id of the other endpoint
-        :return: True if a link between exactly these two nodes already exists
+        :param port_a: (adapter_number, port_number) on node a (optional)
+        :param port_b: (adapter_number, port_number) on node b (optional)
+        :return: True if a link between exactly these two nodes (and ports) already exists
         """
         wanted = {node_id_a, node_id_b}
-        return any(
-            {endpoint["node_id"] for endpoint in link["nodes"]} == wanted
-            for link in self._existing_links
-        )
+        for link in self._existing_links:
+            if {endpoint["node_id"] for endpoint in link["nodes"]} != wanted:
+                continue
+            if port_a is None or port_b is None:
+                return True
+            ports = {
+                (
+                    endpoint["node_id"],
+                    endpoint.get("adapter_number"),
+                    endpoint.get("port_number"),
+                )
+                for endpoint in link["nodes"]
+            }
+            if ports == {(node_id_a, *port_a), (node_id_b, *port_b)}:
+                return True
+            if any(
+                endpoint.get("adapter_number") is None for endpoint in link["nodes"]
+            ):
+                return True  # no port information to tell links apart: same as before, one link per pair
+        return False
 
     def connect_nodes(
-        self, node_1: GenericNode, node_2: GenericNode
+        self,
+        node_1: GenericNode,
+        node_2: GenericNode,
+        intf_1: Interface | None = None,
+        intf_2: Interface | None = None,
     ) -> dict[str, Any] | None:
         """
         Connects two GNS3 nodes from the same GNS3 project together.
+        Two nodes can be linked more than once over different interfaces: pass the interfaces of the
+        link to create (``intf_1`` on ``node_1``, ``intf_2`` on ``node_2``). Without them the first interface
+        of each node that leads to the other one is used.
         :param node_1: Node to connect to ``node_2``.
         :param node_2: Node to connect to ``node_1``.
+        :param intf_1: Interface of ``node_1`` of the link (optional)
+        :param intf_2: Interface of ``node_2`` of the link (optional)
         :return: Returns the newly generated GNS3 link information. `None`` is returned, if the ``Settings.IS_DRY_RUN`` or ``Settings.ONLY_ON_ESXI`` options are True.
         :raises ValueError: Is thrown when no adapter can be associated with the given interface.
         This may happen because the names are not the same.
@@ -815,8 +850,8 @@ class GNS3Connection(APIHandler):
         """
         if Settings.ONLY_ON_ESXI:
             return None
-        intf_1 = node_1.get_interface(node_2)
-        intf_2 = node_2.get_interface(node_1)
+        intf_1 = intf_1 or node_1.get_interface(node_2)
+        intf_2 = intf_2 or node_2.get_interface(node_1)
 
         if intf_1 is None or intf_2 is None:
             raise RuntimeError(
@@ -834,7 +869,20 @@ class GNS3Connection(APIHandler):
         if self.incremental and self._link_exists(
             gns3_info_1["node_id"], gns3_info_2["node_id"]
         ):
-            return None
+            # Some link between the two exists. It is only THIS one if it uses the same ports; a
+            # parallel link over other interfaces is still missing and has to be created.
+            try:
+                found_1 = self._get_adapter(gns3_info_1, intf_1)
+                found_2 = self._get_adapter(gns3_info_2, intf_2)
+            except (KeyError, ValueError):
+                return None
+            if self._link_exists(
+                gns3_info_1["node_id"],
+                gns3_info_2["node_id"],
+                (found_1["adapter_number"], found_1["port_number"]),
+                (found_2["adapter_number"], found_2["port_number"]),
+            ):
+                return None
 
         # --------------------------------------------------------------------------------------------------------------
         if Settings.IS_DRY_RUN:

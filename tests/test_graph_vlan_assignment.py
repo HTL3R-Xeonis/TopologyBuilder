@@ -107,3 +107,48 @@ def graph_vlan_004() -> None:
     VirtualLan("B", "eth0")
     VirtualLan.reset()
     assert VirtualLan("C", "eth0").id == 2
+
+
+@allure.title(
+    "Graph.edges liefert die Kanten so, wie sie in der Config stehen, auch parallele"
+)
+@allure.description(
+    "Überprüft, dass Graph.edges jede Kante als (Knoten1, Interface1, Knoten2, Interface2) "
+    "behält, auch wenn zwei Knoten über verschiedene Interfaces mehrfach verbunden sind - "
+    "die Interfaces kennen als neighbour nur den Knoten, nicht das Interface der Gegenseite"
+)
+@allure.tag("positiv-test", "graph")
+@allure.feature("graph")
+@allure.severity(allure.severity_level.NORMAL)
+def graph_vlan_005() -> None:
+    Settings.API.LITERAL_API_VALUES = True
+    VirtualLan.reset()
+    edges = [["R1", "gi0/0", "VM1", "ens160"], ["R1", "gi0/1", "VM1", "ens192"]]
+    graph = Graph(_NODES, edges)
+
+    assert graph.edges == [
+        ("R1", "gi0/0", "VM1", "ens160"),
+        ("R1", "gi0/1", "VM1", "ens192"),
+    ]
+
+
+@allure.title("Jedes Interface kennt seine Gegenstelle, auch bei parallelen Kanten")
+@allure.description(
+    "Überprüft, dass Interface.peer bei zwei Kanten zwischen denselben Nodes jeweils das Interface der "
+    "Gegenseite ist (get_interface liefert dagegen immer nur das erste)"
+)
+@allure.tag("positiv-test", "graph")
+@allure.feature("graph")
+@allure.severity(allure.severity_level.CRITICAL)
+def graph_vlan_006() -> None:
+    Settings.API.LITERAL_API_VALUES = True
+    VirtualLan.reset()
+    edges = [["R1", "gi0/0", "VM1", "ens160"], ["R1", "gi0/1", "VM1", "ens192"]]
+    graph = Graph(_NODES, edges)
+    r1, vm1 = graph.nodes["R1"], graph.nodes["VM1"]
+
+    assert r1.interfaces["gi0/1"].peer is vm1.interfaces["ens192"]
+    assert vm1.interfaces["ens192"].peer is r1.interfaces["gi0/1"]
+    assert (
+        r1.get_interface("VM1") is r1.interfaces["gi0/0"]
+    )  # first only, which is why peer exists

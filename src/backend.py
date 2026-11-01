@@ -370,16 +370,30 @@ class TopologyBackend:
         project_name = self._set_project_name(topology_file)
         self._orchestrator.delete_orphans(orphans, project_name)
 
-    def remove_link(self, topology_file: str, node1: str, node2: str) -> None:
+    def remove_link(
+        self,
+        topology_file: str,
+        node1: str,
+        node2: str,
+        if1: str | None = None,
+        if2: str | None = None,
+    ) -> None:
         """
         Deletes the live GNS3 link directly connecting node1 and node2
         (if one exists) and removes the corresponding edge from the
         topology YAML. See remove_node - live deletion happens first.
+        Two nodes can be linked more than once over different interfaces:
+        ``if1``/``if2`` (the interface on node1/node2) pick which one. Without
+        them every edge between the two nodes leaves the YAML and the first
+        live link is deleted, as before.
         :param topology_file: path to the topology YAML file
         :param node1: name of one endpoint node
         :param node2: name of the other endpoint node
+        :param if1: interface of node1 of the link to remove (optional)
+        :param if2: interface of node2 of the link to remove (optional)
         :return:
         :raises RuntimeError: propagated from GNS3Connection.delete_link on deletion failure.
+        :raises ValueError: if several live links connect the two nodes and the interfaces do not single out one.
         """
         validator, _ = self._load(topology_file)
 
@@ -390,29 +404,92 @@ class TopologyBackend:
             live_nodes = GNS3Connection.list_project_nodes(
                 gns3_vm_ip, self._gns3_port, project_id
             )
-            node_ids = {
-                n["name"]: n["node_id"]
-                for n in live_nodes
-                if n["name"] in (node1, node2)
+            wanted_nodes = {
+                n["name"]: n for n in live_nodes if n["name"] in (node1, node2)
             }
-            if node1 in node_ids and node2 in node_ids:
-                wanted = {node_ids[node1], node_ids[node2]}
+            if node1 in wanted_nodes and node2 in wanted_nodes:
+                wanted = {
+                    wanted_nodes[node1]["node_id"],
+                    wanted_nodes[node2]["node_id"],
+                }
                 live_links = GNS3Connection.list_project_links(
                     gns3_vm_ip, self._gns3_port, project_id
                 )
-                link = next(
-                    (
-                        candidate
-                        for candidate in live_links
-                        if {endpoint["node_id"] for endpoint in candidate["nodes"]}
-                        == wanted
-                    ),
-                    None,
+                candidates = [
+                    candidate
+                    for candidate in live_links
+                    if {endpoint["node_id"] for endpoint in candidate["nodes"]}
+                    == wanted
+                ]
+                link = self._pick_live_link(
+                    candidates, wanted_nodes[node1], wanted_nodes[node2], if1, if2
                 )
                 if link is not None:
                     GNS3Connection.delete_link(
                         gns3_vm_ip, self._gns3_port, project_id, link["link_id"]
                     )
 
-        validator.remove_edge(node1, node2)
+        validator.remove_edge(node1, node2, if1, if2)
         validator.save()
+
+    @staticmethod
+    def _pick_live_link(
+        candidates: list[dict],
+        node1: dict,
+        node2: dict,
+        if1: str | None,
+        if2: str | None,
+    ) -> dict | None:
+        """
+        The live link between two nodes that uses the given interfaces (by GNS3 port name).
+        A node without port names (or an interface not given) does not narrow the choice down.
+        :raises ValueError: if more than one link remains and nothing singles one out, so a
+            parallel link is never deleted by guesswork.
+        """
+        if not candidates:
+            return None
+
+        def port_name(node: dict, endpoint: dict) -> str | None:
+            for port in node.get("ports", []):
+                if port.get("adapter_number") == endpoint.get(
+                    "adapter_number"
+                ) and port.get("port_number") == endpoint.get("port_number"):
+                    return port.get("name")
+            return None
+
+        def uses(link: dict, node: dict, interface: str | None) -> bool:
+            # A Cloud node (the GNS3 side of an ESXi VM) names its port like the host NIC, not like the
+            # VM's interface in the topology file, so its port name says nothing about the interface.
+            if interface is None or node.get("node_type") == "cloud":
+                return True
+            for endpoint in link["nodes"]:
+                if endpoint["node_id"] == node["node_id"]:
+                    name = port_name(node, endpoint)
+                    return name is None or name == interface
+            return False
+
+        if len(candidates) == 1:
+            # Nothing to tell apart - but only if it really is the link asked for: a topology file can
+            # list a second link over other interfaces that GNS3 never got, and deleting the one live
+            # link for it would take down the wrong one.
+            only = candidates[0]
+            return only if uses(only, node1, if1) and uses(only, node2, if2) else None
+
+        narrowed = [
+            link
+            for link in candidates
+            if uses(link, node1, if1) and uses(link, node2, if2)
+        ]
+        if len(narrowed) == 1:
+            return narrowed[0]
+        if not narrowed:
+            raise ValueError(
+                f"no live link between '{node1['name']}' and '{node2['name']}' uses the interfaces "
+                f"{if1 or '*'} and {if2 or '*'}"
+            )
+        if if1 is None and if2 is None:
+            return narrowed[0]
+        raise ValueError(
+            f"{len(narrowed)} live links between '{node1['name']}' and '{node2['name']}' match the interfaces "
+            f"{if1 or '*'} and {if2 or '*'}; cannot tell which one to delete"
+        )

@@ -1238,3 +1238,100 @@ def gns3_connection_049() -> None:
     ):
         with pytest.raises(TimeoutError):
             GNS3Connection.delete_node("10.20.20.231", 80, "proj-1", "node-1")
+
+
+def _nodes_with_ports():
+    ports = [
+        {"name": "Gi0/0", "adapter_number": 0, "port_number": 0},
+        {"name": "Gi0/1", "adapter_number": 1, "port_number": 0},
+    ]
+    node_1 = MagicMock()
+    node_1.name = "R1"
+    node_1.gns3_node_info = {"node_id": "n1", "name": "R1", "ports": ports}
+    node_2 = MagicMock()
+    node_2.name = "R2"
+    node_2.gns3_node_info = {"node_id": "n2", "name": "R2", "ports": ports}
+    return node_1, node_2
+
+
+def _interface(name: str) -> MagicMock:
+    interface = MagicMock()
+    interface.name = name
+    return interface
+
+
+@allure.title(
+    "connect_nodes legt im incremental-Modus einen zweiten, parallelen Link an"
+)
+@allure.description(
+    "Überprüft, dass connect_nodes im incremental-Modus den Link über Gi0/1 anlegt, obwohl zwischen "
+    "denselben beiden Nodes schon ein Link über Gi0/0 existiert - früher wurde jeder weitere Link "
+    "zwischen zwei Nodes übersprungen, so dass er zwar in der YAML stand, aber nie in GNS3 entstand"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_050() -> None:
+    existing_project = {"project_id": "p1", "name": "lab", "status": "opened"}
+    existing_link = {
+        "nodes": [
+            {"node_id": "n1", "adapter_number": 0, "port_number": 0},
+            {"node_id": "n2", "adapter_number": 0, "port_number": 0},
+        ]
+    }
+    with patch.object(GNS3Connection, "delete"), patch.object(GNS3Connection, "post"):
+        conn = _make_incremental_connection(existing_project, [], [existing_link])
+    node_1, node_2 = _nodes_with_ports()
+
+    with patch.object(
+        GNS3Connection, "post", return_value={"link_id": "new"}
+    ) as mock_post:
+        parallel = conn.connect_nodes(
+            node_1, node_2, _interface("Gi0/1"), _interface("Gi0/1")
+        )
+        existing = conn.connect_nodes(
+            node_1, node_2, _interface("Gi0/0"), _interface("Gi0/0")
+        )
+
+    assert parallel == {"link_id": "new"}
+    payload = mock_post.call_args.kwargs["json"]["nodes"]
+    assert [(n["adapter_number"], n["port_number"]) for n in payload] == [
+        (1, 0),
+        (1, 0),
+    ]
+    assert existing is None  # the link over Gi0/0 is already there
+    mock_post.assert_called_once()
+
+
+@allure.title(
+    "_link_exists unterscheidet mehrere Links zwischen denselben Nodes nach den Ports"
+)
+@allure.description(
+    "Überprüft, dass _link_exists ohne Ports wie bisher jeden Link des Paars zählt, mit Ports nur den "
+    "Link, der genau diese Ports benutzt, und bei Links ohne Port-Angabe weiterhin pro Paar entscheidet"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_connection_051() -> None:
+    existing_project = {"project_id": "p1", "name": "lab", "status": "opened"}
+    with_ports = {
+        "nodes": [
+            {"node_id": "n1", "adapter_number": 0, "port_number": 0},
+            {"node_id": "n2", "adapter_number": 0, "port_number": 0},
+        ]
+    }
+    with patch.object(GNS3Connection, "delete"), patch.object(GNS3Connection, "post"):
+        conn = _make_incremental_connection(existing_project, [], [with_ports])
+
+    assert conn._link_exists("n1", "n2")
+    assert conn._link_exists("n2", "n1", (0, 0), (0, 0))
+    assert not conn._link_exists("n1", "n2", (1, 0), (1, 0))
+    assert not conn._link_exists("n1", "n3")
+
+    without_ports = {"nodes": [{"node_id": "n1"}, {"node_id": "n2"}]}
+    with patch.object(GNS3Connection, "delete"), patch.object(GNS3Connection, "post"):
+        conn = _make_incremental_connection(existing_project, [], [without_ports])
+    assert conn._link_exists(
+        "n1", "n2", (1, 0), (1, 0)
+    )  # nothing to tell links apart: one per pair

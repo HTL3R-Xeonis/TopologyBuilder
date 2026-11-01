@@ -120,7 +120,7 @@ succeeded, so a failure leaves the file describing what is really there:
 |---|---|
 | `deploy_topology(file, yaml_text)` | Validate, then deploy a whole topology (incremental per `Settings.INCREMENTAL_DEPLOY`) |
 | `add_node` / `remove_node` | Deploy / delete one node live and update the file |
-| `add_link` / `remove_link` | Connect / disconnect two nodes live and update the file |
+| `add_link` / `remove_link(file, node1, node2, if1=None, if2=None)` | Connect / disconnect two nodes live and update the file. Two nodes can be linked more than once over different interfaces (`Graph.edges`, `Interface.peer`): `if1`/`if2` pick the link to remove, without them every edge between the two leaves the file and the first live link goes |
 | `verify(file, fix=False, fix_vlan_subinterfaces=False)` | The `verify` checks; with `fix=True` first the low-risk repairs. Returns `(repairs, [(passed, description)])`; includes the GNS3 VM VLAN subinterface check and the boot-time VLAN service check (`fix=True` writes that service). Re-creating missing subinterfaces is NOT part of `fix`, only `fix_vlan_subinterfaces=True` does it (see the warning below) |
 | `repair_vlan_subinterfaces(file)` | Only the subinterface repair (re-create missing ones, restart the ESXi VMs' Cloud nodes); returns what was done, empty if nothing was missing |
 | `find_orphans(file)` / `delete_orphans(file, orphans)` | Live resources no node in the file describes (and their permanent deletion) |

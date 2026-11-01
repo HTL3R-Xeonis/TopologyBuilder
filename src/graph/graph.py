@@ -26,9 +26,22 @@ class Graph:
         """
 
         self._nodes: dict[str, GenericNode] = {}
+        self._edges: list[tuple[str, str, str, str]] = [
+            (edge[0], edge[1], edge[2], edge[3]) for edge in edges
+        ]
         self._build_nodes(nodes)
         self._build_edges(edges)
         self._assign_vlans()
+
+    @property
+    def edges(self) -> list[tuple[str, str, str, str]]:
+        """
+        The links as (node1, interface1, node2, interface2), exactly as in the config file. Two nodes can be
+        linked more than once over different interfaces, which the interfaces' own ``neighbour`` (a node)
+        cannot express.
+        :return: Returns a copy of this attribute
+        """
+        return list(self._edges)
 
     @property
     def nodes(self) -> dict[str, GenericNode]:
@@ -76,8 +89,8 @@ class Graph:
             if_1 = node_1.add_interface(edge[1])
             if_2 = node_2.add_interface(edge[3])
 
-            if_1.connect_to(node_2)
-            if_2.connect_to(node_1)
+            if_1.connect_to(node_2, if_2)
+            if_2.connect_to(node_1, if_1)
 
     def _assign_vlans(self) -> None:
         """
@@ -103,7 +116,9 @@ class Graph:
 
                 neighbour = interface.neighbour
                 if neighbour is not None and neighbour.env == Environment.ON_ESXI:
-                    neighbour_interface = neighbour.get_interface(node)
+                    neighbour_interface = interface.peer or neighbour.get_interface(
+                        node
+                    )
                     if neighbour_interface is not None and (
                         neighbour_interface.vlan is not None
                     ):
@@ -146,7 +161,7 @@ class Graph:
                     device.add(f"[yellow]{if_name}[/yellow] [dim]-- unconnected[/dim]")
                     continue
 
-                neighbour_interface = neighbour.get_interface(node)
+                neighbour_interface = interface.peer or neighbour.get_interface(node)
                 neighbour_if_name = (
                     neighbour_interface.name if neighbour_interface else "?"
                 )
