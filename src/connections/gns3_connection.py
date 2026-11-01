@@ -874,7 +874,9 @@ class GNS3Connection(APIHandler):
             try:
                 found_1 = self._get_adapter(gns3_info_1, intf_1)
                 found_2 = self._get_adapter(gns3_info_2, intf_2)
-            except (KeyError, ValueError):
+            except KeyError:
+                return None
+            except ValueError:
                 return None
             if self._link_exists(
                 gns3_info_1["node_id"],
