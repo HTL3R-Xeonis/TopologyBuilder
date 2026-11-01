@@ -3,6 +3,9 @@ __date__ = "28/07/2026"
 __license__ = "GNU GPLv3"
 __status__ = "In development"
 
+import base64
+import shlex
+
 from src.connections import SSHConnection
 from src.graph import Graph
 from src.settings import Settings, Verbosity
@@ -14,6 +17,14 @@ class GNS3VMInterfaceSetup:
     Object to handle the interface configuration of the GNS3 VM to ensure, that only the dedicated GNS3 device can communicate with the VM on the ESXi host.
     This is done by subinterfaces with vlans on the GNS3 VM which correspond with the VLANs of the vSwitch on the ESXi host.
     """
+
+    # The subinterfaces are plain ``ip link`` objects and vanish whenever the VM reboots. These two files
+    # re-create them at boot, before GNS3 starts, so the Cloud nodes bind to them normally. They are
+    # generated from the topology on every deploy (never edited by hand), so they always describe the
+    # VLANs of the topology that was deployed last and stale ones disappear on their own.
+    PERSISTENT_NAME = "topologybuilder-vlan-subinterfaces"
+    PERSISTENT_SCRIPT_PATH = f"/usr/local/sbin/{PERSISTENT_NAME}.sh"
+    PERSISTENT_UNIT_PATH = f"/etc/systemd/system/{PERSISTENT_NAME}.service"
 
     def __init__(
         self, gns3_ssh_connection: SSHConnection, parent_interface: str
@@ -154,6 +165,105 @@ class GNS3VMInterfaceSetup:
                 + f"ip link set {name} up\n"
             )
 
+    def persistent_script_text(self, graph: Graph) -> str:
+        """
+        The boot-time script: waits for the parent interface and creates the subinterfaces the graph
+        needs that do not exist yet (running ones are left alone, so it is safe to run at any time).
+        """
+        parent = shlex.quote(self.parent_interface)
+        lines = [
+            "#!/bin/sh",
+            "# Managed by TopologyBuilder: regenerated on every deploy, do not edit.",
+            "# Re-creates the VLAN subinterfaces of the last deployed topology after a reboot.",
+            "rc=0",
+            f"for i in $(seq 1 60); do ip link show {parent} >/dev/null 2>&1 && break; sleep 1; done",
+            f"ip link set {parent} up || rc=1",
+        ]
+        for name, vlan_id in self.expected_subinterfaces(graph).items():
+            name = shlex.quote(name)
+            lines.append(
+                f"ip link show {name} >/dev/null 2>&1 || ip link add link {parent} name {name} type vlan id {int(vlan_id)} || rc=1"
+            )
+            lines.append(f"ip link set {name} up || rc=1")
+        lines.append("exit $rc")
+        return "\n".join(lines) + "\n"
+
+    def persistent_unit_text(self) -> str:
+        return (
+            "[Unit]\n"
+            "Description=VLAN subinterfaces of the last TopologyBuilder deployment (managed file)\n"
+            "After=network.target\n"
+            "Before=gns3.service gns3-server.service\n"
+            "\n"
+            "[Service]\n"
+            "Type=oneshot\n"
+            "RemainAfterExit=yes\n"
+            f"ExecStart={self.PERSISTENT_SCRIPT_PATH}\n"
+            "\n"
+            "[Install]\n"
+            "WantedBy=multi-user.target\n"
+        )
+
+    def _run_remote(self, command: str) -> tuple[int, str]:
+        stdin, stdout, stderr = self.gns3_ssh_connection.exec_command(command)
+        output = stdout.read().decode()
+        return stdout.channel.recv_exit_status(), output
+
+    def persistent_config_problem(self, graph: Graph) -> str | None:
+        """
+        Compares the managed files on the GNS3 VM with what the graph needs.
+        :return: what is wrong (missing, outdated, not enabled), None when the VM brings the subinterfaces back by itself
+        :raises RuntimeError: Is thrown when the files cannot be read.
+        """
+        code, script = self._run_remote(
+            f"cat {self.PERSISTENT_SCRIPT_PATH} 2>/dev/null"
+        )
+        if code != 0:
+            return "not installed"
+        if script != self.persistent_script_text(graph):
+            return "outdated (it does not match this topology's VLANs)"
+        _, unit = self._run_remote(f"cat {self.PERSISTENT_UNIT_PATH} 2>/dev/null")
+        if unit != self.persistent_unit_text():
+            return "service file missing or outdated"
+        _, enabled = self._run_remote(
+            f"systemctl is-enabled {self.PERSISTENT_NAME}.service 2>/dev/null"
+        )
+        if enabled.strip() != "enabled":
+            return "service not enabled"
+        return None
+
+    def _persistent_install_script(self, graph: Graph) -> str:
+        def write(path: str, text: str, mode: str) -> str:
+            encoded = base64.b64encode(text.encode()).decode()
+            return f"echo {encoded} | base64 -d > {path}\nchmod {mode} {path}\n"
+
+        return (
+            write(
+                self.PERSISTENT_SCRIPT_PATH, self.persistent_script_text(graph), "755"
+            )
+            + write(self.PERSISTENT_UNIT_PATH, self.persistent_unit_text(), "644")
+            + "systemctl daemon-reload\n"
+            + f"systemctl enable {self.PERSISTENT_NAME}.service\n"
+        )
+
+    def install_persistent_config(self, graph: Graph) -> bool:
+        """
+        Writes the managed script and unit and enables the service. Nothing is started or restarted
+        and no running subinterface is touched, so this is safe while links are carrying traffic.
+        :return: True when something was written, False when it was already up to date
+        :raises RuntimeError: Is thrown when the files cannot be written.
+        """
+        if Settings.IS_DRY_RUN:
+            Verbosity.volumatic_print(
+                Verbosity.NORMAL, "Would write the boot-time VLAN subinterface service"
+            )
+            return False
+        if self.persistent_config_problem(graph) is None:
+            return False
+        self.script = "set -e\n" + self._persistent_install_script(graph)
+        self.execute_script()
+        return True
+
     def initialize_commands(self, graph: Graph) -> None:
         """
         Initializes the commands for the creation and deletion of subinterfaces, on the GNS3 VM.
@@ -163,6 +273,11 @@ class GNS3VMInterfaceSetup:
         """
         self._create_subinterface_deletion_commands()
         self._create_subinterface_creation_commands(graph)
+        if not Settings.IS_DRY_RUN:
+            Verbosity.volumatic_print(
+                Verbosity.NORMAL, "Writes the boot-time VLAN subinterface service"
+            )
+            self.script += self._persistent_install_script(graph)
 
     def execute_script(self) -> tuple[int, str, str]:
         """

@@ -46,7 +46,9 @@ def gns3_connection_000() -> None:
     ):
         conn = GNS3Connection("10.20.20.231", 80, "lab")
 
-    mock_delete.assert_called_once_with(f"{conn.url}/v2/projects/old-id")
+    mock_delete.assert_called_once_with(
+        f"{conn.url}/v2/projects/old-id", timeout=_NODE_START_TIMEOUT_SECONDS
+    )
     mock_post.assert_called_once()
     assert conn.project == {"name": "lab", "project_id": "new-id"}
 
@@ -744,7 +746,10 @@ def gns3_connection_026() -> None:
     ):
         result = GNS3Connection.delete_project("10.20.20.231", 80, "lab")
 
-    mock_delete.assert_called_once_with("http://10.20.20.231:80/v2/projects/p1")
+    # deleting a project stops its running nodes first: the long timeout, not the 5 s default
+    mock_delete.assert_called_once_with(
+        "http://10.20.20.231:80/v2/projects/p1", timeout=_NODE_START_TIMEOUT_SECONDS
+    )
     assert result is True
 
 

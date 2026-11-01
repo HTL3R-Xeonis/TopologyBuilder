@@ -897,6 +897,47 @@ class VMOrchestrator:
             )
         return True, f"GNS3 VM VLAN subinterfaces: all {total} present"
 
+    def verify_persistent_vlan_config(
+        self, graph: Graph, gns3_username: str, gns3_password: str | None
+    ) -> tuple[bool, str]:
+        """
+        Checks that the GNS3 VM re-creates its VLAN subinterfaces by itself after a reboot (the managed
+        boot-time service written at deploy), so the topology survives a restart of that VM.
+        :return: (passed, description)
+        """
+        if Settings.ONLY_ON_ESXI:
+            return True, "GNS3 VM boot-time VLAN service: not needed (ESXi only)"
+        try:
+            setup = self._open_gns3_interface_setup(gns3_username, gns3_password)
+            problem = setup.persistent_config_problem(graph)
+        except Exception as exc:
+            return (
+                False,
+                f"GNS3 VM boot-time VLAN service: could not be checked ({exc})",
+            )
+        if problem:
+            return (
+                False,
+                f"GNS3 VM boot-time VLAN service: {problem} - after a reboot of the GNS3 VM the "
+                f"subinterfaces would be gone; verify --fix writes it (touches no running link)",
+            )
+        return True, "GNS3 VM boot-time VLAN service: installed and up to date"
+
+    def install_persistent_vlan_config(
+        self, graph: Graph, gns3_username: str, gns3_password: str | None
+    ) -> list[str]:
+        """
+        Writes the managed boot-time service (see verify_persistent_vlan_config). Starts and restarts
+        nothing, so it is part of the normal automatic repairs.
+        :return: what was done (empty if it was already up to date)
+        """
+        if Settings.ONLY_ON_ESXI:
+            return []
+        setup = self._open_gns3_interface_setup(gns3_username, gns3_password)
+        if not setup.install_persistent_config(graph):
+            return []
+        return ["Wrote the boot-time VLAN subinterface service on the GNS3 VM"]
+
     def repair_vlan_subinterfaces(
         self,
         graph: Graph,

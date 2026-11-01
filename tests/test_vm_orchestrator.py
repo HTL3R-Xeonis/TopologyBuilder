@@ -1527,3 +1527,43 @@ def vm_orchestrator_044(monkeypatch) -> None:
 
     assert actions[0] == f"Re-created VLAN subinterface {name} on the GNS3 VM"
     assert actions[1].startswith("Could not restart the Cloud node of 'PC_A'")
+
+
+@allure.title("Das Boot-Dienst-Prüfen und -Schreiben läuft über das Interface-Setup")
+@allure.description(
+    "Überprüft, dass verify_persistent_vlan_config den Befund des Interface-Setups "
+    "als Check meldet (auch bei SSH-Fehler), und dass install_persistent_vlan_config "
+    "nur dann eine Aktion meldet, wenn wirklich etwas geschrieben wurde"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_045(monkeypatch) -> None:
+    monkeypatch.setattr(Settings, "ONLY_ON_ESXI", False)
+    orchestrator, _ = _make_orchestrator()
+    graph = Graph([], [])
+    setup = MagicMock()
+
+    with patch.object(orchestrator, "_open_gns3_interface_setup", return_value=setup):
+        setup.persistent_config_problem.return_value = None
+        ok, text = orchestrator.verify_persistent_vlan_config(graph, "u", None)
+        assert ok and "up to date" in text
+
+        setup.persistent_config_problem.return_value = "not installed"
+        ok, text = orchestrator.verify_persistent_vlan_config(graph, "u", None)
+        assert not ok and "not installed" in text and "--fix" in text
+
+        setup.persistent_config_problem.side_effect = RuntimeError("ssh down")
+        ok, text = orchestrator.verify_persistent_vlan_config(graph, "u", None)
+        assert not ok and "could not be checked" in text
+
+        setup.install_persistent_config.return_value = True
+        assert orchestrator.install_persistent_vlan_config(graph, "u", None) == [
+            "Wrote the boot-time VLAN subinterface service on the GNS3 VM"
+        ]
+        setup.install_persistent_config.return_value = False
+        assert orchestrator.install_persistent_vlan_config(graph, "u", None) == []
+
+    monkeypatch.setattr(Settings, "ONLY_ON_ESXI", True)
+    assert orchestrator.install_persistent_vlan_config(graph, "u", None) == []
+    assert orchestrator.verify_persistent_vlan_config(graph, "u", None)[0]

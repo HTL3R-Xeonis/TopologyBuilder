@@ -561,6 +561,16 @@ def verify(
 
     if fix or fix_vlan_subinterfaces:
         actions = orchestrator.repair_graph(graph, project_name) if fix else []
+        if fix:
+            try:
+                actions += orchestrator.install_persistent_vlan_config(
+                    graph, Settings.GNS3.USERNAME, Settings.GNS3.PASSWORD
+                )
+            except Exception as exc:
+                typer.secho(
+                    f"Could not write the GNS3 VM's boot-time VLAN service: {exc}",
+                    fg=typer.colors.RED,
+                )
         if fix_vlan_subinterfaces:
             try:
                 actions += orchestrator.repair_vlan_subinterfaces(
@@ -580,6 +590,11 @@ def verify(
     results = orchestrator.verify_graph(graph, project_name)
     results.append(
         orchestrator.verify_vlan_subinterfaces(
+            graph, Settings.GNS3.USERNAME, Settings.GNS3.PASSWORD
+        )
+    )
+    results.append(
+        orchestrator.verify_persistent_vlan_config(
             graph, Settings.GNS3.USERNAME, Settings.GNS3.PASSWORD
         )
     )

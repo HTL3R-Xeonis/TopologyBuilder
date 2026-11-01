@@ -252,3 +252,142 @@ def gns3_vm_interface_setup_006() -> None:
     complete.execute_script = lambda: scripts.append("ran") or (0, "", "")
     assert complete.create_missing_subinterfaces(graph) == []
     assert scripts == []
+
+
+def _setup_with_remote_files(files: dict[str, tuple[int, str]]) -> GNS3VMInterfaceSetup:
+    setup = GNS3VMInterfaceSetup(MagicMock(), "eth1")
+
+    def run(command: str) -> tuple[int, str]:
+        for needle, answer in files.items():
+            if needle in command:
+                return answer
+        return 1, ""
+
+    setup._run_remote = run
+    return setup
+
+
+@allure.title("Das Boot-Skript beschreibt genau die VLANs der Topologie")
+@allure.description(
+    "Überprüft, dass das verwaltete Boot-Skript für jedes benötigte Subinterface "
+    "nur anlegt, was fehlt, nichts löscht, auf die Eltern-Schnittstelle wartet "
+    "und sich bei einer anderen Topologie komplett ändert (alte VLANs verschwinden)"
+)
+@allure.tag("positiv-test", "gns3-vm-interface-setup")
+@allure.feature("gns3_vm_interface_setup")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_vm_interface_setup_007() -> None:
+    _reset_settings()
+    graph, node_a, node_b = _graph_with_two_gns3_bridges()
+    name_a = node_a.interfaces["ens160"].vlan.subinterface_name
+    name_b = node_b.interfaces["ens160"].vlan.subinterface_name
+    setup = GNS3VMInterfaceSetup(MagicMock(), "eth1")
+
+    text = setup.persistent_script_text(graph)
+    assert (
+        f"ip link show {name_a} >/dev/null 2>&1 || ip link add link eth1 name {name_a} type vlan id"
+        in text
+    )
+    assert f"name {name_b} type vlan" in text
+    assert (
+        "ip link show eth1" in text
+        and "delete" not in text
+        and text.endswith("exit $rc\n")
+    )
+
+    other = MagicMock()
+    other.nodes = {"PC_A": node_a}
+    assert name_b not in setup.persistent_script_text(other)
+
+
+@allure.title(
+    "persistent_config_problem erkennt fehlende, veraltete und nicht aktivierte Dateien"
+)
+@allure.description(
+    "Überprüft alle Zustände der verwalteten Dateien auf der GNS3-VM: nicht "
+    "installiert, Skript passt nicht zur Topologie, Dienstdatei falsch, Dienst "
+    "nicht aktiviert und der Gutfall"
+)
+@allure.tag("positiv-test", "gns3-vm-interface-setup")
+@allure.feature("gns3_vm_interface_setup")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_vm_interface_setup_008() -> None:
+    _reset_settings()
+    graph, _, _ = _graph_with_two_gns3_bridges()
+    reference = GNS3VMInterfaceSetup(MagicMock(), "eth1")
+    script, unit = (
+        reference.persistent_script_text(graph),
+        reference.persistent_unit_text(),
+    )
+    script_path = GNS3VMInterfaceSetup.PERSISTENT_SCRIPT_PATH
+    unit_path = GNS3VMInterfaceSetup.PERSISTENT_UNIT_PATH
+    good = {
+        script_path: (0, script),
+        unit_path: (0, unit),
+        "is-enabled": (0, "enabled\n"),
+    }
+
+    assert (
+        _setup_with_remote_files({}).persistent_config_problem(graph) == "not installed"
+    )
+    assert "outdated" in _setup_with_remote_files(
+        {**good, script_path: (0, "old\n")}
+    ).persistent_config_problem(graph)
+    assert "service file" in _setup_with_remote_files(
+        {**good, unit_path: (1, "")}
+    ).persistent_config_problem(graph)
+    assert "not enabled" in _setup_with_remote_files(
+        {**good, "is-enabled": (1, "disabled\n")}
+    ).persistent_config_problem(graph)
+    assert _setup_with_remote_files(good).persistent_config_problem(graph) is None
+
+
+@allure.title("install_persistent_config schreibt nur bei Bedarf und startet nichts")
+@allure.description(
+    "Überprüft, dass install_persistent_config nichts tut, wenn die Dateien aktuell "
+    "sind, sonst Skript und Dienst schreibt, daemon-reload und enable ausführt, aber "
+    "weder start noch restart noch ip link delete, und dass initialize_commands "
+    "(Deploy) dieselben Schreibbefehle enthält"
+)
+@allure.tag("positiv-test", "gns3-vm-interface-setup")
+@allure.feature("gns3_vm_interface_setup")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_vm_interface_setup_009() -> None:
+    _reset_settings()
+    graph, _, _ = _graph_with_two_gns3_bridges()
+    scripts = []
+
+    stale = _setup_with_remote_files({})
+    stale.execute_script = lambda: scripts.append(stale.script) or (0, "", "")
+    assert stale.install_persistent_config(graph) is True
+    written = scripts[0]
+    assert "base64 -d >" in written and "systemctl daemon-reload" in written
+    assert f"systemctl enable {GNS3VMInterfaceSetup.PERSISTENT_NAME}.service" in written
+    assert (
+        "start" not in written.replace("systemctl", "")
+        and "restart" not in written
+        and "delete" not in written
+    )
+
+    reference = GNS3VMInterfaceSetup(MagicMock(), "eth1")
+    current = _setup_with_remote_files(
+        {
+            GNS3VMInterfaceSetup.PERSISTENT_SCRIPT_PATH: (
+                0,
+                reference.persistent_script_text(graph),
+            ),
+            GNS3VMInterfaceSetup.PERSISTENT_UNIT_PATH: (
+                0,
+                reference.persistent_unit_text(),
+            ),
+            "is-enabled": (0, "enabled\n"),
+        }
+    )
+    current.execute_script = lambda: scripts.append("ran") or (0, "", "")
+    scripts.clear()
+    assert current.install_persistent_config(graph) is False
+    assert scripts == []
+
+    deploy = _setup_with_existing([])
+    deploy.initialize_commands(graph)
+    assert "base64 -d >" in deploy.script and "systemctl enable" in deploy.script

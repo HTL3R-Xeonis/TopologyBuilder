@@ -285,7 +285,8 @@ class TopologyBackend:
         stopped GNS3 node, power on a stopped ESXi VM, create a missing
         port group, fix the trunk port group's security policy) and verifies
         afterwards, so the result reflects what's still wrong after the
-        repairs. Re-creating the GNS3 VM's lost VLAN subinterfaces is NOT
+        repairs. fix also writes the GNS3 VM's boot-time VLAN service (it
+        touches no running link). Re-creating the GNS3 VM's lost VLAN subinterfaces is NOT
         part of fix: on the project's lab that step (it also restarts the
         Cloud nodes) twice took the ESXi host's network down within seconds,
         so it only runs when asked for with fix_vlan_subinterfaces.
@@ -297,6 +298,8 @@ class TopologyBackend:
         _, graph = self._load(topology_file)
         project_name = self._set_project_name(topology_file)
         actions = self._orchestrator.repair_graph(graph, project_name) if fix else []
+        if fix:
+            actions += self._install_persistent_vlan_config(graph)
         if fix_vlan_subinterfaces:
             actions += self._repair_vlan_subinterfaces(graph, project_name)
         results = self._orchestrator.verify_graph(graph, project_name)
@@ -305,7 +308,23 @@ class TopologyBackend:
                 graph, self._gns3_username, self._gns3_password
             )
         )
+        results.append(
+            self._orchestrator.verify_persistent_vlan_config(
+                graph, self._gns3_username, self._gns3_password
+            )
+        )
         return actions, results
+
+    def _install_persistent_vlan_config(self, graph) -> list[str]:
+        try:
+            return self._orchestrator.install_persistent_vlan_config(
+                graph, self._gns3_username, self._gns3_password
+            )
+        except Exception as exc:
+            logger.warning(
+                f"Could not write the GNS3 VM's boot-time VLAN service: {exc}"
+            )
+            return []
 
     def _repair_vlan_subinterfaces(self, graph, project_name: str) -> list[str]:
         try:

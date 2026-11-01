@@ -28,7 +28,10 @@ from loguru import logger
 # potentially-slow wait as starting one (confirmed live: the default
 # APIHandler.delete timeout of 5s is nowhere near enough for that,
 # causing a real TimeoutError/502 even though the delete had actually
-# succeeded server-side moments later - see HANDOFF.md).
+# succeeded server-side moments later - see HANDOFF.md). Deleting a whole
+# project with running nodes needs the same stop-first wait: an import that
+# replaced a 12-node project failed with "DELETE request timed out" after 5s
+# although GNS3 finished deleting it moments later.
 _NODE_START_TIMEOUT_SECONDS = 300
 
 # Matches the error GNS3 raises when a node's console TCP port is already
@@ -223,7 +226,8 @@ class GNS3Connection(APIHandler):
 
         try:
             GNS3Connection.delete(
-                f"http://{ip}:{port}/v2/projects/{project['project_id']}"
+                f"http://{ip}:{port}/v2/projects/{project['project_id']}",
+                timeout=_NODE_START_TIMEOUT_SECONDS,
             )
         except requests.exceptions.HTTPError as exc:
             logger.error(
@@ -484,7 +488,10 @@ class GNS3Connection(APIHandler):
         :raises RuntimeError: Is thrown when the project does not exist on the GNS3 instance.
         """
         try:
-            self.delete(f"{self.url}/v2/projects/{project_id}")
+            self.delete(
+                f"{self.url}/v2/projects/{project_id}",
+                timeout=_NODE_START_TIMEOUT_SECONDS,
+            )
         except requests.exceptions.HTTPError as exc:
             if getattr(exc.response, "status_code", None) == 404:
                 logger.error(

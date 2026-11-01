@@ -378,6 +378,11 @@ def cli_011() -> None:
             True,
             "GNS3 VM VLAN subinterfaces: all 1 present",
         )
+        orchestrator_cls.return_value.verify_persistent_vlan_config.return_value = (
+            True,
+            "boot service ok",
+        )
+        orchestrator_cls.return_value.install_persistent_vlan_config.return_value = []
 
         result = runner.invoke(
             app,
@@ -394,7 +399,7 @@ def cli_011() -> None:
 
     assert result.exit_code == 0, result.output
     assert "[OK]" in result.output
-    assert "3/3 checks passed" in result.output
+    assert "4/4 checks passed" in result.output
     assert "VLAN subinterfaces" in result.output
 
 
@@ -421,6 +426,11 @@ def cli_012() -> None:
             True,
             "GNS3 VM VLAN subinterfaces: all 1 present",
         )
+        orchestrator_cls.return_value.verify_persistent_vlan_config.return_value = (
+            True,
+            "boot service ok",
+        )
+        orchestrator_cls.return_value.install_persistent_vlan_config.return_value = []
 
         result = runner.invoke(
             app,
@@ -437,7 +447,7 @@ def cli_012() -> None:
 
     assert result.exit_code == 1
     assert "[FAIL]" in result.output
-    assert "2/3 checks passed" in result.output
+    assert "3/4 checks passed" in result.output
 
 
 @allure.title(
@@ -1049,11 +1059,16 @@ def cli_028() -> None:
             orchestrator.repair_vlan_subinterfaces.configure_mock(**repair)
             orchestrator.verify_graph.return_value = [(True, "R1: started")]
             orchestrator.verify_vlan_subinterfaces.return_value = (True, "ok")
+            orchestrator.verify_persistent_vlan_config.return_value = (
+                True,
+                "boot service ok",
+            )
+            orchestrator.install_persistent_vlan_config.return_value = []
 
             result = runner.invoke(app, args)
 
         assert result.exit_code == 0, result.output
-        assert "2/2 checks passed" in result.output
+        assert "3/3 checks passed" in result.output
         if "return_value" in repair:
             assert "[FIXED] Re-created VLAN subinterface eth1.7" in result.output
         else:
@@ -1088,6 +1103,11 @@ def cli_029() -> None:
         orchestrator.repair_graph.return_value = []
         orchestrator.verify_graph.return_value = [(True, "R1: started")]
         orchestrator.verify_vlan_subinterfaces.return_value = (True, "ok")
+        orchestrator.verify_persistent_vlan_config.return_value = (
+            True,
+            "boot service ok",
+        )
+        orchestrator.install_persistent_vlan_config.return_value = []
 
         result = runner.invoke(app, args + ["--fix"])
 

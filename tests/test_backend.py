@@ -451,11 +451,17 @@ def backend_014(tmp_path) -> None:
     backend, orchestrator = _make_backend()
     orchestrator.verify_graph.return_value = [(True, "ok")]
     orchestrator.verify_vlan_subinterfaces.return_value = (True, "subinterfaces ok")
+    orchestrator.verify_persistent_vlan_config.return_value = (True, "boot service ok")
+    orchestrator.install_persistent_vlan_config.return_value = []
 
     actions, results = backend.verify(topology_file)
 
     assert actions == []
-    assert results == [(True, "ok"), (True, "subinterfaces ok")]
+    assert results == [
+        (True, "ok"),
+        (True, "subinterfaces ok"),
+        (True, "boot service ok"),
+    ]
     orchestrator.repair_graph.assert_not_called()
     orchestrator.repair_vlan_subinterfaces.assert_not_called()
     assert orchestrator.verify_graph.call_args.args[1] == "topology"
@@ -484,6 +490,8 @@ def backend_015(tmp_path) -> None:
         calls.append("verify") or [(True, "ok")]
     )
     orchestrator.verify_vlan_subinterfaces.return_value = (True, "subinterfaces ok")
+    orchestrator.verify_persistent_vlan_config.return_value = (True, "boot service ok")
+    orchestrator.install_persistent_vlan_config.return_value = []
 
     actions, results = backend.verify(
         topology_file, fix=True, fix_vlan_subinterfaces=True
@@ -494,7 +502,11 @@ def backend_015(tmp_path) -> None:
         "Started GNS3 node 'R1'",
         "Re-created VLAN subinterface eth1.7",
     ]
-    assert results == [(True, "ok"), (True, "subinterfaces ok")]
+    assert results == [
+        (True, "ok"),
+        (True, "subinterfaces ok"),
+        (True, "boot service ok"),
+    ]
 
 
 @allure.title("find_orphans und delete_orphans reichen Graph bzw. Projektnamen durch")
@@ -537,13 +549,15 @@ def backend_017(tmp_path) -> None:
     orchestrator.repair_vlan_subinterfaces.side_effect = RuntimeError("ssh down")
     orchestrator.verify_graph.return_value = []
     orchestrator.verify_vlan_subinterfaces.return_value = (False, "missing")
+    orchestrator.verify_persistent_vlan_config.return_value = (True, "boot service ok")
+    orchestrator.install_persistent_vlan_config.return_value = []
 
     actions, results = backend.verify(
         topology_file, fix=True, fix_vlan_subinterfaces=True
     )
 
     assert actions == []
-    assert results == [(False, "missing")]
+    assert results == [(False, "missing"), (True, "boot service ok")]
 
 
 @allure.title("verify(fix=True) legt die VLAN-Subinterfaces nicht von selbst an")
@@ -562,6 +576,8 @@ def backend_018(tmp_path) -> None:
     orchestrator.repair_graph.return_value = []
     orchestrator.verify_graph.return_value = []
     orchestrator.verify_vlan_subinterfaces.return_value = (False, "9 of 9 missing")
+    orchestrator.verify_persistent_vlan_config.return_value = (True, "boot service ok")
+    orchestrator.install_persistent_vlan_config.return_value = []
 
     backend.verify(topology_file, fix=True)
 
