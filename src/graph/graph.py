@@ -76,6 +76,7 @@ class Graph:
             if_1.connect_to(node_2)
             if_2.connect_to(node_1)
 
+    # @TODO THIS IS FAULTY
     def visualize(self) -> None:
         """
         Visualizes the graph in the terminal.
@@ -117,10 +118,7 @@ class Graph:
 
         renderer = ASCIIRenderer(
             G,
-            options=LayoutOptions(
-                node_style=NodeStyle.SQUARE,
-                layout_strategy="kamada_kawai",
-            ),
+            options=LayoutOptions(node_style=NodeStyle.SQUARE),
         )
 
         print(renderer.render())

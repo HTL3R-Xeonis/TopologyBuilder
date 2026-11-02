@@ -66,7 +66,7 @@ class ESXiConnection(GenericConnection):
         except vim.fault.InvalidLogin as exc:
             logger.error(
                 msg
-                := "Invalid ESXi credentials. If more than 5 invalid attempts were made, the user enters in a lockout-state."
+                := "Invalid ESXi credentials. If more than 5 invalid attempts were made, the esxi host will enter a lockout-state."
             )
             raise ValueError(msg) from exc
         except TimeoutError as err:
@@ -108,7 +108,7 @@ class ESXiConnection(GenericConnection):
 
     def get_virtual_switch(self, virtual_switch_name: str) -> vim.host.VirtualSwitch | None:
         """
-        Looks for a virtual Switch with the name, specified in ``Settings.Esxi.VIRTUAL_SWITCH``, on the ESXi Host.
+        Looks for a virtual Switch with given name on the ESXi Host.
         :param virtual_switch_name: Name of the virtual switch to look for.
         :return: Returns the virtual Switch if found, else ``None``.
         """
@@ -271,6 +271,22 @@ class ESXiConnection(GenericConnection):
             for address in nic.ipAddress or []:
                 if self.is_valid_ipv4_address(address):
                     return address
+        return None
+
+    @staticmethod
+    def get_nic_port_group(nic: vim.vm.device.VirtualEthernetCard) -> str | None:
+        """Return a standard portgroup name, or None for other backing types."""
+        backing = getattr(nic, "backing", None)
+        if isinstance(backing, vim.vm.device.VirtualEthernetCard.NetworkBackingInfo):
+            return backing.deviceName
+        return None
+
+    @staticmethod
+    def get_nic_label(nic: vim.vm.device.VirtualEthernetCard) -> str | None:
+        """Return the name of the nic, or None if no label was found."""
+        label = getattr(nic.deviceInfo, "label", None)
+        if isinstance(label, str):
+            return label
         return None
 
     @staticmethod

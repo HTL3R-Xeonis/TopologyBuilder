@@ -1,18 +1,48 @@
 from __future__ import annotations
 
 from enum import Enum
+from functools import total_ordering
 
 
+class StatusList:
+    """Collects and displays health-check results."""
+
+    def __init__(self) -> None:
+        """Creates an empty result collection."""
+        self._items: set[Status] = set()
+
+    def add(self, status: Status) -> None:
+        """Adds a result."""
+        self._items.add(status)
+
+    def extend(self, statuses: StatusList) -> None:
+        """Adds results from another collection."""
+        self._items.update(statuses._items)
+
+    def __iter__(self):
+        """Returns results ordered by topic and severity."""
+        return iter(sorted(self._items))
+
+    def __len__(self) -> int:
+        """Returns the number of results."""
+        return len(self._items)
+
+    @property
+    def has_failures(self) -> bool:
+        """Indicates whether a check reported a problem."""
+        return any(item.status in Status.FAILURE_STATES for item in self._items)
+
+    def __repr__(self) -> str:
+        """Returns the formatted results."""
+        width = max((len(item.topic) for item in self._items), default=0)
+        return "\n".join(f"{item.topic:<{width}} - {item!r}" for item in self)
+
+
+@total_ordering
 class Status:
-    """
-    Object to save a status.
-    """
+    """Describes a single health-check result."""
 
     class StatusEnum(Enum):
-        """
-        Enum class for the states.
-        """
-
         OK = "OK"
         ERROR = "ERROR"
         EXISTS = "EXISTS"
@@ -20,101 +50,88 @@ class Status:
         FAULT = "FAULT"
         INFO = "INFO"
 
-    def __init__(self, status: StatusEnum, message: str):
-        """
-        :param status: Status of the status object.
-        :param message: Message of the status object.
-        """
-        self.__status = status
-        self.__message = message
+    FAILURE_STATES = frozenset({StatusEnum.ERROR, StatusEnum.MISSING, StatusEnum.FAULT})
 
-    def __repr__(self) -> str:
-        max_length = 0
-        for status in Status.StatusEnum:
-            max_length = max(max_length, len(str(status.value)))
-        colors = self.get_status_color()
-        status_field = f"<{colors[0]}{self.__status.name:<{max_length}}{colors[1]}>"
-        return f"Status{status_field} | {colors[0]}{self.__message}{colors[1]}"
-
-    def get_status_color(self) -> tuple[str, str]:
-        """
-        Returns the colour of the state.
-        :return: Returns a tuple with the start and end sequence of the colour
-        """
-        match self.__status:
-            case self.StatusEnum.OK:
-                return "\033[32m", "\033[0m"  # Green
-            case self.StatusEnum.ERROR:
-                return "\033[31m", "\033[0m"  # Red
-            case self.StatusEnum.EXISTS:
-                return "\033[32m", "\033[0m"  # Green
-            case self.StatusEnum.MISSING:
-                return "\033[31m", "\033[0m"  # Red
-            case self.StatusEnum.FAULT:
-                return "\033[31m", "\033[0m"  # Red
-            case self.StatusEnum.INFO:
-                return "\033[34m", "\033[0m"  # Blue
+    def __init__(self, status: StatusEnum, topic: str, message: str):
+        """Creates a check result."""
+        self._status = status
+        self._topic = topic
+        self._message = message
 
     @property
     def status(self) -> StatusEnum:
-        """Status of the status object."""
-        return self.__status
+        """Returns the result state."""
+        return self._status
+
+    @property
+    def topic(self) -> str:
+        """Returns the result category."""
+        return self._topic
 
     @property
     def message(self) -> str:
-        """Message of the status object."""
-        return self.__message
+        """Returns the result description."""
+        return self._message
+
+    def __repr__(self) -> str:
+        """Returns a colored check result."""
+        color, reset = self.get_status_color(self)
+        return f"{color}[{self._status.value}] {self._message}{reset}"
+
+    def __eq__(self, other):
+        """Compares two check results."""
+        if not isinstance(other, Status):
+            return NotImplemented
+        return (self.topic, self.status, self.message) == (other.topic, other.status, other.message)
+
+    def __hash__(self):
+        """Returns a stable hash for a check result."""
+        return hash((self.topic, self.status, self.message))
+
+    def __lt__(self, other):
+        """Orders check results for display."""
+        if not isinstance(other, Status):
+            return NotImplemented
+        return (self.topic, self.status.value, self.message) < (other.topic, other.status.value, other.message)
 
     @staticmethod
-    def ok(msg: str) -> Status:
-        """
-        Creates a Status object with an OK status and given message.
-        :param msg: Message to create Status object with.
-        :return: Returns the created Status object.
-        """
-        return Status(Status.StatusEnum.OK, msg)
+    def get_status_color(status: Status) -> tuple[str, str]:
+        """Returns the terminal color for a result."""
+        color = (
+            "\033[31m"
+            if status.status in Status.FAILURE_STATES
+            else "\033[34m"
+            if status.status == Status.StatusEnum.INFO
+            else "\033[32m"
+        )
+        return color, "\033[0m"
 
     @staticmethod
-    def info(msg: str) -> Status:
-        """
-        Creates a Status object with an INFO status and given message.
-        :param msg: Message to create Status object with.
-        :return: Returns the created Status object.
-        """
-        return Status(Status.StatusEnum.INFO, msg)
+    def ok(topic: str, msg: str) -> Status:
+        """Creates a successful result."""
+        return Status(Status.StatusEnum.OK, topic, msg)
 
     @staticmethod
-    def fault(msg: str) -> Status:
-        """
-        Creates a Status object with an FAULT status and given message.
-        :param msg: Message to create Status object with.
-        :return: Returns the created Status object.
-        """
-        return Status(Status.StatusEnum.FAULT, msg)
+    def info(topic: str, msg: str) -> Status:
+        """Creates an informational result."""
+        return Status(Status.StatusEnum.INFO, topic, msg)
 
     @staticmethod
-    def error(msg: str) -> Status:
-        """
-        Creates a Status object with an ERROR status and given message.
-        :param msg: Message to create Status object with.
-        :return: Returns the created Status object.
-        """
-        return Status(Status.StatusEnum.ERROR, msg)
+    def fault(topic: str, msg: str) -> Status:
+        """Creates a failed result."""
+        return Status(Status.StatusEnum.FAULT, topic, msg)
 
     @staticmethod
-    def exists(msg: str) -> Status:
-        """
-        Creates a Status object with an EXISTS status and given message.
-        :param msg: Message to create Status object with.
-        :return: Returns the created Status object.
-        """
-        return Status(Status.StatusEnum.EXISTS, msg)
+    def error(topic: str, msg: str) -> Status:
+        """Creates an error result."""
+        return Status(Status.StatusEnum.ERROR, topic, msg)
 
     @staticmethod
-    def missing(msg: str) -> Status:
-        """
-        Creates a Status object with an MISSING status and given message.
-        :param msg: Message to create Status object with.
-        :return: Returns the created Status object.
-        """
-        return Status(Status.StatusEnum.MISSING, msg)
+    def exists(topic: str, msg: str) -> Status:
+        """Creates a resource-present result."""
+        return Status(Status.StatusEnum.EXISTS, topic, msg)
+
+    @staticmethod
+    def missing(topic: str, msg: str) -> Status:
+        """Creates a resource-missing result."""
+        return Status(Status.StatusEnum.MISSING, topic, msg)
