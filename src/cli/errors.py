@@ -3,7 +3,6 @@
 from functools import wraps
 
 import typer
-from loguru import logger
 
 from src.settings import Settings, Verbosity
 
@@ -14,6 +13,8 @@ def cli_errors(function):
     @wraps(function)
     def guarded(*args, **kwargs):
         """Runs a CLI command and reports failures."""
+        from loguru import logger
+
         try:
             return function(*args, **kwargs)
         except (typer.Exit, typer.Abort, typer.BadParameter):

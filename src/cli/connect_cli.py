@@ -4,11 +4,9 @@ from pathlib import Path
 
 import typer
 
-from src.orchestrator.graph_orchestrator import GraphOrchestrator
 from src.settings import Settings
 
 from .errors import cli_errors
-from .generator import load_graph
 
 connection_app = typer.Typer(help="Deployment and connection commands.", add_completion=False)
 
@@ -61,6 +59,8 @@ def connection_main(
 
 def deploy_graph(graph, dry_run: bool = False, incremental: bool = False) -> None:
     """Deploys a graph or displays a safe deployment preview."""
+    from src.orchestrator.graph_orchestrator import GraphOrchestrator
+
     if incremental:
         typer.secho("Incremental deployment is not implemented in this project version.", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2)
@@ -102,6 +102,8 @@ def deploy(
     incremental: bool = typer.Option(False, "--incremental", "-i", help="Unavailable in this project version."),
 ) -> None:
     """Validates and deploys the configured topology to ESXi and GNS3."""
+    from .generator import load_graph
+
     apply_esxi_options(address, esxi_username, esxi_password, gns3_vm_name, datastore, virtual_switch, trunk_port_group)
     if gns3_username is not None:
         Settings.GNS3.USERNAME = gns3_username

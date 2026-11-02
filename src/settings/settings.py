@@ -4,7 +4,6 @@ from typing import Any
 
 import yaml
 from dotenv import load_dotenv
-from loguru import logger
 
 from .verbosity import Verbosity
 
@@ -19,6 +18,8 @@ def check_value_type[T](value: Any, value_type: type[T] | tuple[type[T], ...]) -
     :return: Returns the value.
     :raises ValueError: Is thrown when the value is not of the corresponding type.
     """
+    from loguru import logger
+
     if not isinstance(value, value_type):
         logger.error(msg := f"Setting value {value} is of wrong type {type(value)}. Should be of type {value_type}.")
         raise TypeError(msg)
@@ -47,6 +48,8 @@ class Settings:
         :param class_path: Classpath of the nested class.
         :return: True if all attributes are initialized, False otherwise.
         """
+        from loguru import logger
+
         is_it = True
         class_path = f"{class_path}.{cls_object.__name__}".lstrip(".")
         for key, value in vars(cls_object).items():
@@ -71,6 +74,8 @@ class Settings:
         :param class_path: Classpath of the nested class.
         :return: True if all attributes are initialized, False otherwise.
         """
+        from loguru import logger
+
         unset_settings = {}
         class_path = f"{class_path}.{cls_object.__name__}".lstrip(".")
         for key, value in vars(cls_object).items():
@@ -101,6 +106,8 @@ class Settings:
         :param custom_settings: Path to the custom YAML settings file. Set ``None`` to just use default settings.
         :return:
         """
+        from loguru import logger
+
         if not (default_settings.name.endswith(".yaml") or default_settings.name.endswith(".yml")):
             logger.error(msg := "Default settings file is not a yaml file.")
             raise ValueError(msg)
@@ -141,6 +148,8 @@ class Settings:
         :return:
         :raises ValueError: Is thrown when the value of a setting option is not correct.
         """
+        from loguru import logger
+
         if isinstance(config, Path):
             with open(config, "r", encoding="utf-8") as file:
                 parsed_configuration = yaml.safe_load(file)
@@ -183,6 +192,8 @@ class Settings:
         :return:
         :raises ValueError: Is thrown when the value of a setting option is not correct.
         """
+        from loguru import logger
+
         for key, value in esxi_settings.items():
             match key.lower():
                 case "ip":
@@ -228,6 +239,8 @@ class Settings:
         :return:
         :raises ValueError: Is thrown when the value of a setting option is not correct.
         """
+        from loguru import logger
+
         for key, value in gns3_settings.items():
             match key.lower():
                 case "username":
@@ -264,6 +277,8 @@ class Settings:
         :return:
         :raises ValueError: Is thrown when the value of a setting option is not correct.
         """
+        from loguru import logger
+
         for key, value in api_settings.items():
             match key:
                 case "gns3_template_server_url":

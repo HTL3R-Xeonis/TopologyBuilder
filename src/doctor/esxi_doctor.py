@@ -1,6 +1,11 @@
-from pyVmomi import vim
+from __future__ import annotations
 
-from src.graph import Environment, Graph
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.graph import Graph
+
+from src.graph import Environment
 from src.settings import Settings
 
 from .status import Status, StatusList
@@ -99,6 +104,8 @@ class ESXiDoctor:
 
     def check_esxi_setup(self) -> StatusList:
         """Checks the ESXi infrastructure required for deployment."""
+        from pyVmomi import vim
+
         results = StatusList()
         datastore = self.connection.get_esxi_object(vim.Datastore, Settings.ESXI.DATASTORE)
         if datastore is None:
@@ -160,6 +167,8 @@ class ESXiDoctor:
     def find_orphans(self, graph: Graph) -> StatusList:
         """Reports untracked virtual machines connected to the lab switch."""
         import re
+
+        from pyVmomi import vim
 
         results = StatusList()
         lab_groups = {

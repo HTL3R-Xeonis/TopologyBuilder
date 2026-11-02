@@ -1,12 +1,18 @@
 """Read-only health-check commands."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.connections import ESXiConnection
+    from src.doctor.doctor import Doctor
+
 import os
 from pathlib import Path
 
 import typer
 
-from src.connections import ESXiConnection
-from src.doctor.doctor import Doctor, check_generator_api, check_template_apis
 from src.doctor.status import Status, StatusList
 from src.settings import Settings
 
@@ -19,6 +25,8 @@ doctor_app = typer.Typer(help="Check the ESXi, GNS3 and generator setup.", add_c
 
 def _connection() -> ESXiConnection:
     """Opens an ESXi connection using configured credentials."""
+    from src.connections import ESXiConnection
+
     return ESXiConnection(Settings.ESXI.IP, Settings.ESXI.PORT, Settings.ESXI.USERNAME, Settings.ESXI.PASSWORD)
 
 
@@ -34,6 +42,8 @@ def _report(results: StatusList) -> None:
 
 def _get_doctor() -> Doctor:
     """Creates the infrastructure doctor or reports a connection error."""
+    from src.doctor.doctor import Doctor
+
     try:
         return Doctor(_connection())
     except Exception as exc:
@@ -56,6 +66,8 @@ def preflight(
     trunk_port_group: str | None = TRUNK,
 ) -> None:
     """Checks deployment prerequisites without altering any resources."""
+    from src.doctor.doctor import Doctor, check_generator_api, check_template_apis
+
     apply_esxi_options(address, esxi_username, esxi_password, gns3_vm_name, datastore, virtual_switch, trunk_port_group)
     results = check_template_apis()
     results.extend(check_generator_api(generator_url or os.getenv("TOPOLOGY_GENERATOR_URL")))

@@ -4,8 +4,6 @@ from enum import Enum
 from functools import lru_cache
 from typing import Literal
 
-from src.connections.api_handler import APIHandler
-
 
 class Environment(Enum):
     """
@@ -23,6 +21,8 @@ class Environment(Enum):
         Returns a tuple Frozen-sets with the available template names on GNS3 and ESXi
         :return: Tupel with two Frozen-sets. First index is for GNS3, second is for ESXi
         """
+        from src.connections.api_handler import APIHandler
+
         gns3_templates = frozenset(APIHandler.get_gns3_template_names())
         esxi_templates = frozenset(APIHandler.get_esxi_template_names())
         return gns3_templates, esxi_templates

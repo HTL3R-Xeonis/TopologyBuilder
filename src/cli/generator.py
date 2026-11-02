@@ -1,15 +1,19 @@
 """CLI support for the Topology Generator website API."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.graph import Graph
+
 import os
 import tempfile
 from pathlib import Path
 
-import requests
 import typer
 
-from src.graph import Graph
 from src.settings import Settings
-from src.topology_file_validation import TopologyFileValidation
 
 
 def generator_url(override: str | None = None) -> str:
@@ -22,6 +26,9 @@ def generator_url(override: str | None = None) -> str:
 
 def load_graph(path: Path) -> Graph:
     """Validates a topology file and returns its graph."""
+    from src.graph import Graph
+    from src.topology_file_validation import TopologyFileValidation
+
     validator = TopologyFileValidation(str(path))
     validator.validate_file()
     return Graph(validator.nodes, validator.edges)
@@ -29,6 +36,8 @@ def load_graph(path: Path) -> Graph:
 
 def generate_topology(prompt: str, output: Path, url: str | None = None) -> Graph:
     """Generates a valid topology through the website API and saves its YAML."""
+    import requests
+
     base_url = generator_url(url)
     max_retries = Settings.LLM.MAX_RETRIES if isinstance(Settings.LLM.MAX_RETRIES, int) else 2
     output = output.expanduser().resolve()

@@ -13,8 +13,6 @@ from typing import ClassVar
 import yaml
 from loguru import logger
 
-from src.connections.api_handler import APIHandler
-
 
 class TopologyFileValidation:
     """
@@ -63,6 +61,8 @@ class TopologyFileValidation:
         :raises TimeoutError: Is thrown when a timeout occurs.
         :raises ValueError: Is thrown when there is a template on GNS3 which has the same name as a template on ESXi and vice versa.
         """
+        from src.connections.api_handler import APIHandler
+
         esxi_templates = APIHandler.get_esxi_template_names()
         gns3_templates = APIHandler.get_gns3_template_names()
         if esxi_templates & gns3_templates:

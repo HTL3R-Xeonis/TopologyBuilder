@@ -1,12 +1,9 @@
 """TopologyBuilder command-line interface."""
 
-import os
-from collections import deque
 from pathlib import Path
 
 import typer
 
-from src.connections.api_handler import APIHandler
 from src.settings import Settings, Verbosity
 
 from .connect_cli import deploy, destroy
@@ -45,6 +42,8 @@ def main(
     ),
 ) -> None:
     """Loads project settings and command-line overrides."""
+    import os
+
     # Reading settings must not request passwords when showing help or validating files.
     missing = [name for name in ("ESXI_PASSWORD", "GNS3_PASSWORD") if name not in os.environ]
     for name in missing:
@@ -100,6 +99,8 @@ def generate(
 @cli_errors
 def templates() -> None:
     """Lists template images offered by ESXi and GNS3."""
+    from src.connections.api_handler import APIHandler
+
     for label, names in (
         ("ESXi", APIHandler.get_esxi_template_names()),
         ("GNS3", APIHandler.get_gns3_template_names()),
@@ -115,6 +116,8 @@ def logs(
     lines: int = typer.Option(50, "--lines", "-n", min=1, help="Number of recent lines."),
 ) -> None:
     """Displays the most recent application log lines."""
+    from collections import deque
+
     log_path = Path(Settings.LOG_FILE_PATH)
     if not log_path.is_file():
         typer.secho(f"No log file found at {log_path}.", fg=typer.colors.RED, err=True)
