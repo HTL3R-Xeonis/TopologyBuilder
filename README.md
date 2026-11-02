@@ -51,7 +51,12 @@ every invocation:
 **`.env`** - copy [`.env.example`](.env.example) to `.env` and fill in
 `ESXI_PASSWORD`/`GNS3_PASSWORD`. Loaded automatically via `python-dotenv`,
 no flag needed. CLI flags (`--esxi_password`/`--gns3_password`) always take
-precedence if both are given.
+precedence if both are given. The four service URLs can also be set here (or as plain
+environment variables): `ESXI_TEMPLATE_SERVER_URL`, `GNS3_TEMPLATE_SERVER_URL`,
+`TOPOLOGY_GENERATOR_URL`, `OVA_DEPLOY_URL` - order of precedence: the `settings.yml`
+`api:` section, then these variables, then the built-in lab addresses (an empty value counts as
+unset, a trailing `/` is dropped). That is how a deployment that runs all services together points
+every host at one place without touching any settings file.
 
 **`settings.yml`** - copy [`settings.example.yml`](settings.example.yml) to
 `settings.yml` and override whichever keys you need (ESXi host/datastore/

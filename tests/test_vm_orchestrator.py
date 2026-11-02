@@ -373,7 +373,7 @@ def vm_orchestrator_009() -> None:
 @allure.feature("vm_orchestrator")
 @allure.severity(allure.severity_level.CRITICAL)
 def vm_orchestrator_010() -> None:
-    orchestrator, esxi_connection = _make_orchestrator()
+    orchestrator, _esxi_connection = _make_orchestrator()
     graph = MagicMock()
     graph.nodes = {}
 
@@ -397,7 +397,7 @@ def vm_orchestrator_010() -> None:
 @allure.feature("vm_orchestrator")
 @allure.severity(allure.severity_level.NORMAL)
 def vm_orchestrator_011() -> None:
-    orchestrator, esxi_connection = _make_orchestrator()
+    orchestrator, _esxi_connection = _make_orchestrator()
     graph = MagicMock()
     graph.nodes = {}
 
@@ -427,7 +427,7 @@ def vm_orchestrator_011() -> None:
 @allure.feature("vm_orchestrator")
 @allure.severity(allure.severity_level.CRITICAL)
 def vm_orchestrator_012() -> None:
-    orchestrator, esxi_connection = _make_orchestrator()
+    orchestrator, _esxi_connection = _make_orchestrator()
     graph = MagicMock()
     graph.nodes = {}
 
@@ -454,7 +454,7 @@ def vm_orchestrator_012() -> None:
 @allure.feature("vm_orchestrator")
 @allure.severity(allure.severity_level.NORMAL)
 def vm_orchestrator_013() -> None:
-    orchestrator, esxi_connection = _make_orchestrator()
+    orchestrator, _esxi_connection = _make_orchestrator()
     graph = MagicMock()
     graph.nodes = {}
 
@@ -481,7 +481,7 @@ def vm_orchestrator_013() -> None:
 @allure.feature("vm_orchestrator")
 @allure.severity(allure.severity_level.CRITICAL)
 def vm_orchestrator_014() -> None:
-    orchestrator, esxi_connection = _make_orchestrator()
+    orchestrator, _esxi_connection = _make_orchestrator()
     graph = MagicMock()
     graph.nodes = {}
 
@@ -518,7 +518,7 @@ def vm_orchestrator_014() -> None:
 @allure.feature("vm_orchestrator")
 @allure.severity(allure.severity_level.NORMAL)
 def vm_orchestrator_015() -> None:
-    orchestrator, esxi_connection = _make_orchestrator()
+    orchestrator, _esxi_connection = _make_orchestrator()
     graph = MagicMock()
     graph.nodes = {}
 

@@ -37,3 +37,7 @@ py-modules = ["main"]
 
 [tool.setuptools.packages.find]
 include = ["src*"]
+
+[tool.ruff.lint.flake8-bugbear]
+# typer declares options as call expressions in default arguments - that is its API, not a bug
+extend-immutable-calls = ["typer.Option", "typer.Argument"]

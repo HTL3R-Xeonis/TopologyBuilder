@@ -181,9 +181,13 @@ def _draw_line(grid: list[list[str]], x0: int, y0: int, x1: int, y1: int) -> Non
     x, y = x0, y0
 
     while True:
-        if (x, y) not in ((x0, y0), (x1, y1)):
-            if 0 <= y < len(grid) and 0 <= x < len(grid[0]) and grid[y][x] == " ":
-                grid[y][x] = "."
+        if (
+            (x, y) not in ((x0, y0), (x1, y1))
+            and 0 <= y < len(grid)
+            and 0 <= x < len(grid[0])
+            and grid[y][x] == " "
+        ):
+            grid[y][x] = "."
         if x == x1 and y == y1:
             break
         e2 = 2 * err

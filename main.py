@@ -7,7 +7,7 @@ import sys
 
 from loguru import logger
 
-from src.cli import app, Settings, Verbosity
+from src.cli import Settings, Verbosity, app
 
 __autor__ = "Leon Eiböck"
 __date__ = "21/07/2026"
@@ -41,7 +41,7 @@ def main():
     except Exception as e:
         logger.error(f"{type(e).__name__}: {e}")
         if Settings.VERBOSITY_LEVEL.level == Verbosity.DEBUG.level:
-            raise e
+            raise
         sys.exit(1)
 
 

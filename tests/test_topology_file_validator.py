@@ -9,6 +9,7 @@ __status__ = "In development"
 
 import allure
 import pytest
+
 from src.topology_file_validation import TopologyFileValidation
 
 TEST_FILE_FOLDER = "./tests/files/"

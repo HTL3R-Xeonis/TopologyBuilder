@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.graph import Environment
-from .interface import Interface
-from .formatter import nested_formatter
 from loguru import logger
+
+from src.graph import Environment
+
+from .formatter import nested_formatter
+from .interface import Interface
 
 __autor__ = "Leon Eiböck"
 __date__ = "17/07/2026"

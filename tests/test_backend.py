@@ -208,7 +208,7 @@ def backend_005(tmp_path) -> None:
 def backend_006(tmp_path) -> None:
     _reset_settings()
     topology_file = _copy_topology(tmp_path)
-    backend, orchestrator = _make_backend()
+    backend, _orchestrator = _make_backend()
 
     live_nodes = [
         {"name": "PC1", "node_id": "n-pc1"},

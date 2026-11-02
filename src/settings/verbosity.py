@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from enum import Enum
 
 
@@ -25,7 +27,7 @@ class Verbosity(str, Enum):
         }[self.value]
 
     @staticmethod
-    def volumatic_print(verbosity: "Verbosity", msg: str) -> None:
+    def volumatic_print(verbosity: Verbosity, msg: str) -> None:
         """
         Print message if verbosity level is higher or equal to verbosity level.
         :param verbosity: Minimal verbosity level where the message is printed.

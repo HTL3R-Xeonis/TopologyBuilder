@@ -4,10 +4,10 @@ Tests to validate functionality of src/graph/environment.py
 
 __license__ = "GNU GPLv3"
 
+import allure
+
 from src.graph.environment import Environment, normalize_template_name
 from src.settings import Settings
-
-import allure
 
 
 @allure.title("Template-Namen mit Leerzeichen-Unterschied werden gleichgesetzt")

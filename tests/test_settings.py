@@ -4,6 +4,11 @@ Tests to validate functionality of src/settings/settings.py
 
 __license__ = "GNU GPLv3"
 
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 import allure
 import pytest
 import yaml
@@ -15,6 +20,44 @@ def _write_settings(tmp_path, data: dict) -> str:
     path = tmp_path / "settings.yml"
     path.write_text(yaml.safe_dump(data))
     return str(path)
+
+
+_SERVICE_URL_VARS = (
+    "ESXI_TEMPLATE_SERVER_URL",
+    "GNS3_TEMPLATE_SERVER_URL",
+    "TOPOLOGY_GENERATOR_URL",
+    "OVA_DEPLOY_URL",
+)
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _api_urls_in_fresh_process(
+    env: dict[str, str], settings_file: str | None = None
+) -> dict[str, str]:
+    """
+    The four service URLs a freshly imported Settings gives. The values are read when the class is created, so this
+    runs in a new interpreter with exactly the given variables set (and a cwd without a .env of its own).
+    """
+    code = (
+        "import json, sys\n"
+        "from src.settings import Settings\n"
+        "if len(sys.argv) > 1:\n"
+        "    Settings.initialise_settings(sys.argv[1])\n"
+        "api = Settings.API\n"
+        "print(json.dumps({'esxi': api.ESXI_TEMPLATE_SERVER_URL, 'gns3': api.GNS3_TEMPLATE_SERVER_URL, "
+        "'generator': api.TOPOLOGY_GENERATOR_URL, 'ova': api.OVA_DEPLOY_URL}))\n"
+    )
+    clean = {k: v for k, v in os.environ.items() if k not in _SERVICE_URL_VARS}
+    result = subprocess.run(
+        [sys.executable, "-c", code, *([settings_file] if settings_file else [])],
+        env={**clean, "PYTHONPATH": str(_REPO_ROOT), **env},
+        cwd=_REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    )
+    return yaml.safe_load(result.stdout.strip().splitlines()[-1])
 
 
 def _reset_esxi_gns3_defaults() -> None:
@@ -217,3 +260,83 @@ def settings_006(tmp_path) -> None:
 def settings_005() -> None:
     with pytest.raises(FileNotFoundError):
         Settings.initialise_settings("./does-not-exist.yml")
+
+
+@allure.title("Ohne Umgebungsvariablen gelten die eingebauten Adressen des Labors")
+@allure.description(
+    "Überprüft, dass die vier Dienst-Adressen ohne Umgebungsvariablen und ohne Settings-Datei unverändert bleiben"
+)
+@allure.tag("positiv-test", "settings")
+@allure.feature("settings")
+@allure.severity(allure.severity_level.CRITICAL)
+def settings_007() -> None:
+    assert _api_urls_in_fresh_process({}) == {
+        "esxi": "http://10.20.20.171:8000",
+        "gns3": "http://10.20.20.171:8001",
+        "generator": "http://10.20.20.172:8002",
+        "ova": "http://10.20.20.172:8003",
+    }
+
+
+@allure.title("Umgebungsvariablen ersetzen die eingebauten Dienst-Adressen")
+@allure.description(
+    "Überprüft, dass jede der vier Umgebungsvariablen genau ihre Adresse ersetzt und ein abschließender Schrägstrich "
+    "entfernt wird"
+)
+@allure.tag("positiv-test", "settings")
+@allure.feature("settings")
+@allure.severity(allure.severity_level.CRITICAL)
+def settings_008() -> None:
+    urls = _api_urls_in_fresh_process(
+        {
+            "ESXI_TEMPLATE_SERVER_URL": "http://gateway:8000/",
+            "GNS3_TEMPLATE_SERVER_URL": "http://gateway:8001",
+            "TOPOLOGY_GENERATOR_URL": "https://gen.example/v1/",
+            "OVA_DEPLOY_URL": "http://ova:9000",
+        }
+    )
+    assert urls == {
+        "esxi": "http://gateway:8000",
+        "gns3": "http://gateway:8001",
+        "generator": "https://gen.example/v1",
+        "ova": "http://ova:9000",
+    }
+
+
+@allure.title("Eine nur teilweise gesetzte Umgebung ändert nur die genannten Adressen")
+@allure.description(
+    "Überprüft, dass eine leere Variable als nicht gesetzt gilt und die übrigen Adressen ihren eingebauten Wert behalten"
+)
+@allure.tag("positiv-test", "settings")
+@allure.feature("settings")
+@allure.severity(allure.severity_level.NORMAL)
+def settings_009() -> None:
+    urls = _api_urls_in_fresh_process(
+        {"OVA_DEPLOY_URL": "http://ova:9000", "ESXI_TEMPLATE_SERVER_URL": ""}
+    )
+    assert urls["ova"] == "http://ova:9000"
+    assert urls["esxi"] == "http://10.20.20.171:8000"
+    assert urls["gns3"] == "http://10.20.20.171:8001"
+
+
+@allure.title("Ein Eintrag in der Settings-Datei gewinnt gegen die Umgebung")
+@allure.description(
+    "Überprüft die Reihenfolge Settings-Datei vor Umgebungsvariable vor eingebautem Wert für die Dienst-Adressen"
+)
+@allure.tag("positiv-test", "settings")
+@allure.feature("settings")
+@allure.severity(allure.severity_level.CRITICAL)
+def settings_010(tmp_path) -> None:
+    path = _write_settings(
+        tmp_path, {"api": {"esxi_template_server_url": "http://from-file:8000"}}
+    )
+    urls = _api_urls_in_fresh_process(
+        {
+            "ESXI_TEMPLATE_SERVER_URL": "http://from-env:8000",
+            "GNS3_TEMPLATE_SERVER_URL": "http://from-env:8001",
+        },
+        settings_file=path,
+    )
+    assert urls["esxi"] == "http://from-file:8000"  # the file wins
+    assert urls["gns3"] == "http://from-env:8001"  # not in the file: the environment
+    assert urls["ova"] == "http://10.20.20.172:8003"  # neither: the built-in value

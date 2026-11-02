@@ -50,12 +50,14 @@ def topology_generator_client_000() -> None:
 @allure.feature("topology_generator_client")
 @allure.severity(allure.severity_level.CRITICAL)
 def topology_generator_client_001() -> None:
-    with patch(
-        "src.connections.topology_generator_client.requests.post",
-        side_effect=requests.Timeout(),
+    with (
+        patch(
+            "src.connections.topology_generator_client.requests.post",
+            side_effect=requests.Timeout(),
+        ),
+        pytest.raises(TimeoutError),
     ):
-        with pytest.raises(TimeoutError):
-            TopologyGeneratorClient.generate_topology("a small lab")
+        TopologyGeneratorClient.generate_topology("a small lab")
 
 
 @allure.title("generate_topology wirft RuntimeError bei einem HTTP-Fehler")
@@ -71,9 +73,11 @@ def topology_generator_client_002() -> None:
     response = MagicMock()
     response.raise_for_status.side_effect = requests.HTTPError("500 server error")
 
-    with patch(
-        "src.connections.topology_generator_client.requests.post",
-        return_value=response,
+    with (
+        patch(
+            "src.connections.topology_generator_client.requests.post",
+            return_value=response,
+        ),
+        pytest.raises(RuntimeError),
     ):
-        with pytest.raises(RuntimeError):
-            TopologyGeneratorClient.generate_topology("a small lab")
+        TopologyGeneratorClient.generate_topology("a small lab")

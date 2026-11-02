@@ -12,8 +12,8 @@ exist - exactly the situation this function exists to fix.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from datetime import datetime
-from typing import Callable
 
 from loguru import logger
 
@@ -142,7 +142,7 @@ def deploy_fresh_gns3_vm(
         stage("powering off existing VM")
         logger.info(f"Powering off existing '{vm_name}' VM")
         esxi_connection.power_off_vm(old_vm)
-        backup_name = f"{vm_name}-backup-{datetime.now():%Y%m%d%H%M%S}"
+        backup_name = f"{vm_name}-backup-{datetime.now().astimezone():%Y%m%d%H%M%S}"
         esxi_connection.rename_vm(old_vm, backup_name)
         logger.info(f"Renamed existing '{vm_name}' VM to '{backup_name}'")
 

@@ -3,15 +3,14 @@ from pathlib import Path
 
 import typer
 
-from src.settings import Settings, Verbosity
 from src.connections.api_handler import APIHandler
 from src.connections.esxi_connection import ESXiConnection
 from src.connections.gns3_connection import GNS3Connection
 from src.connections.topology_generator_client import TopologyGeneratorClient
 from src.graph import Graph
+from src.settings import Settings, Verbosity
 from src.topology_file_validation import TopologyFileValidation
 from src.vm_orchestrator.vm_orchestrator import VMOrchestrator
-
 
 app = typer.Typer(
     name="TopologyBuilder",
@@ -181,7 +180,7 @@ def _generate_topology(prompt: str, output_path: Path) -> Graph:
         try:
             validator = TopologyFileValidation(str(tmp_path))
             validator.validate_file()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - reported to the user; the other steps still run / the next attempt starts
             typer.secho(
                 f"Attempt {attempt}: generated topology failed validation "
                 f"({type(exc).__name__}: {exc}), retrying...",
@@ -566,7 +565,7 @@ def verify(
                 actions += orchestrator.install_persistent_vlan_config(
                     graph, Settings.GNS3.USERNAME, Settings.GNS3.PASSWORD
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - reported to the user; the other steps still run / the next attempt starts
                 typer.secho(
                     f"Could not write the GNS3 VM's boot-time VLAN service: {exc}",
                     fg=typer.colors.RED,
@@ -576,7 +575,7 @@ def verify(
                 actions += orchestrator.repair_vlan_subinterfaces(
                     graph, project_name, Settings.GNS3.USERNAME, Settings.GNS3.PASSWORD
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - reported to the user; the other steps still run / the next attempt starts
                 typer.secho(
                     f"Could not repair the GNS3 VM's VLAN subinterfaces: {exc}",
                     fg=typer.colors.RED,

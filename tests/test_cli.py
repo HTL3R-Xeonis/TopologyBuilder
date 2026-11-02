@@ -7,7 +7,6 @@ __license__ = "GNU GPLv3"
 from unittest.mock import patch
 
 import allure
-
 from typer.testing import CliRunner
 
 from src.cli import app

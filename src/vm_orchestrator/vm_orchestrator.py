@@ -10,17 +10,18 @@ __status__ = "In development"
 
 import re
 
+from loguru import logger
+
 from src.connections.api_handler import APIHandler
 from src.connections.esxi_connection import ESXiConnection
-from src.connections.ssh_connection import SSHConnection
 from src.connections.gns3_connection import (
     GNS3Connection,
     is_console_port_collision_error,
 )
-from src.settings import Settings
+from src.connections.ssh_connection import SSHConnection
 from src.graph import Environment, Graph
+from src.settings import Settings
 from src.vm_orchestrator.gns3_vm_interface_setup import GNS3VMInterfaceSetup
-from loguru import logger
 
 
 class VMOrchestrator:
@@ -282,25 +283,31 @@ class VMOrchestrator:
             results.append(
                 (
                     True,
-                    f"Trunk port group '{trunk_port_group_name}': missing, "
-                    f"would be auto-created",
+                    (
+                        f"Trunk port group '{trunk_port_group_name}': missing, "
+                        f"would be auto-created"
+                    ),
                 )
             )
         elif self.esxi_connection.bridging_security_policy_ok(trunk_port_group):
             results.append(
                 (
                     True,
-                    f"Trunk port group '{trunk_port_group_name}': exists, "
-                    f"security policy OK",
+                    (
+                        f"Trunk port group '{trunk_port_group_name}': exists, "
+                        f"security policy OK"
+                    ),
                 )
             )
         else:
             results.append(
                 (
                     False,
-                    f"Trunk port group '{trunk_port_group_name}': exists, but "
-                    f"security policy is not yet correct (fixed automatically "
-                    f"by the next deploy)",
+                    (
+                        f"Trunk port group '{trunk_port_group_name}': exists, but "
+                        f"security policy is not yet correct (fixed automatically "
+                        f"by the next deploy)"
+                    ),
                 )
             )
 
@@ -311,8 +318,10 @@ class VMOrchestrator:
                 results.append(
                     (
                         True,
-                        f"Datastore '{Settings.ESXI.DATASTORE}': exists, "
-                        f"{free_gb:.1f} GB free",
+                        (
+                            f"Datastore '{Settings.ESXI.DATASTORE}': exists, "
+                            f"{free_gb:.1f} GB free"
+                        ),
                     )
                 )
             else:
@@ -321,8 +330,10 @@ class VMOrchestrator:
                 results.append(
                     (
                         True,
-                        f"Datastore: none configured, would auto-pick "
-                        f"'{datastore.name}' ({free_gb:.1f} GB free)",
+                        (
+                            f"Datastore: none configured, would auto-pick "
+                            f"'{datastore.name}' ({free_gb:.1f} GB free)"
+                        ),
                     )
                 )
         except ValueError as error:
@@ -342,16 +353,20 @@ class VMOrchestrator:
                 results.append(
                     (
                         True,
-                        f"GNS3 VM '{self.gns3_vm_name}' at {gns3_ip}: reachable "
-                        f"(GNS3 {version.get('version', '?')})",
+                        (
+                            f"GNS3 VM '{self.gns3_vm_name}' at {gns3_ip}: reachable "
+                            f"(GNS3 {version.get('version', '?')})"
+                        ),
                     )
                 )
-            except Exception as error:
+            except Exception as error:  # noqa: BLE001 - best effort or a check: the failure becomes a result or a warning, never a crash
                 results.append(
                     (
                         False,
-                        f"GNS3 VM '{self.gns3_vm_name}' at {gns3_ip}: not "
-                        f"reachable ({error})",
+                        (
+                            f"GNS3 VM '{self.gns3_vm_name}' at {gns3_ip}: not "
+                            f"reachable ({error})"
+                        ),
                     )
                 )
 
@@ -364,11 +379,13 @@ class VMOrchestrator:
                 results.append(
                     (
                         True,
-                        f"Template-APIs: reachable ({len(esxi_templates)} ESXi, "
-                        f"{len(gns3_templates)} GNS3 template(s))",
+                        (
+                            f"Template-APIs: reachable ({len(esxi_templates)} ESXi, "
+                            f"{len(gns3_templates)} GNS3 template(s))"
+                        ),
                     )
                 )
-            except Exception as error:
+            except Exception as error:  # noqa: BLE001 - best effort or a check: the failure becomes a result or a warning, never a crash
                 results.append((False, f"Template-APIs: not reachable ({error})"))
 
         return results
@@ -393,7 +410,7 @@ class VMOrchestrator:
                     f"Trunk port group '{name}': promiscuous mode, MAC address "
                     f"changes and forged transmits are accepted"
                 )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - best effort or a check: the failure becomes a result or a warning, never a crash
             return (
                 False,
                 f"Trunk port group '{name}': security policy could not be checked ({exc})",
@@ -421,12 +438,14 @@ class VMOrchestrator:
             ):
                 return []
             self.esxi_connection.ensure_bridging_security_policy(name)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - best effort or a check: the failure becomes a result or a warning, never a crash
             logger.warning(f"Could not repair the security policy of '{name}': {exc}")
             return []
         return [
-            f"Set the security policy of trunk port group '{name}' to accept "
-            f"promiscuous mode, MAC address changes and forged transmits"
+            (
+                f"Set the security policy of trunk port group '{name}' to accept "
+                f"promiscuous mode, MAC address changes and forged transmits"
+            )
         ]
 
     def verify_graph(self, graph: Graph, project_name: str) -> list[tuple[bool, str]]:
@@ -534,8 +553,10 @@ class VMOrchestrator:
                         results.append(
                             (
                                 True,
-                                f"ESXi VM '{name}': powered on, no IP reported "
-                                "(expected - topology VLANs have no DHCP)",
+                                (
+                                    f"ESXi VM '{name}': powered on, no IP reported "
+                                    "(expected - topology VLANs have no DHCP)"
+                                ),
                             )
                         )
                     else:
@@ -930,14 +951,16 @@ class VMOrchestrator:
             setup = self._open_gns3_interface_setup(gns3_username, gns3_password)
             missing = setup.missing_subinterfaces(graph)
             total = len(setup.expected_subinterfaces(graph))
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - best effort or a check: the failure becomes a result or a warning, never a crash
             return False, f"GNS3 VM VLAN subinterfaces: could not be checked ({exc})"
         if missing:
             return (
                 False,
-                f"GNS3 VM VLAN subinterfaces: {len(missing)} of {total} missing "
-                f"({', '.join(missing)}) - links to ESXi VMs carry no traffic; re-creating them is a separate, "
-                f"explicit step (--fix-vlan-subinterfaces), see the warning there",
+                (
+                    f"GNS3 VM VLAN subinterfaces: {len(missing)} of {total} missing "
+                    f"({', '.join(missing)}) - links to ESXi VMs carry no traffic; re-creating them is a separate, "
+                    f"explicit step (--fix-vlan-subinterfaces), see the warning there"
+                ),
             )
         return True, f"GNS3 VM VLAN subinterfaces: all {total} present"
 
@@ -954,7 +977,7 @@ class VMOrchestrator:
         try:
             setup = self._open_gns3_interface_setup(gns3_username, gns3_password)
             problem = setup.persistent_config_problem(graph)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - best effort or a check: the failure becomes a result or a warning, never a crash
             return (
                 False,
                 f"GNS3 VM boot-time VLAN service: could not be checked ({exc})",
@@ -962,8 +985,10 @@ class VMOrchestrator:
         if problem:
             return (
                 False,
-                f"GNS3 VM boot-time VLAN service: {problem} - after a reboot of the GNS3 VM the "
-                f"subinterfaces would be gone; verify --fix writes it (touches no running link)",
+                (
+                    f"GNS3 VM boot-time VLAN service: {problem} - after a reboot of the GNS3 VM the "
+                    f"subinterfaces would be gone; verify --fix writes it (touches no running link)"
+                ),
             )
         return True, "GNS3 VM boot-time VLAN service: installed and up to date"
 
@@ -1049,7 +1074,7 @@ class VMOrchestrator:
                         project["project_id"],
                         cloud["node_id"],
                     )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - best effort or a check: the failure becomes a result or a warning, never a crash
                 # One stuck Cloud node must not hide that the subinterfaces
                 # were already re-created, nor stop the others from restarting.
                 logger.warning(f"Could not restart the Cloud node of '{name}': {exc}")
@@ -1139,7 +1164,7 @@ class VMOrchestrator:
                 logger.error(
                     f"Console port collision diagnostics - '{command}':\n{output}"
                 )
-        except Exception as diagnostic_error:
+        except Exception as diagnostic_error:  # noqa: BLE001 - best effort or a check: the failure becomes a result or a warning, never a crash
             logger.warning(
                 f"Could not capture console port collision diagnostics: "
                 f"{diagnostic_error}"

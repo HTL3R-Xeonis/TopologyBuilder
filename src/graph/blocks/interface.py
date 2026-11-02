@@ -5,8 +5,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .generic_node import GenericNode
 
-from .vlan import VirtualLan
 from .formatter import nested_formatter
+from .vlan import VirtualLan
 
 __autor__ = "Leon Eiböck"
 __date__ = "17/07/2026"

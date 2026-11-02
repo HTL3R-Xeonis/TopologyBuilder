@@ -85,7 +85,7 @@ class GenericConnection(ABC):
         """
         try:
             addr = ipaddress.ip_address(ip)
-            if not addr.version == 4:
+            if addr.version != 4:
                 return False
             return (
                 addr.is_global

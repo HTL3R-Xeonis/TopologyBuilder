@@ -96,7 +96,9 @@ api:
   # ESXi VMs directly from its own NFS mount, with no local
   # download/upload hop on this project's side). Only needed if these
   # live somewhere other than this project's own internal network
-  # default.
+  # default. Instead of a settings file, the same four values can also come from environment variables of the same name
+  # in upper case (ESXI_TEMPLATE_SERVER_URL, GNS3_TEMPLATE_SERVER_URL, TOPOLOGY_GENERATOR_URL, OVA_DEPLOY_URL, also from
+  # .env); an entry here wins over them.
   esxi_template_server_url: http://10.20.20.171:8000
   gns3_template_server_url: http://10.20.20.171:8001
   topology_generator_url: http://10.20.20.172:8002

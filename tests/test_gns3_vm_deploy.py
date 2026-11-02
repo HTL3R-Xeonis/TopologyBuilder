@@ -482,17 +482,19 @@ def gns3_vm_deploy_901() -> None:
     esxi_connection = MagicMock()
     esxi_connection.get_vm.return_value = None
 
-    with patch("src.gns3_vm_deploy.APIHandler.deploy_ova"):
-        with pytest.raises(RuntimeError, match="no VM 'GNS-VM-1'"):
-            deploy_fresh_gns3_vm(
-                esxi_connection,
-                "GNS-VM-1",
-                "",
-                "datastore1",
-                "PG-MGMT",
-                "PG_GNS3_TRUNK",
-                ova_filename="x.ova",
-            )
+    with (
+        patch("src.gns3_vm_deploy.APIHandler.deploy_ova"),
+        pytest.raises(RuntimeError, match="no VM 'GNS-VM-1'"),
+    ):
+        deploy_fresh_gns3_vm(
+            esxi_connection,
+            "GNS-VM-1",
+            "",
+            "datastore1",
+            "PG-MGMT",
+            "PG_GNS3_TRUNK",
+            ova_filename="x.ova",
+        )
     esxi_connection.power_on_vm.assert_not_called()
 
 
@@ -517,10 +519,13 @@ def gns3_vm_deploy_902() -> None:
         esxi_connection.get_vm_ip_address.return_value = "10.20.20.233"
         new_vm = MagicMock()
         calls = []
-        esxi_connection.set_vm_resources.side_effect = lambda *a: calls.append(
-            "resources"
+        # bound as a default argument: each round of the loop records into its own list
+        esxi_connection.set_vm_resources.side_effect = lambda *a, calls=calls: (
+            calls.append("resources")
         )
-        esxi_connection.power_on_vm.side_effect = lambda *a: calls.append("power on")
+        esxi_connection.power_on_vm.side_effect = lambda *a, calls=calls: calls.append(
+            "power on"
+        )
 
         with patch("src.gns3_vm_deploy.OVAImporter") as importer_cls:
             importer_cls.return_value.import_ova.return_value = new_vm

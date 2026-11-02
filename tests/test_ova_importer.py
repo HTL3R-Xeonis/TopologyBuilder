@@ -114,12 +114,14 @@ def ova_importer_001() -> None:
     importer, _ = _make_importer(["net1", "net2"])
     ova_bytes = _make_ova_bytes()
 
-    with patch(
-        "src.ova_importer.tarfile.open",
-        return_value=tarfile.open(fileobj=io.BytesIO(ova_bytes), mode="r"),
+    with (
+        patch(
+            "src.ova_importer.tarfile.open",
+            return_value=tarfile.open(fileobj=io.BytesIO(ova_bytes), mode="r"),
+        ),
+        pytest.raises(ValueError, match=r"OVF declares 2 network\(s\)"),
     ):
-        with pytest.raises(ValueError, match=r"OVF declares 2 network\(s\)"):
-            importer.import_ova("/fake/path.ova", "GNS3-VM", "datastore1", ["PG-MGMT"])
+        importer.import_ova("/fake/path.ova", "GNS3-VM", "datastore1", ["PG-MGMT"])
 
 
 @allure.title("import_ova wirft einen Fehler, wenn CreateImportSpec fehlschlägt")
@@ -139,12 +141,14 @@ def ova_importer_002() -> None:
     )
     ova_bytes = _make_ova_bytes()
 
-    with patch(
-        "src.ova_importer.tarfile.open",
-        return_value=tarfile.open(fileobj=io.BytesIO(ova_bytes), mode="r"),
+    with (
+        patch(
+            "src.ova_importer.tarfile.open",
+            return_value=tarfile.open(fileobj=io.BytesIO(ova_bytes), mode="r"),
+        ),
+        pytest.raises(RuntimeError, match="Failed to create import spec"),
     ):
-        with pytest.raises(RuntimeError, match="Failed to create import spec"):
-            importer.import_ova("/fake/path.ova", "GNS3-VM", "datastore1", [])
+        importer.import_ova("/fake/path.ova", "GNS3-VM", "datastore1", [])
 
 
 @allure.title("import_ova wirft einen Fehler, wenn der Lease nicht bereit wird")
@@ -164,9 +168,11 @@ def ova_importer_003() -> None:
     host_system.parent.resourcePool.ImportVApp.return_value = lease
     ova_bytes = _make_ova_bytes()
 
-    with patch(
-        "src.ova_importer.tarfile.open",
-        return_value=tarfile.open(fileobj=io.BytesIO(ova_bytes), mode="r"),
+    with (
+        patch(
+            "src.ova_importer.tarfile.open",
+            return_value=tarfile.open(fileobj=io.BytesIO(ova_bytes), mode="r"),
+        ),
+        pytest.raises(RuntimeError, match="HTTP NFC lease failed to become ready"),
     ):
-        with pytest.raises(RuntimeError, match="HTTP NFC lease failed to become ready"):
-            importer.import_ova("/fake/path.ova", "GNS3-VM", "datastore1", [])
+        importer.import_ova("/fake/path.ova", "GNS3-VM", "datastore1", [])

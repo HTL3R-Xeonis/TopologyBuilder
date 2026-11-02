@@ -1,12 +1,18 @@
 import os
+from typing import ClassVar
 
 import yaml
+from dotenv import load_dotenv
 from loguru import logger
 
 from .verbosity import Verbosity
-from dotenv import load_dotenv
 
 load_dotenv()
+
+
+def _env_url(name: str, default: str) -> str:
+    """A service URL from the environment (empty counts as unset), without a trailing slash; else ``default``."""
+    return (os.getenv(name) or default).rstrip("/")
 
 
 class Settings:
@@ -162,9 +168,12 @@ class Settings:
         accept promiscuous mode/MAC changes/forged transmits, which GNS3's
         Cloud nodes need to bridge topology devices through it - ESXi's
         default security policy silently drops that traffic otherwise."""
-        IGNORE_PORT_GROUPS: set[str] = {"PG_GNS3_TRUNK"}
+        IGNORE_PORT_GROUPS: ClassVar[set[str]] = {"PG_GNS3_TRUNK"}
         """Specifies which port groups not to delete on the virtual switch."""
-        RESERVED_PORT_GROUPS: set[str] = {"VM Network", "Management Network"}
+        RESERVED_PORT_GROUPS: ClassVar[set[str]] = {
+            "VM Network",
+            "Management Network",
+        }
         """ESXi's own built-in port groups (present on essentially every
         install, not created by this tool). Always protected from deletion
         regardless of IGNORE_PORT_GROUPS' contents - deleting 'Management
@@ -239,13 +248,26 @@ class Settings:
         and force a specific name."""
 
     class API:
-        """Settings related to API requests."""
+        """
+        Settings related to API requests.
 
-        GNS3_TEMPLATE_SERVER_URL = "http://10.20.20.171:8001"
+        Each service URL below comes from, strongest first: the settings file's ``api`` section, an environment
+        variable (or ``.env`` entry) with the same name as the setting, and this lab's built-in address. The
+        environment layer is what lets a deployment that runs all services together point everything somewhere else
+        in one place, without touching any settings file.
+        """
+
+        GNS3_TEMPLATE_SERVER_URL = _env_url(
+            "GNS3_TEMPLATE_SERVER_URL", "http://10.20.20.171:8001"
+        )
         """URL to the GNS3 template API server."""
-        ESXI_TEMPLATE_SERVER_URL = "http://10.20.20.171:8000"
+        ESXI_TEMPLATE_SERVER_URL = _env_url(
+            "ESXI_TEMPLATE_SERVER_URL", "http://10.20.20.171:8000"
+        )
         """URL to the ESXi template API server."""
-        TOPOLOGY_GENERATOR_URL = "http://10.20.20.172:8002"
+        TOPOLOGY_GENERATOR_URL = _env_url(
+            "TOPOLOGY_GENERATOR_URL", "http://10.20.20.172:8002"
+        )
         """URL to the Topology Generator API server, used by the
         `generate` command to turn a natural-language prompt into a
         topology config file via an LLM."""
@@ -253,7 +275,7 @@ class Settings:
         """How long to wait for a response from the Topology Generator
         API. Generation can legitimately take a while on constrained
         hardware, across multiple Ollama servers/retries server-side."""
-        OVA_DEPLOY_URL = "http://10.20.20.172:8003"
+        OVA_DEPLOY_URL = _env_url("OVA_DEPLOY_URL", "http://10.20.20.172:8003")
         """URL to the TopologyBuilderServices OVA-deploy API, used by
         ESXiConnection.deploy_virtual_machine to import an OVA straight
         from its own NFS mount to ESXi, with network wiring driven
@@ -268,7 +290,7 @@ class Settings:
             os.getenv("LITERAL_API_VALUES", "false").lower() == "true"
         )
         """Specifies whether to use literal API values instead of using API calls to get the existing templates."""
-        LITERAL_ESXI_TEMPLATES: set[str] = {
+        LITERAL_ESXI_TEMPLATES: ClassVar[set[str]] = {
             "pfSense",
             "mint21",
             "debian",
@@ -280,7 +302,7 @@ class Settings:
             "Rocky 9.2",
         }
         """Literal ESXi template name values."""
-        LITERAL_GNS3_TEMPLATES: set[str] = {
+        LITERAL_GNS3_TEMPLATES: ClassVar[set[str]] = {
             "VPCS",
             "Frame Relay switch",
             "Ethernet switch",

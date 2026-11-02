@@ -320,7 +320,7 @@ class TopologyBackend:
             return self._orchestrator.install_persistent_vlan_config(
                 graph, self._gns3_username, self._gns3_password
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - best effort: reported as a warning, the caller carries on
             logger.warning(
                 f"Could not write the GNS3 VM's boot-time VLAN service: {exc}"
             )
@@ -331,7 +331,7 @@ class TopologyBackend:
             return self._orchestrator.repair_vlan_subinterfaces(
                 graph, project_name, self._gns3_username, self._gns3_password
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - best effort: reported as a warning, the caller carries on
             logger.warning(f"Could not repair the GNS3 VM's VLAN subinterfaces: {exc}")
             return []
 

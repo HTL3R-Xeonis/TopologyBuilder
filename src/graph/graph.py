@@ -3,14 +3,15 @@ __date__ = "17/07/2026"
 __license__ = "GNU GPLv3"
 __status__ = "In development"
 
+from loguru import logger
+from rich.console import Console
+from rich.tree import Tree
+
 from src.graph.blocks import GenericNode
 from src.graph.blocks.formatter import nested_formatter
 from src.graph.blocks.vlan import VirtualLan
 from src.graph.environment import Environment
 from src.graph.layout import render_graph
-from loguru import logger
-from rich.console import Console
-from rich.tree import Tree
 
 
 class Graph:

@@ -51,9 +51,8 @@ def api_handler_000() -> None:
 def api_handler_001() -> None:
     data = {"templates": [{"name": "pfSense", "file": "pfsense.ova"}]}
 
-    with patch.object(APIHandler, "get", return_value=data):
-        with pytest.raises(ValueError):
-            APIHandler.find_esxi_template_file("Ubuntu-Server")
+    with patch.object(APIHandler, "get", return_value=data), pytest.raises(ValueError):
+        APIHandler.find_esxi_template_file("Ubuntu-Server")
 
 
 @allure.title("deploy_ova postet die Deploy-Daten an die OVA-Deploy-API")
@@ -104,14 +103,16 @@ def api_handler_002() -> None:
 @allure.feature("api_handler")
 @allure.severity(allure.severity_level.CRITICAL)
 def api_handler_003() -> None:
-    with patch(
-        "src.connections.api_handler.requests.post",
-        side_effect=requests.Timeout(),
+    with (
+        patch(
+            "src.connections.api_handler.requests.post",
+            side_effect=requests.Timeout(),
+        ),
+        pytest.raises(TimeoutError),
     ):
-        with pytest.raises(TimeoutError):
-            APIHandler.deploy_ova(
-                "10.20.20.202", 443, "PC1", "ubuntu-server.ova", "datastore1", {}
-            )
+        APIHandler.deploy_ova(
+            "10.20.20.202", 443, "PC1", "ubuntu-server.ova", "datastore1", {}
+        )
 
 
 @allure.title("deploy_ova wirft RuntimeError bei einem HTTP-Fehler")
@@ -127,11 +128,13 @@ def api_handler_004() -> None:
     response = MagicMock()
     response.raise_for_status.side_effect = requests.HTTPError("500 server error")
 
-    with patch("src.connections.api_handler.requests.post", return_value=response):
-        with pytest.raises(RuntimeError):
-            APIHandler.deploy_ova(
-                "10.20.20.202", 443, "PC1", "ubuntu-server.ova", "datastore1", {}
-            )
+    with (
+        patch("src.connections.api_handler.requests.post", return_value=response),
+        pytest.raises(RuntimeError),
+    ):
+        APIHandler.deploy_ova(
+            "10.20.20.202", 443, "PC1", "ubuntu-server.ova", "datastore1", {}
+        )
 
 
 @allure.title(

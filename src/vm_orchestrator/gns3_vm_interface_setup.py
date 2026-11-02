@@ -6,10 +6,11 @@ __status__ = "In development"
 import base64
 import shlex
 
+from loguru import logger
+
 from src.connections import SSHConnection
 from src.graph import Graph
 from src.settings import Settings, Verbosity
-from loguru import logger
 
 
 class GNS3VMInterfaceSetup:
@@ -43,7 +44,7 @@ class GNS3VMInterfaceSetup:
         :return: A list of found subinterface-names as strings or an empty list
         :raises RuntimeError: Is thrown when an error occurs while trying to get subinterface information.
         """
-        stdin, stdout, stderr = self.gns3_ssh_connection.exec_command(
+        _stdin, stdout, stderr = self.gns3_ssh_connection.exec_command(
             f"ip -br link show type vlan | grep @{self.parent_interface} | awk '{{sub(/@.*/, \"\", $1); print $1}}'"
         )
         if stderr.channel.recv_exit_status() != 0:
@@ -205,7 +206,7 @@ class GNS3VMInterfaceSetup:
         )
 
     def _run_remote(self, command: str) -> tuple[int, str]:
-        stdin, stdout, stderr = self.gns3_ssh_connection.exec_command(command)
+        _stdin, stdout, _stderr = self.gns3_ssh_connection.exec_command(command)
         output = stdout.read().decode()
         return stdout.channel.recv_exit_status(), output
 

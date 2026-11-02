@@ -503,9 +503,9 @@ def gns3_connection_018() -> None:
     with (
         patch.object(GNS3Connection, "get", return_value=nodes),
         patch.object(GNS3Connection, "post", side_effect=fake_post) as mock_post,
+        pytest.raises(RuntimeError, match=r"Failed to start 1/3 node\(s\)"),
     ):
-        with pytest.raises(RuntimeError, match=r"Failed to start 1/3 node\(s\)"):
-            conn.start_all_nodes()
+        conn.start_all_nodes()
 
     assert mock_post.call_count == 3
     started_urls = {call.args[0] for call in mock_post.call_args_list}
@@ -723,9 +723,11 @@ def gns3_connection_025() -> None:
     conn.ip = "10.20.20.231"
 
     templates = [{"name": "VPCS", "template_id": "t1", "builtin": True}]
-    with patch.object(GNS3Connection, "get", return_value=templates):
-        with pytest.raises(ValueError):
-            conn._get_template("Nonexistent Template")
+    with (
+        patch.object(GNS3Connection, "get", return_value=templates),
+        pytest.raises(ValueError),
+    ):
+        conn._get_template("Nonexistent Template")
 
 
 @allure.title("delete_project löscht ein existierendes Projekt")
@@ -856,9 +858,9 @@ def gns3_connection_031() -> None:
         patch.object(
             GNS3Connection, "delete", side_effect=requests.exceptions.HTTPError()
         ),
+        pytest.raises(RuntimeError),
     ):
-        with pytest.raises(RuntimeError):
-            GNS3Connection.delete_node("10.20.20.231", 80, "proj-1", "node-1")
+        GNS3Connection.delete_node("10.20.20.231", 80, "proj-1", "node-1")
 
 
 @allure.title("delete_link schickt einen DELETE-Request an den richtigen Link-Endpoint")
@@ -957,9 +959,9 @@ def gns3_connection_036() -> None:
         patch.object(
             GNS3Connection, "post", side_effect=requests.exceptions.HTTPError()
         ),
+        pytest.raises(RuntimeError),
     ):
-        with pytest.raises(RuntimeError):
-            GNS3Connection.start_node("10.20.20.231", 80, "proj-1", "node-1")
+        GNS3Connection.start_node("10.20.20.231", 80, "proj-1", "node-1")
 
 
 @allure.title("stop_node schickt einen POST-Request an den richtigen Stop-Endpoint")
@@ -1017,9 +1019,9 @@ def gns3_connection_039() -> None:
         patch.object(
             GNS3Connection, "post", side_effect=requests.exceptions.HTTPError()
         ),
+        pytest.raises(RuntimeError),
     ):
-        with pytest.raises(RuntimeError):
-            GNS3Connection.stop_node("10.20.20.231", 80, "proj-1", "node-1")
+        GNS3Connection.stop_node("10.20.20.231", 80, "proj-1", "node-1")
 
 
 @allure.title("reload_node schickt einen POST-Request an den richtigen Reload-Endpoint")
@@ -1078,9 +1080,9 @@ def gns3_connection_042() -> None:
         patch.object(
             GNS3Connection, "post", side_effect=requests.exceptions.HTTPError()
         ),
+        pytest.raises(RuntimeError),
     ):
-        with pytest.raises(RuntimeError):
-            GNS3Connection.reload_node("10.20.20.231", 80, "proj-1", "node-1")
+        GNS3Connection.reload_node("10.20.20.231", 80, "proj-1", "node-1")
 
 
 @allure.title("ensure_project_open reopens a closed project before a mutating call")
@@ -1160,11 +1162,13 @@ def gns3_connection_045() -> None:
 @allure.severity(allure.severity_level.NORMAL)
 def gns3_connection_046() -> None:
     _reset_settings()
-    with patch.object(
-        GNS3Connection, "get", side_effect=requests.exceptions.HTTPError()
+    with (
+        patch.object(
+            GNS3Connection, "get", side_effect=requests.exceptions.HTTPError()
+        ),
+        pytest.raises(RuntimeError),
     ):
-        with pytest.raises(RuntimeError):
-            GNS3Connection.ensure_project_open("10.20.20.231", 80, "proj-1")
+        GNS3Connection.ensure_project_open("10.20.20.231", 80, "proj-1")
 
 
 @allure.title("ensure_project_open raises RuntimeError when reopening fails")
@@ -1182,9 +1186,9 @@ def gns3_connection_047() -> None:
         patch.object(
             GNS3Connection, "post", side_effect=requests.exceptions.HTTPError()
         ),
+        pytest.raises(RuntimeError),
     ):
-        with pytest.raises(RuntimeError):
-            GNS3Connection.ensure_project_open("10.20.20.231", 80, "proj-1")
+        GNS3Connection.ensure_project_open("10.20.20.231", 80, "proj-1")
 
 
 @allure.title(
@@ -1235,9 +1239,9 @@ def gns3_connection_049() -> None:
     with (
         patch.object(GNS3Connection, "get", return_value={"status": "opened"}),
         patch.object(GNS3Connection, "delete", side_effect=TimeoutError()),
+        pytest.raises(TimeoutError),
     ):
-        with pytest.raises(TimeoutError):
-            GNS3Connection.delete_node("10.20.20.231", 80, "proj-1", "node-1")
+        GNS3Connection.delete_node("10.20.20.231", 80, "proj-1", "node-1")
 
 
 def _nodes_with_ports():

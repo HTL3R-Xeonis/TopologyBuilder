@@ -4,12 +4,12 @@ import atexit
 import re
 import ssl
 import time
-from typing import Callable, Optional, List, TypeVar
-from typing import TYPE_CHECKING
+from collections.abc import Callable
+from typing import TYPE_CHECKING, TypeVar
 
 import pyVmomi
 from loguru import logger
-from pyVim.connect import SmartConnect, Disconnect
+from pyVim.connect import Disconnect, SmartConnect
 from pyVmomi import vim, vmodl
 
 from .api_handler import APIHandler
@@ -17,10 +17,9 @@ from .generic_connection import GenericConnection
 
 if TYPE_CHECKING:
     from src.graph import Graph
-    from src.graph.blocks import VirtualLan, GenericNode
+    from src.graph.blocks import GenericNode, VirtualLan
 
 from src.settings import Settings, Verbosity
-
 
 T = TypeVar("T")
 
@@ -154,7 +153,9 @@ class ESXiConnection(GenericConnection):
             self._reconnect()
             return fn()
 
-    def _get_object_by_name(self, vim_type: type[T], name: str = None) -> T | None:
+    def _get_object_by_name(
+        self, vim_type: type[T], name: str | None = None
+    ) -> T | None:
         """
         Finds the object on the ServiceInstance by type and name.
         :param vim_type: Specifies the type of the object to look for. Should be a type of the pyVmomi library.
@@ -344,7 +345,7 @@ class ESXiConnection(GenericConnection):
         finally:
             view.Destroy()
 
-    def get_vm_ip_address(self, vm_name: str) -> Optional[str]:
+    def get_vm_ip_address(self, vm_name: str) -> str | None:
         """
         Returns the first IPv4 Address it finds on the VM with given name.
         Ignores loopback, link locals and multicast addresses.
@@ -397,9 +398,11 @@ class ESXiConnection(GenericConnection):
         :return: the matching adapter's MAC address, or None if no adapter is connected to that port group
         """
         for device in vm.config.hardware.device:
-            if isinstance(device, vim.vm.device.VirtualEthernetCard):
-                if getattr(device.backing, "deviceName", None) == port_group_name:
-                    return device.macAddress
+            if (
+                isinstance(device, vim.vm.device.VirtualEthernetCard)
+                and getattr(device.backing, "deviceName", None) == port_group_name
+            ):
+                return device.macAddress
         return None
 
     def find_virtual_switch(self) -> vim.host.VirtualSwitch | None:
@@ -554,7 +557,7 @@ class ESXiConnection(GenericConnection):
         self._ensure_port_group(Settings.ESXI.TRUNK_PORT_GROUP, 4095)
         self.ensure_bridging_security_policy(Settings.ESXI.TRUNK_PORT_GROUP)
 
-    def _get_port_groups(self) -> List[pyVmomi.vim.host.PortGroup]:
+    def _get_port_groups(self) -> list[pyVmomi.vim.host.PortGroup]:
         """
         Returns a list of all port groups connected to the virtual switch.
         :return: A list of port groups or empty list.
@@ -1014,7 +1017,7 @@ class ESXiConnection(GenericConnection):
         """
         self._wait_for_task(vm.Rename_Task(newName=new_name))
 
-    def get_vm_mac_address(self, vm: vim.VirtualMachine) -> Optional[str]:
+    def get_vm_mac_address(self, vm: vim.VirtualMachine) -> str | None:
         """
         Returns the MAC address of the VM's first Ethernet network adapter.
         :param vm: the VM to inspect
