@@ -120,6 +120,8 @@ class VMOrchestrator:
             f"Deploying {len(graph.nodes)} node(s) to project "
             f"'{Settings.GNS3.PROJECT_NAME}' (incremental={incremental})"
         )
+        if not incremental:
+            self.check_templates_readable(graph)
         self._configure_gns3_interfaces(graph, gns3_username, gns3_password)
         self.esxi_connection.ensure_virtual_switch_exists()
         if not incremental:
@@ -172,6 +174,33 @@ class VMOrchestrator:
             raise
 
         logger.info(f"Deployment complete: project '{Settings.GNS3.PROJECT_NAME}'")
+
+    @staticmethod
+    def check_templates_readable(graph: Graph) -> None:
+        """
+        Makes sure every OVA the graph's ESXi-hosted nodes need can be read, BEFORE a full deploy removes anything: a
+        template file the share can not deliver would otherwise fail the deploy after the old VMs are already deleted.
+        Each image is checked once.
+        :param graph: the topology about to be deployed
+        :return:
+        :raises ValueError: Is thrown when an image has no matching template.
+        :raises RuntimeError: Is thrown when a template file can not be read; nothing has been changed at that point.
+        """
+        checked: set[str] = set()
+        for node in graph.nodes.values():
+            if node.env != Environment.ON_ESXI or node.image in checked:
+                continue
+            checked.add(node.image)
+            ova_filename = APIHandler.find_esxi_template_file(node.image)
+            try:
+                APIHandler.check_ova_readable(ova_filename)
+            except RuntimeError as error:
+                msg = (
+                    f"Not deploying: the template of '{node.name}' ({node.image}) "
+                    f"is not usable - {error}. Nothing was changed."
+                )
+                logger.error(msg)
+                raise RuntimeError(msg) from error
 
     def delete_unused_vms(self, graph: Graph) -> None:
         """

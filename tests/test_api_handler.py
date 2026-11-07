@@ -242,3 +242,86 @@ def api_handler_009() -> None:
         APIHandler.get("http://example.com/thing", timeout=60)
 
     assert [call.kwargs["timeout"] for call in mock_get.call_args_list] == [5, 60]
+
+
+@allure.title(
+    "check_ova_readable fragt die OVA-Deploy-API und akzeptiert eine lesbare OVA"
+)
+@allure.description(
+    "Überprüft, dass check_ova_readable einen GET an {OVA_DEPLOY_URL}/ova/check "
+    "mit dem Dateinamen schickt und bei 200 nichts wirft"
+)
+@allure.tag("positiv-test", "api-handler")
+@allure.feature("api_handler")
+@allure.severity(allure.severity_level.CRITICAL)
+def api_handler_010() -> None:
+    response = MagicMock(status_code=200, ok=True)
+
+    with patch(
+        "src.connections.api_handler.requests.get", return_value=response
+    ) as mock_get:
+        APIHandler.check_ova_readable("ubuntu-server.ova")
+
+    mock_get.assert_called_once_with(
+        f"{Settings.API.OVA_DEPLOY_URL}/ova/check",
+        params={"ova_filename": "ubuntu-server.ova"},
+        timeout=Settings.API.OVA_CHECK_TIMEOUT_SECONDS,
+    )
+
+
+@allure.title(
+    "check_ova_readable meldet eine nicht lesbare OVA mit dem Grund des Dienstes"
+)
+@allure.description(
+    "Überprüft, dass check_ova_readable bei einem 503 einen RuntimeError mit dem "
+    "'detail' der Antwort wirft"
+)
+@allure.tag("negativ-test", "api-handler")
+@allure.feature("api_handler")
+@allure.severity(allure.severity_level.CRITICAL)
+def api_handler_011() -> None:
+    response = MagicMock(status_code=503, ok=False)
+    response.json.return_value = {"detail": "OVA 'x.ova' can not be read: ENXIO"}
+
+    with (
+        patch("src.connections.api_handler.requests.get", return_value=response),
+        pytest.raises(RuntimeError, match="can not be read: ENXIO"),
+    ):
+        APIHandler.check_ova_readable("x.ova")
+
+
+@allure.title(
+    "check_ova_readable überspringt den Check bei einem Dienst ohne /ova/check"
+)
+@allure.description(
+    "Überprüft, dass ein 404 (älterer Dienst ohne diese Route) keinen Fehler auslöst"
+)
+@allure.tag("positiv-test", "api-handler")
+@allure.feature("api_handler")
+@allure.severity(allure.severity_level.NORMAL)
+def api_handler_012() -> None:
+    response = MagicMock(status_code=404, ok=False)
+
+    with patch("src.connections.api_handler.requests.get", return_value=response):
+        APIHandler.check_ova_readable("x.ova")
+
+
+@allure.title(
+    "check_ova_readable wirft RuntimeError, wenn der Dienst nicht erreichbar ist"
+)
+@allure.description(
+    "Überprüft, dass ein Verbindungsfehler als RuntimeError gemeldet wird - vor dem "
+    "Deploy, solange noch nichts gelöscht wurde"
+)
+@allure.tag("negativ-test", "api-handler")
+@allure.feature("api_handler")
+@allure.severity(allure.severity_level.NORMAL)
+def api_handler_013() -> None:
+    with (
+        patch(
+            "src.connections.api_handler.requests.get",
+            side_effect=requests.exceptions.ConnectionError("down"),
+        ),
+        pytest.raises(RuntimeError, match="not reachable"),
+    ):
+        APIHandler.check_ova_readable("x.ova")

@@ -176,6 +176,42 @@ class APIHandler:
         raise ValueError(msg)
 
     @staticmethod
+    def check_ova_readable(ova_filename: str) -> None:
+        """
+        Asks the OVA-deploy API whether an OVA can be read from its template share right now (GET /ova/check) - asked
+        before a deploy removes anything, because a file that can not be read only fails the deploy after the old
+        VMs are gone. An older service without that endpoint answers 404 for the route: that is not a problem with
+        the file and the check is skipped.
+        :param ova_filename: Exact OVA filename on the service's NFS mount.
+        :return:
+        :raises RuntimeError: Is thrown when the file does not exist or can not be read, or the service can not be reached.
+        """
+        try:
+            response = requests.get(
+                f"{Settings.API.OVA_DEPLOY_URL}/ova/check",
+                params={"ova_filename": ova_filename},
+                timeout=Settings.API.OVA_CHECK_TIMEOUT_SECONDS,
+            )
+        except requests.exceptions.RequestException as error:
+            logger.error(
+                msg
+                := f"OVA deploy service not reachable while checking '{ova_filename}': {error}"
+            )
+            raise RuntimeError(msg)
+        if response.status_code == 404:
+            logger.warning(
+                "OVA deploy service has no /ova/check endpoint, skipping the check"
+            )
+            return
+        if not response.ok:
+            try:
+                detail = response.json().get("detail", response.text)
+            except ValueError:
+                detail = response.text
+            logger.error(msg := f"OVA '{ova_filename}' failed the check: {detail}")
+            raise RuntimeError(msg)
+
+    @staticmethod
     def deploy_ova(
         ip: str,
         port: int,

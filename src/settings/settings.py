@@ -285,6 +285,9 @@ class Settings:
         """How long to wait for a response from the OVA-deploy API. This
         is a synchronous call that blocks for the entire server-side
         transfer, with no progress polling exposed over HTTP."""
+        OVA_CHECK_TIMEOUT_SECONDS: int = 60
+        """How long to wait for the OVA-deploy API to prove that an OVA can be
+        read (it reads the start and the end of the file from the NFS share)."""
 
         LITERAL_API_VALUES: bool = (
             os.getenv("LITERAL_API_VALUES", "false").lower() == "true"

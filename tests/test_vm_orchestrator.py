@@ -1626,3 +1626,86 @@ def vm_orchestrator_047() -> None:
     assert (
         VMOrchestrator._wanted_link_ports(a, "gi0/1", {"node_id": "n2"}, "eth0") is None
     )
+
+
+def _esxi_node(name: str, image: str) -> MagicMock:
+    from src.graph import Environment
+
+    node = MagicMock()
+    node.name = name
+    node.image = image
+    node.env = Environment.ON_ESXI
+    return node
+
+
+@allure.title("deploy_graph bricht vor dem Löschen ab, wenn eine OVA nicht lesbar ist")
+@allure.description(
+    "Überprüft, dass ein vollständiger Deploy mit einer nicht lesbaren Template-Datei "
+    "mit RuntimeError abbricht, bevor delete_unused_vms, der vSwitch-Reset oder "
+    "irgendeine Änderung stattfinden"
+)
+@allure.tag("negativ-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_048() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    graph = MagicMock()
+    graph.nodes = {"U": _esxi_node("UBUNTU1", "Ubuntu-Server")}
+
+    with (
+        patch(
+            "src.vm_orchestrator.vm_orchestrator.APIHandler.find_esxi_template_file",
+            return_value="ubuntu.ova",
+        ),
+        patch(
+            "src.vm_orchestrator.vm_orchestrator.APIHandler.check_ova_readable",
+            side_effect=RuntimeError("can not be read"),
+        ),
+        patch.object(orchestrator, "delete_unused_vms") as delete_unused_vms,
+        patch("src.vm_orchestrator.vm_orchestrator.GNS3Connection") as gns3_cls,
+        pytest.raises(RuntimeError, match="Nothing was changed"),
+    ):
+        orchestrator.deploy_graph(graph, "gns3", "gns3pw")
+
+    delete_unused_vms.assert_not_called()
+    esxi_connection.reset_virtual_switch.assert_not_called()
+    esxi_connection.initialize_virtual_switch.assert_not_called()
+    gns3_cls.assert_not_called()
+
+
+@allure.title(
+    "check_templates_readable prüft jedes Image nur einmal und nur ESXi-Nodes"
+)
+@allure.description(
+    "Überprüft, dass zwei Nodes mit demselben Image eine Prüfung auslösen und ein "
+    "GNS3-Node keine"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.NORMAL)
+def vm_orchestrator_049() -> None:
+    from src.graph import Environment
+
+    gns3_node = MagicMock()
+    gns3_node.image = "Cisco IOSv"
+    gns3_node.env = Environment.ON_GNS3
+    graph = MagicMock()
+    graph.nodes = {
+        "a": _esxi_node("A", "debian"),
+        "b": _esxi_node("B", "debian"),
+        "c": gns3_node,
+    }
+
+    with (
+        patch(
+            "src.vm_orchestrator.vm_orchestrator.APIHandler.find_esxi_template_file",
+            return_value="debian.ova",
+        ) as find_file,
+        patch(
+            "src.vm_orchestrator.vm_orchestrator.APIHandler.check_ova_readable"
+        ) as check,
+    ):
+        VMOrchestrator.check_templates_readable(graph)
+
+    find_file.assert_called_once_with("debian")
+    check.assert_called_once_with("debian.ova")
