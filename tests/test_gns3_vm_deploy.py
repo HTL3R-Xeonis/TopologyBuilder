@@ -541,3 +541,59 @@ def gns3_vm_deploy_902() -> None:
 
         esxi_connection.set_vm_resources.assert_called_once_with(new_vm, *expected)
         assert calls == ["resources", "power on"]
+
+
+def _deploy_with(esxi_connection, new_vm) -> str:
+    with patch("src.gns3_vm_deploy.OVAImporter") as importer_cls:
+        importer_cls.return_value.import_ova.return_value = new_vm
+        return deploy_fresh_gns3_vm(
+            esxi_connection,
+            "GNS-VM-1",
+            "/mnt/nfs/gns3.ova",
+            "datastore1",
+            "PG-MGMT",
+            "PG_GNS3_TRUNK",
+        )
+
+
+@allure.title("deploy_fresh_gns3_vm lässt die neue VM mit dem ESXi-Host starten")
+@allure.description(
+    "Überprüft, dass die neue GNS3-VM vor dem Einschalten Autostart bekommt und die "
+    "als Backup umbenannte alte VM ihn verliert, damit nach einem Host-Neustart nicht "
+    "beide mit derselben MAC starten"
+)
+@allure.tag("positiv-test", "gns3_vm_deploy")
+@allure.feature("gns3_vm_deploy")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_vm_deploy_903() -> None:
+    esxi_connection = MagicMock()
+    old_vm = MagicMock()
+    esxi_connection.get_vm.return_value = old_vm
+    esxi_connection.get_vm_ip_address.return_value = "10.20.20.233"
+    new_vm = MagicMock()
+    order = []
+    esxi_connection.set_vm_autostart.side_effect = lambda vm, on: order.append((vm, on))
+    esxi_connection.power_on_vm.side_effect = lambda vm: order.append(("on", vm))
+
+    _deploy_with(esxi_connection, new_vm)
+
+    assert order == [(old_vm, False), (new_vm, True), ("on", new_vm)]
+
+
+@allure.title("deploy_fresh_gns3_vm läuft auch ohne möglichen Autostart weiter")
+@allure.description(
+    "Überprüft, dass ein Fehler beim Setzen des Autostarts den Deploy nicht abbricht: "
+    "die VM wird trotzdem eingeschaltet und die IP-Adresse zurückgegeben"
+)
+@allure.tag("negativ-test", "gns3_vm_deploy")
+@allure.feature("gns3_vm_deploy")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_vm_deploy_904() -> None:
+    esxi_connection = MagicMock()
+    esxi_connection.get_vm.return_value = None
+    esxi_connection.get_vm_ip_address.return_value = "10.20.20.233"
+    esxi_connection.set_vm_autostart.side_effect = RuntimeError("no host")
+    new_vm = MagicMock()
+
+    assert _deploy_with(esxi_connection, new_vm) == "10.20.20.233"
+    esxi_connection.power_on_vm.assert_called_once_with(new_vm)

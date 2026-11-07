@@ -1677,3 +1677,106 @@ def esxi_connection_062() -> None:
     conn.view_manager.CreateContainerView.return_value = container_view
 
     assert conn.find_gns3_vm() is live
+
+
+def _autostart_vm(defaults_enabled: bool) -> tuple[MagicMock, MagicMock]:
+    vm = MagicMock()
+    vm.name = "GNS-VM-1"
+    manager = vm.runtime.host.configManager.autoStartManager
+    manager.config.defaults.enabled = defaults_enabled
+    manager.config.defaults.startDelay = 120
+    manager.config.defaults.stopDelay = 120
+    manager.config.defaults.waitForHeartbeat = False
+    manager.config.defaults.stopAction = "powerOff"
+    return vm, manager
+
+
+@allure.title("set_vm_autostart lässt die VM mit dem ESXi-Host starten")
+@allure.description(
+    "Überprüft, dass set_vm_autostart(enabled=True) die VM als erste per powerOn "
+    "mit dem Host starten lässt und den Autostart des Hosts einschaltet, wenn er "
+    "aus war, ohne dessen Verzögerungen zu ändern"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def esxi_connection_067() -> None:
+    conn = _make_esxi_connection()
+    vm, manager = _autostart_vm(defaults_enabled=False)
+
+    with patch("src.connections.esxi_connection.vim") as fake_vim:
+        conn.set_vm_autostart(vm, True)
+
+    autostart = fake_vim.host.AutoStartManager
+    defaults_kwargs = autostart.SystemDefaults.call_args.kwargs
+    assert defaults_kwargs["enabled"] is True
+    assert (defaults_kwargs["startDelay"], defaults_kwargs["stopDelay"]) == (120, 120)
+    info_kwargs = autostart.AutoPowerInfo.call_args.kwargs
+    assert info_kwargs["key"] is vm
+    assert (
+        info_kwargs["startAction"],
+        info_kwargs["startOrder"],
+        info_kwargs["stopAction"],
+    ) == ("powerOn", 1, "guestShutdown")
+    spec = autostart.Config.return_value
+    assert spec.defaults is autostart.SystemDefaults.return_value
+    assert spec.powerInfo == [autostart.AutoPowerInfo.return_value]
+    manager.ReconfigureAutostart.assert_called_once_with(spec)
+
+
+@allure.title(
+    "set_vm_autostart lässt die Host-Einstellung in Ruhe, wenn sie schon an ist"
+)
+@allure.description(
+    "Überprüft, dass set_vm_autostart(enabled=True) die Standardwerte des Hosts "
+    "nicht neu schreibt, wenn sein Autostart schon eingeschaltet ist"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def esxi_connection_068() -> None:
+    conn = _make_esxi_connection()
+    vm, manager = _autostart_vm(defaults_enabled=True)
+
+    with patch("src.connections.esxi_connection.vim") as fake_vim:
+        conn.set_vm_autostart(vm, True)
+
+    fake_vim.host.AutoStartManager.SystemDefaults.assert_not_called()
+    manager.ReconfigureAutostart.assert_called_once()
+
+
+@allure.title("set_vm_autostart nimmt der VM den Autostart wieder weg")
+@allure.description(
+    "Überprüft, dass set_vm_autostart(enabled=False) die VM auf startAction 'none' "
+    "setzt, damit z. B. ein Backup nicht neben der neuen VM startet"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def esxi_connection_069() -> None:
+    conn = _make_esxi_connection()
+    vm, manager = _autostart_vm(defaults_enabled=True)
+
+    with patch("src.connections.esxi_connection.vim") as fake_vim:
+        conn.set_vm_autostart(vm, False)
+
+    info_kwargs = fake_vim.host.AutoStartManager.AutoPowerInfo.call_args.kwargs
+    assert info_kwargs["startAction"] == "none"
+    manager.ReconfigureAutostart.assert_called_once()
+
+
+@allure.title("set_vm_autostart wirft einen Fehler, wenn die VM auf keinem Host liegt")
+@allure.description(
+    "Überprüft, dass set_vm_autostart eine RuntimeError wirft, wenn die VM keinem "
+    "Host zugeordnet ist"
+)
+@allure.tag("negativ-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def esxi_connection_070() -> None:
+    conn = _make_esxi_connection()
+    vm = MagicMock()
+    vm.runtime.host = None
+
+    with pytest.raises(RuntimeError):
+        conn.set_vm_autostart(vm, True)

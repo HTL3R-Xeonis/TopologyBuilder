@@ -989,6 +989,42 @@ class ESXiConnection(GenericConnection):
         if vm.runtime.powerState == vim.VirtualMachine.PowerState.poweredOn:
             self._wait_for_task(vm.ResetVM_Task())
 
+    def set_vm_autostart(self, vm: vim.VirtualMachine, enabled: bool) -> None:
+        """
+        Makes the ESXi host power the given VM on when the host itself starts (and shut it down gracefully when the host
+        stops), or takes that away again. Nothing comes back by itself after a host restart otherwise. Switching it on also
+        switches the host's autostart service on if it was off; the host's own delays stay as they are.
+        :param vm: the VM to configure
+        :param enabled: True = start with the host (first in order), False = do not start with the host
+        :raises RuntimeError: if the VM is not placed on a host
+        """
+        host = vm.runtime.host
+        if host is None:
+            raise RuntimeError(f"VM '{vm.name}' is not placed on an ESXi host")
+        manager = host.configManager.autoStartManager
+        spec = vim.host.AutoStartManager.Config()
+        defaults = manager.config.defaults
+        if enabled and not defaults.enabled:
+            spec.defaults = vim.host.AutoStartManager.SystemDefaults(
+                enabled=True,
+                startDelay=defaults.startDelay,
+                stopDelay=defaults.stopDelay,
+                waitForHeartbeat=defaults.waitForHeartbeat,
+                stopAction=defaults.stopAction,
+            )
+        spec.powerInfo = [
+            vim.host.AutoStartManager.AutoPowerInfo(
+                key=vm,
+                startAction="powerOn" if enabled else "none",
+                startOrder=1 if enabled else -1,
+                startDelay=-1,
+                waitForHeartbeat="systemDefault",
+                stopAction="guestShutdown" if enabled else "systemDefault",
+                stopDelay=-1,
+            )
+        ]
+        manager.ReconfigureAutostart(spec)
+
     def delete_vm(self, vm: vim.VirtualMachine) -> None:
         """
         Powers off (if needed) and permanently deletes the given VM. Used

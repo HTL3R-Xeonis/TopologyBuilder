@@ -16,6 +16,7 @@ from collections.abc import Callable
 from datetime import datetime
 
 from loguru import logger
+from pyVmomi import vmodl
 
 from src.connections.api_handler import APIHandler
 from src.connections.esxi_connection import ESXiConnection
@@ -29,6 +30,19 @@ _IP_WAIT_POLL_INTERVAL_SECONDS = 5
 # GNS3 VM OVA comes with 1 vCPU / 2 GB, far too little for a handful of IOSv nodes).
 DEFAULT_GNS3_VM_CPUS = 4
 DEFAULT_GNS3_VM_MEMORY_MB = 8192
+
+
+def _set_autostart(
+    esxi_connection: ESXiConnection, vm: object, vm_name: str, enabled: bool
+) -> None:
+    """Starts the VM with its ESXi host (or stops doing so). Never fails the deploy: it is a convenience on top of it."""
+    try:
+        esxi_connection.set_vm_autostart(vm, enabled)
+        logger.info(
+            f"'{vm_name}' VM {'starts' if enabled else 'no longer starts'} with the ESXi host"
+        )
+    except (RuntimeError, ConnectionError, vmodl.MethodFault) as exc:
+        logger.warning(f"Could not change the autostart of '{vm_name}' VM: {exc}")
 
 
 def deploy_fresh_gns3_vm(
@@ -145,6 +159,9 @@ def deploy_fresh_gns3_vm(
         backup_name = f"{vm_name}-backup-{datetime.now().astimezone():%Y%m%d%H%M%S}"
         esxi_connection.rename_vm(old_vm, backup_name)
         logger.info(f"Renamed existing '{vm_name}' VM to '{backup_name}'")
+        # The backup keeps the old VM's autostart entry (it belongs to the VM, not to the name): without this the host
+        # would start it next to the new VM after a restart, with the same MAC address.
+        _set_autostart(esxi_connection, old_vm, backup_name, enabled=False)
 
     stage("importing OVA")
     if ova_filename is not None:
@@ -199,6 +216,9 @@ def deploy_fresh_gns3_vm(
     stage("setting CPU and memory")
     logger.info(f"Setting '{vm_name}' VM to {cpus} vCPU(s) and {memory_mb} MB memory")
     esxi_connection.set_vm_resources(new_vm, cpus, memory_mb)
+
+    # After a host restart nothing comes back by itself, so the new GNS3 VM starts with the host.
+    _set_autostart(esxi_connection, new_vm, vm_name, enabled=True)
 
     stage("powering on")
     logger.info(f"Powering on '{vm_name}' VM")
