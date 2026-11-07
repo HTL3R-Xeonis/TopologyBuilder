@@ -61,5 +61,5 @@ class GNS3Orchestrator:
         gns3_connection = SSHConnection(self.gns3_connection.ip, port, gns3_username, gns3_password)
         gns3_interface_setup = GNS3VMInterfaceSetup(gns3_connection, Settings.GNS3.PARENT_INTERFACE)
 
-        gns3_interface_setup.initialize_commands(graph)
-        gns3_interface_setup.execute_script()
+        gns3_interface_setup.initialize_yaml(graph)
+        gns3_interface_setup.apply_yaml()
