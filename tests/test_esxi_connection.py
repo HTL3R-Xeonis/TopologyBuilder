@@ -23,6 +23,8 @@ def _reset_settings() -> None:
     Settings.ONLY_ON_GNS3 = False
     Settings.ONLY_ON_ESXI = False
     Settings.IS_DRY_RUN = False
+    Settings.ESXI.TASK_TIMEOUT_SECONDS = 1800
+    Settings.ESXI.HTTP_TIMEOUT_SECONDS = 60
 
 
 @allure.title(
@@ -1780,3 +1782,59 @@ def esxi_connection_070() -> None:
 
     with pytest.raises(RuntimeError):
         conn.set_vm_autostart(vm, True)
+
+
+@allure.title(
+    "_wait_for_task wirft TimeoutError, wenn der Task nie success/error erreicht"
+)
+@allure.description(
+    "Überprüft, dass _wait_for_task aufgibt, sobald Settings.ESXI."
+    "TASK_TIMEOUT_SECONDS überschritten ist, statt für immer auf einen "
+    "serverseitig feststeckenden Task zu warten (live beobachtet: ein "
+    "gelöschter MT1 wurde nie neu angelegt, weil genau diese Schleife "
+    "stundenlang blockierte)"
+)
+@allure.tag("negativ-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_071() -> None:
+    from pyVmomi import vim
+
+    _reset_settings()
+    Settings.ESXI.TASK_TIMEOUT_SECONDS = 10
+
+    task = MagicMock()
+    task.info.state = vim.TaskInfo.State.running
+
+    with (
+        patch("src.connections.esxi_connection.time.sleep"),
+        patch("src.connections.esxi_connection.time.monotonic", side_effect=[0, 11]),
+    ):
+        with pytest.raises(TimeoutError, match=r"did not finish within 10s"):
+            ESXiConnection._wait_for_task(task)
+
+
+@allure.title("connect übergibt Settings.ESXI.HTTP_TIMEOUT_SECONDS an SmartConnect")
+@allure.description(
+    "Überprüft, dass connect() den konfigurierten Socket-Timeout an "
+    "SmartConnect weiterreicht, statt sich auf pyVmomis eigenen Default "
+    "(kein Timeout) zu verlassen - sonst kann ein einzelner vSphere-Aufruf "
+    "bei einer still gestorbenen Verbindung für immer blockieren"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_072() -> None:
+    _reset_settings()
+    Settings.ESXI.HTTP_TIMEOUT_SECONDS = 42
+
+    conn = ESXiConnection.__new__(ESXiConnection)
+    conn._ip_address = "10.20.20.202"
+    conn._port = 443
+    conn._username = "root"
+    conn._password = "secret"
+
+    with patch("src.connections.esxi_connection.SmartConnect") as smart_connect:
+        conn.connect()
+
+    assert smart_connect.call_args.kwargs["httpConnectionTimeout"] == 42

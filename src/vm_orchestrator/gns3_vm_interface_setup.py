@@ -285,17 +285,34 @@ class GNS3VMInterfaceSetup:
         Executes the commands via a remote shell on the GNS3 VM.
         :return: Returns the exit code, output and error messages
         :raises RuntimeError: Is thrown when execution of the script fails.
+        :raises TimeoutError: Is thrown when the channel is silent for
+            longer than Settings.GNS3.INTERFACE_SETUP_TIMEOUT_SECONDS - a
+            connection that goes dead mid-script (no RST/FIN) would
+            otherwise leave stdout.read()/stderr.read() blocking forever
+            (observed live; see that setting's own docstring).
         """
         if Settings.IS_DRY_RUN:
             return 0, "", ""
 
-        stdin, stdout, stderr = self.gns3_ssh_connection.exec_command("sudo bash -s")
-        stdin.write(self.script)
-        stdin.flush()
-        stdin.channel.shutdown_write()
+        stdin, stdout, stderr = self.gns3_ssh_connection.exec_command(
+            "sudo bash -s", timeout=Settings.GNS3.INTERFACE_SETUP_TIMEOUT_SECONDS
+        )
+        try:
+            stdin.write(self.script)
+            stdin.flush()
+            stdin.channel.shutdown_write()
 
-        output = stdout.read().decode()
-        errors = stderr.read().decode()
+            output = stdout.read().decode()
+            errors = stderr.read().decode()
+        except TimeoutError:
+            logger.error(
+                msg := (
+                    f"The GNS3 VM's VLAN subinterface script did not answer "
+                    f"within {Settings.GNS3.INTERFACE_SETUP_TIMEOUT_SECONDS:.0f}s "
+                    f"- giving up"
+                )
+            )
+            raise TimeoutError(msg) from None
         exit_code = stdout.channel.recv_exit_status()
         if stderr.channel.recv_exit_status() != 0:
             logger.error(

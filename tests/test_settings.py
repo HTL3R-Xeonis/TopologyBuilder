@@ -73,10 +73,13 @@ def _reset_esxi_gns3_defaults() -> None:
     Settings.ESXI.GNS3_VM_OVA_PATH = None
     Settings.ESXI.GNS3_VM_MGMT_NETWORK = None
     Settings.ESXI.GNS3_VM_MAC_RANGE = None
+    Settings.ESXI.HTTP_TIMEOUT_SECONDS = 60
+    Settings.ESXI.TASK_TIMEOUT_SECONDS = 1800
     Settings.GNS3.USERNAME = "gns3"
     Settings.GNS3.PROJECT_NAME = None
     Settings.GNS3.PORT = 80
     Settings.GNS3.PARENT_INTERFACE = None
+    Settings.GNS3.INTERFACE_SETUP_TIMEOUT_SECONDS = 120
     Settings.TOPOLOGY_FILE = "./topology_example.yaml"
     Settings.GENERATE_MAX_RETRIES = 3
     Settings.INCREMENTAL_DEPLOY = True
@@ -111,12 +114,15 @@ def settings_000(tmp_path) -> None:
                 "gns3_vm_ova_path": "/mnt/nfs/gns3.ova",
                 "gns3_vm_mgmt_network": "PG-MGMT",
                 "gns3_vm_mac_range": ["00:50:56:00:10:00", "00:50:56:00:10:ff"],
+                "http_timeout_seconds": 30,
+                "task_timeout_seconds": 900,
             },
             "gns3": {
                 "username": "gns3user",
                 "project_name": "my_lab",
                 "port": 8080,
                 "parent_interface": "eth2",
+                "interface_setup_timeout_seconds": 45,
             },
             "api": {
                 "esxi_template_server_url": "http://example.com:8000",
@@ -146,10 +152,13 @@ def settings_000(tmp_path) -> None:
             "00:50:56:00:10:00",
             "00:50:56:00:10:ff",
         )
+        assert Settings.ESXI.HTTP_TIMEOUT_SECONDS == 30
+        assert Settings.ESXI.TASK_TIMEOUT_SECONDS == 900
         assert Settings.GNS3.USERNAME == "gns3user"
         assert Settings.GNS3.PROJECT_NAME == "my_lab"
         assert Settings.GNS3.PORT == 8080
         assert Settings.GNS3.PARENT_INTERFACE == "eth2"
+        assert Settings.GNS3.INTERFACE_SETUP_TIMEOUT_SECONDS == 45
         assert Settings.API.ESXI_TEMPLATE_SERVER_URL == "http://example.com:8000"
         assert Settings.API.GNS3_TEMPLATE_SERVER_URL == "http://example.com:8001"
         assert Settings.API.OVA_DEPLOY_URL == "http://example.com:8003"

@@ -91,6 +91,7 @@ class ESXiConnection(GenericConnection):
             ssl_context.verify_mode = ssl.CERT_NONE
 
             instance = SmartConnect(
+                httpConnectionTimeout=Settings.ESXI.HTTP_TIMEOUT_SECONDS,
                 host=self.ip,
                 user=self.username,
                 pwd=self.password,
@@ -946,15 +947,33 @@ class ESXiConnection(GenericConnection):
     @staticmethod
     def _wait_for_task(task: vim.Task) -> None:
         """
-        Blocks until the given vSphere task finishes, raising if it errors out.
+        Blocks until the given vSphere task finishes, raising if it errors
+        out or if it is still neither successful nor errored after
+        Settings.ESXI.TASK_TIMEOUT_SECONDS - a task that is itself stuck
+        server-side (e.g. a VM clone the host never finishes) would
+        otherwise loop here forever, exactly like a dead connection would
+        without Settings.ESXI.HTTP_TIMEOUT_SECONDS (see that setting's own
+        docstring for the real incident both of these fix).
         :param task: the task to wait for
         :return:
         :raises RuntimeError: Is thrown when the task fails.
+        :raises TimeoutError: Is thrown when the task neither succeeds nor
+            fails within Settings.ESXI.TASK_TIMEOUT_SECONDS.
         """
+        started = time.monotonic()
         while task.info.state not in (
             vim.TaskInfo.State.success,
             vim.TaskInfo.State.error,
         ):
+            if time.monotonic() - started > Settings.ESXI.TASK_TIMEOUT_SECONDS:
+                logger.error(
+                    msg := (
+                        f"vSphere task did not finish within "
+                        f"{Settings.ESXI.TASK_TIMEOUT_SECONDS:.0f}s "
+                        f"(still '{task.info.state}') - giving up"
+                    )
+                )
+                raise TimeoutError(msg)
             time.sleep(0.5)
         if task.info.state == vim.TaskInfo.State.error:
             logger.error(msg := f"vSphere task failed: {task.info.error}")

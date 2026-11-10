@@ -17,6 +17,7 @@ from src.vm_orchestrator.gns3_vm_interface_setup import GNS3VMInterfaceSetup
 def _reset_settings() -> None:
     Settings.IS_DRY_RUN = False
     Settings.API.LITERAL_API_VALUES = True
+    Settings.GNS3.INTERFACE_SETUP_TIMEOUT_SECONDS = 120
 
 
 @allure.title(
@@ -391,3 +392,63 @@ def gns3_vm_interface_setup_009() -> None:
     deploy = _setup_with_existing([])
     deploy.initialize_commands(graph)
     assert "base64 -d >" in deploy.script and "systemctl enable" in deploy.script
+
+
+def _setup_with_exec_command(exec_command: MagicMock) -> GNS3VMInterfaceSetup:
+    connection = MagicMock()
+    connection.exec_command = exec_command
+    return GNS3VMInterfaceSetup(connection, "eth1")
+
+
+@allure.title("execute_script übergibt das konfigurierte Timeout an exec_command")
+@allure.description(
+    "Überprüft, dass execute_script Settings.GNS3.INTERFACE_SETUP_TIMEOUT_SECONDS "
+    "als timeout an exec_command weiterreicht, statt ohne Zeitbegrenzung auf "
+    "stdout/stderr zu warten - sonst blockiert eine Verbindung, die mitten im "
+    "Skript stillschweigend stirbt (kein RST/FIN), für immer"
+)
+@allure.tag("positiv-test", "gns3-vm-interface-setup")
+@allure.feature("gns3_vm_interface_setup")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_vm_interface_setup_010() -> None:
+    _reset_settings()
+    Settings.GNS3.INTERFACE_SETUP_TIMEOUT_SECONDS = 42
+
+    stdin, stdout, stderr = MagicMock(), MagicMock(), MagicMock()
+    stdout.read.return_value = b""
+    stderr.read.return_value = b""
+    stdout.channel.recv_exit_status.return_value = 0
+    stderr.channel.recv_exit_status.return_value = 0
+    exec_command = MagicMock(return_value=(stdin, stdout, stderr))
+
+    setup = _setup_with_exec_command(exec_command)
+    setup.execute_script()
+
+    exec_command.assert_called_once_with("sudo bash -s", timeout=42)
+
+
+@allure.title(
+    "execute_script wirft einen klaren TimeoutError, wenn die Verbindung stillsteht"
+)
+@allure.description(
+    "Überprüft, dass execute_script ein TimeoutError beim Lesen von stdout "
+    "(paramikos eigenes socket.timeout, seit Python 3.10 ein Alias davon) in "
+    "einen eigenen, klaren TimeoutError umwandelt, statt es unkommentiert "
+    "durchzureichen oder - schlimmer - für immer zu blockieren"
+)
+@allure.tag("negativ-test", "gns3-vm-interface-setup")
+@allure.feature("gns3_vm_interface_setup")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_vm_interface_setup_011() -> None:
+    import pytest
+
+    _reset_settings()
+    Settings.GNS3.INTERFACE_SETUP_TIMEOUT_SECONDS = 5
+
+    stdin, stdout, stderr = MagicMock(), MagicMock(), MagicMock()
+    stdout.read.side_effect = TimeoutError("timed out")
+    exec_command = MagicMock(return_value=(stdin, stdout, stderr))
+
+    setup = _setup_with_exec_command(exec_command)
+    with pytest.raises(TimeoutError, match=r"did not answer within 5s"):
+        setup.execute_script()

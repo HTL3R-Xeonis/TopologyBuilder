@@ -86,6 +86,10 @@ class Settings:
             Settings.ESXI.GNS3_VM_OVA_PATH = esxi["gns3_vm_ova_path"]
         if "gns3_vm_mgmt_network" in esxi:
             Settings.ESXI.GNS3_VM_MGMT_NETWORK = esxi["gns3_vm_mgmt_network"]
+        if "http_timeout_seconds" in esxi:
+            Settings.ESXI.HTTP_TIMEOUT_SECONDS = esxi["http_timeout_seconds"]
+        if "task_timeout_seconds" in esxi:
+            Settings.ESXI.TASK_TIMEOUT_SECONDS = float(esxi["task_timeout_seconds"])
         if "gns3_vm_mac_range" in esxi:
             mac_range = esxi["gns3_vm_mac_range"]
             if mac_range is not None:
@@ -105,6 +109,10 @@ class Settings:
             Settings.GNS3.PORT = gns3["port"]
         if "parent_interface" in gns3:
             Settings.GNS3.PARENT_INTERFACE = gns3["parent_interface"]
+        if "interface_setup_timeout_seconds" in gns3:
+            Settings.GNS3.INTERFACE_SETUP_TIMEOUT_SECONDS = float(
+                gns3["interface_setup_timeout_seconds"]
+            )
 
         api = data.get("api", {})
         if "esxi_template_server_url" in api:
@@ -161,6 +169,30 @@ class Settings:
         """Username to use for the ESXi connections."""
         PASSWORD: str | None = os.getenv("ESXI_PASSWORD", None)
         """Password to use for the ESXi connections."""
+        HTTP_TIMEOUT_SECONDS: float | None = 60
+        """Socket-level timeout for every individual vSphere API call made
+        over this connection (passed to SmartConnect as its own
+        httpConnectionTimeout). None restores pyVmomi's own default of no
+        timeout at all, meaning a single call can block forever if the
+        connection goes silently dead (no RST/FIN) - observed live: an
+        ESXiConnection._wait_for_task poll of task.info.state hung for
+        hours during a network interruption, with no exception and no way
+        to recover short of restarting the whole process. A finished
+        vSphere call normally answers in well under a second; a
+        long-running operation (VM clone/create/delete) runs as a
+        server-side task that's checked with many short, individually-
+        bounded polls (see ESXiConnection._wait_for_task), so this does
+        not limit how long a deploy step may legitimately take - only how
+        long a single dead-connection call can block before surfacing as
+        an error instead of hanging silently."""
+        TASK_TIMEOUT_SECONDS: float = 1800
+        """Maximum total time ESXiConnection._wait_for_task spends polling
+        a single vSphere task before giving up with a TimeoutError,
+        instead of looping forever if the task's own state never reaches
+        success/error - covers a task that is itself stuck server-side
+        (as opposed to a dead connection, which HTTP_TIMEOUT_SECONDS
+        covers instead). 30 minutes is generous for even a large
+        OVA-based VM clone."""
         VIRTUAL_SWITCH: str = "internal_network"
         """Specifies the virtual switch to use on the ESXi client."""
         TRUNK_PORT_GROUP: str = "PG_GNS3_TRUNK"
@@ -246,6 +278,15 @@ class Settings:
         guaranteed to match across different GNS3 VM builds (e.g. 'eth1'
         vs. 'ens192'), but the MAC does. Set explicitly to skip detection
         and force a specific name."""
+        INTERFACE_SETUP_TIMEOUT_SECONDS: float = 120
+        """Timeout for the SSH channel GNS3VMInterfaceSetup.execute_script
+        uses to run the VLAN-subinterface script on the GNS3 VM (passed to
+        paramiko's exec_command, which applies it to the channel's
+        blocking reads/writes). Without it, a connection that goes
+        silently dead mid-script leaves stdout.read()/stderr.read()
+        blocking forever - observed live, same real incident as
+        Settings.ESXI.HTTP_TIMEOUT_SECONDS's own docstring. The script
+        itself normally finishes in well under this."""
 
     class API:
         """
