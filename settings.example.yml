@@ -71,6 +71,16 @@ esxi:
   # here or match gns3_vm_name exactly. A VM without the annotation, i.e.
   # anything this tool didn't create itself, is never touched either way.
   delete_unused_vms: true
+  # Socket-level timeout (seconds) for every individual vSphere API call.
+  # Omit to use the default (60s) - only raise it if a healthy call
+  # legitimately needs longer than that to answer.
+  # http_timeout_seconds: 60
+  # Maximum time (seconds) _wait_for_task polls a single vSphere task
+  # (VM create/delete/power/reconfigure) before giving up with a
+  # TimeoutError, instead of waiting forever for a task that's stuck on
+  # the host itself. Default 1800s (30 min) is generous for even a large
+  # OVA-based VM clone.
+  # task_timeout_seconds: 1800
 
 gns3:
   username: gns3
@@ -88,6 +98,10 @@ gns3:
   # this isn't guaranteed to match across different GNS3 VM builds. Set
   # explicitly only if auto-detection doesn't work for some reason.
   # parent_interface: eth1
+  # Timeout (seconds) for the SSH channel that runs the VLAN-subinterface
+  # script on the GNS3 VM. Default 120s; the script itself normally
+  # finishes well under that.
+  # interface_setup_timeout_seconds: 120
 
 api:
   # Base URLs of the ESXi/NFS template-listing service, the GNS3
