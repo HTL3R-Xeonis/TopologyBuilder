@@ -1339,3 +1339,103 @@ def gns3_connection_051() -> None:
     assert conn._link_exists(
         "n1", "n2", (1, 0), (1, 0)
     )  # nothing to tell links apart: one per pair
+
+
+def _get_side_effect(project_status: str, listing: list[dict]):
+    """GNS3Connection.get's URL tells ensure_project_open's own probe apart from the gone-check's own listing call."""
+
+    def fake_get(url: str, *args, **kwargs):
+        if url.endswith(("/nodes", "/links")):
+            return listing
+        return {"status": project_status}
+
+    return fake_get
+
+
+@allure.title(
+    "delete_node tolerates an error GNS3 answers for a delete it processed anyway"
+)
+@allure.description(
+    "Real bug found live: GNS3 can answer an error to a delete request it "
+    "processed regardless (e.g. a concurrent request on the same project at "
+    "that moment) - confirming the node is really gone must not still raise"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_052() -> None:
+    _reset_settings()
+    with (
+        patch.object(GNS3Connection, "get", side_effect=_get_side_effect("opened", [])),
+        patch.object(
+            GNS3Connection, "delete", side_effect=requests.exceptions.HTTPError()
+        ),
+    ):
+        GNS3Connection.delete_node("10.20.20.231", 80, "proj-1", "node-1")
+
+
+@allure.title("delete_node still raises when the node genuinely is not gone")
+@allure.description(
+    "The tolerance added for the case above must not swallow a real failure - "
+    "if the node is still listed, the original RuntimeError still propagates"
+)
+@allure.tag("negativ-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_connection_053() -> None:
+    _reset_settings()
+    with (
+        patch.object(
+            GNS3Connection,
+            "get",
+            side_effect=_get_side_effect("opened", [{"node_id": "node-1"}]),
+        ),
+        patch.object(
+            GNS3Connection, "delete", side_effect=requests.exceptions.HTTPError()
+        ),
+        pytest.raises(RuntimeError),
+    ):
+        GNS3Connection.delete_node("10.20.20.231", 80, "proj-1", "node-1")
+
+
+@allure.title(
+    "delete_link tolerates an error GNS3 answers for a delete it processed anyway"
+)
+@allure.description(
+    "Same reasoning as delete_node's own tolerance, for a link instead of a node"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_054() -> None:
+    _reset_settings()
+    with (
+        patch.object(GNS3Connection, "get", side_effect=_get_side_effect("opened", [])),
+        patch.object(
+            GNS3Connection, "delete", side_effect=requests.exceptions.HTTPError()
+        ),
+    ):
+        GNS3Connection.delete_link("10.20.20.231", 80, "proj-1", "link-1")
+
+
+@allure.title("delete_link still raises when the link genuinely is not gone")
+@allure.description(
+    "Same reasoning as delete_node's own regression guard, for a link instead of a node"
+)
+@allure.tag("negativ-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_connection_055() -> None:
+    _reset_settings()
+    with (
+        patch.object(
+            GNS3Connection,
+            "get",
+            side_effect=_get_side_effect("opened", [{"link_id": "link-1"}]),
+        ),
+        patch.object(
+            GNS3Connection, "delete", side_effect=requests.exceptions.HTTPError()
+        ),
+        pytest.raises(RuntimeError),
+    ):
+        GNS3Connection.delete_link("10.20.20.231", 80, "proj-1", "link-1")

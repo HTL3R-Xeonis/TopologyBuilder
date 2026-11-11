@@ -305,10 +305,31 @@ class GNS3Connection(APIHandler):
                 timeout=_NODE_START_TIMEOUT_SECONDS,
             )
         except requests.exceptions.HTTPError as exc:
+            if GNS3Connection._node_is_gone(ip, port, project_id, node_id):
+                logger.warning(
+                    f"GNS3 answered an error deleting node '{node_id}' on {ip}, but "
+                    f"the node is already gone - treating it as deleted."
+                )
+                return
             logger.error(
                 msg := f"Something went wrong deleting node '{node_id}' on {ip}"
             )
             raise RuntimeError(msg) from exc
+
+    @staticmethod
+    def _node_is_gone(ip: str, port: int, project_id: str, node_id: str) -> bool:
+        """
+        Confirms a node is really gone after GNS3 answered an error to its own delete call - seen live: GNS3's
+        controller can return an error for a delete it processed anyway (e.g. a concurrent request on the same
+        project at that moment), which would otherwise make a caller believe the delete never happened. A failed
+        re-check (GNS3 unreachable right now) is NOT treated as "gone" - the original error still gets raised then,
+        same as before this check existed.
+        """
+        try:
+            nodes = GNS3Connection.list_project_nodes(ip, port, project_id)
+            return not any(node.get("node_id") == node_id for node in nodes)
+        except Exception:  # noqa: BLE001 - any problem re-checking just falls back to the original error
+            return False
 
     @staticmethod
     def delete_link(ip: str, port: int, project_id: str, link_id: str) -> None:
@@ -334,10 +355,25 @@ class GNS3Connection(APIHandler):
                 f"http://{ip}:{port}/v2/projects/{project_id}/links/{link_id}"
             )
         except requests.exceptions.HTTPError as exc:
+            if GNS3Connection._link_is_gone(ip, port, project_id, link_id):
+                logger.warning(
+                    f"GNS3 answered an error deleting link '{link_id}' on {ip}, but "
+                    f"the link is already gone - treating it as deleted."
+                )
+                return
             logger.error(
                 msg := f"Something went wrong deleting link '{link_id}' on {ip}"
             )
             raise RuntimeError(msg) from exc
+
+    @staticmethod
+    def _link_is_gone(ip: str, port: int, project_id: str, link_id: str) -> bool:
+        """Same reasoning as _node_is_gone, for a link instead of a node."""
+        try:
+            links = GNS3Connection.list_project_links(ip, port, project_id)
+            return not any(link.get("link_id") == link_id for link in links)
+        except Exception:  # noqa: BLE001 - any problem re-checking just falls back to the original error
+            return False
 
     @staticmethod
     def start_node(ip: str, port: int, project_id: str, node_id: str) -> None:
