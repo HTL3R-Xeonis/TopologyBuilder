@@ -173,6 +173,8 @@ def deploy_fresh_gns3_vm(
             ova_filename,
             datastore_name,
             {"management": mgmt_network_name, "trunk": trunk_network_name},
+            Settings.ESXI.USERNAME,
+            Settings.ESXI.PASSWORD,
         )
         new_vm = esxi_connection.get_vm(vm_name)
         if new_vm is None:

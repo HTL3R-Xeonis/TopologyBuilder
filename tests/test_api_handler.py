@@ -325,3 +325,67 @@ def api_handler_013() -> None:
         pytest.raises(RuntimeError, match="not reachable"),
     ):
         APIHandler.check_ova_readable("x.ova")
+
+
+@allure.title(
+    "deploy_ova schickt die Zugangsdaten des Hosts mit, wenn ein Passwort da ist"
+)
+@allure.description(
+    "Überprüft, dass username und password im JSON-Body landen, damit der Dienst sich "
+    "mit dem Passwort des aktiven Host-Profils anmeldet"
+)
+@allure.tag("positiv-test", "api-handler")
+@allure.feature("api_handler")
+@allure.severity(allure.severity_level.CRITICAL)
+def api_handler_credentials_001() -> None:
+    response = MagicMock()
+    with patch(
+        "src.connections.api_handler.requests.post", return_value=response
+    ) as mock_post:
+        APIHandler.deploy_ova(
+            "10.20.20.205", 443, "PC1", "a.ova", "ds", {}, "admin", "s3cret"
+        )
+
+    body = mock_post.call_args.kwargs["json"]
+    assert body["username"] == "admin"
+    assert body["password"] == "s3cret"
+
+
+@allure.title("deploy_ova schickt ohne Passwort keine Zugangsdaten")
+@allure.tag("positiv-test", "api-handler")
+@allure.feature("api_handler")
+@allure.severity(allure.severity_level.NORMAL)
+def api_handler_credentials_002() -> None:
+    with patch(
+        "src.connections.api_handler.requests.post", return_value=MagicMock()
+    ) as mock_post:
+        APIHandler.deploy_ova("10.20.20.205", 443, "PC1", "a.ova", "ds", {})
+
+    body = mock_post.call_args.kwargs["json"]
+    assert "username" not in body and "password" not in body
+
+
+@allure.title("deploy_ova maskiert das Passwort in Fehlertexten des Dienstes")
+@allure.description(
+    "Ein Validierungsfehler des Dienstes kann den Request-Body zurückspiegeln; das Passwort "
+    "darf dann weder in der RuntimeError-Meldung noch im Log stehen"
+)
+@allure.tag("negativ-test", "api-handler")
+@allure.feature("api_handler")
+@allure.severity(allure.severity_level.CRITICAL)
+def api_handler_credentials_003() -> None:
+    error = requests.HTTPError("422 error")
+    error.response = MagicMock(text='{"detail":[{"input":{"password":"s3cret"}}]}')
+    response = MagicMock()
+    response.raise_for_status.side_effect = error
+
+    with (
+        patch("src.connections.api_handler.requests.post", return_value=response),
+        pytest.raises(RuntimeError) as raised,
+    ):
+        APIHandler.deploy_ova(
+            "10.20.20.205", 443, "PC1", "a.ova", "ds", {}, "root", "s3cret"
+        )
+
+    assert "s3cret" not in str(raised.value)
+    assert "***" in str(raised.value)

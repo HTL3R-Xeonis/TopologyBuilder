@@ -219,6 +219,8 @@ class APIHandler:
         ova_filename: str,
         datastore: str,
         network: dict[str, str],
+        username: str | None = None,
+        password: str | None = None,
     ) -> None:
         """
         Deploys an OVA straight from the TopologyBuilderServices API's own
@@ -230,21 +232,29 @@ class APIHandler:
         :param ova_filename: Exact OVA filename on the service's NFS mount.
         :param datastore: Name of the datastore to import onto.
         :param network: Mapping of the OVA's interface names to ESXi port group names.
+        :param username: ESXi user name to log in with. Only sent together with a password.
+        :param password: ESXi password of the host this deploy belongs to (the active host profile's). When given, the
+            service logs in with it instead of looking one up by address, so a host added in the app works at once.
+            It is never logged: error texts that came back from the service have it masked.
         :return:
         :raises RuntimeError: Is thrown when the API call fails.
         :raises TimeoutError: Is thrown when it takes too long to receive a response.
         """
+        payload: dict[str, object] = {
+            "ip": ip,
+            "port": port,
+            "vm_name": vm_name,
+            "ova_filename": ova_filename,
+            "datastore": datastore,
+            "network": network,
+        }
+        if password:
+            payload["username"] = username or "root"
+            payload["password"] = password
         try:
             response = requests.post(
                 f"{Settings.API.OVA_DEPLOY_URL}/deploy/ova",
-                json={
-                    "ip": ip,
-                    "port": port,
-                    "vm_name": vm_name,
-                    "ova_filename": ova_filename,
-                    "datastore": datastore,
-                    "network": network,
-                },
+                json=payload,
                 timeout=Settings.API.OVA_DEPLOY_TIMEOUT_SECONDS,
             )
             response.raise_for_status()
@@ -252,9 +262,12 @@ class APIHandler:
             logger.error(msg := f"OVA deploy request timed out for VM '{vm_name}'")
             raise TimeoutError(msg)
         except requests.exceptions.RequestException as error:
+            detail = f"{error}. Response: {getattr(error.response, 'text', '')}"
+            if password:
+                # a validation error of the service can echo the request body back
+                detail = detail.replace(password, "***")
             logger.error(
-                msg := f"OVA deploy request failed for VM '{vm_name}': {error}. "
-                f"Response: {getattr(error.response, 'text', '')}"
+                msg := f"OVA deploy request failed for VM '{vm_name}': {detail}"
             )
             raise RuntimeError(msg)
 

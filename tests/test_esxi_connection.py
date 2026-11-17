@@ -292,6 +292,8 @@ def esxi_connection_011() -> None:
     conn = _make_esxi_connection()
     conn._ip_address = "10.20.20.202"
     conn._port = 443
+    conn._username = "root"
+    conn._password = "host-password"
 
     node = GenericNode("Ubuntu-Server", "VM", "VM1")
     interface = node.add_interface("ens160")
@@ -320,6 +322,8 @@ def esxi_connection_011() -> None:
         "ubuntu-server.ova",
         "datastore1",
         {"ens160": interface.vlan.name},
+        "root",
+        "host-password",
     )
     mock_set_annotation.assert_called_once_with(
         fake_vm, "topologybuilder-image:Ubuntu-Server"

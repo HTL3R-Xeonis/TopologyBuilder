@@ -861,7 +861,14 @@ class ESXiConnection(GenericConnection):
 
         ova_filename = APIHandler.find_esxi_template_file(node.image)
         APIHandler.deploy_ova(
-            self.ip, self.port, node.name, ova_filename, datastore, network_mapping
+            self.ip,
+            self.port,
+            node.name,
+            ova_filename,
+            datastore,
+            network_mapping,
+            self.username,
+            self.password,
         )
 
         vm = self.get_vm(node.name)

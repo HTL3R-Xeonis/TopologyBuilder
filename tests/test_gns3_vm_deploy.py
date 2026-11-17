@@ -10,6 +10,7 @@ import allure
 import pytest
 
 from src.gns3_vm_deploy import deploy_fresh_gns3_vm
+from src.settings import Settings
 
 
 @allure.title("deploy_fresh_gns3_vm importiert direkt, wenn keine VM existiert")
@@ -466,6 +467,7 @@ def gns3_vm_deploy_900() -> None:
         ("management", "PG-MGMT"),
         ("trunk", "PG_GNS3_TRUNK"),
     ]
+    assert args[6:8] == (Settings.ESXI.USERNAME, Settings.ESXI.PASSWORD)
     esxi_connection.power_on_vm.assert_called_once_with(new_vm)
 
 
