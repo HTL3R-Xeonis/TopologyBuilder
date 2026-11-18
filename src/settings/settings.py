@@ -10,6 +10,22 @@ from .verbosity import Verbosity
 load_dotenv()
 
 
+OVA_DEPLOY_PARALLEL_MAX = 4
+"""Hard cap of simultaneous OVA imports onto one ESXi host, whatever is configured."""
+
+
+def clamp_ova_deploy_parallel(value: object) -> int:
+    """The number of OVA imports that may run at the same time on one host: at least 1 (strictly one after the other,
+    exactly the behaviour before parallel deploys existed), at most OVA_DEPLOY_PARALLEL_MAX. An unusable value gives 2."""
+    try:
+        number = int(value)  # type: ignore[call-overload]
+    except ValueError:
+        return 2
+    except TypeError:
+        return 2
+    return max(1, min(OVA_DEPLOY_PARALLEL_MAX, number))
+
+
 def _env_url(name: str, default: str) -> str:
     """A service URL from the environment (empty counts as unset), without a trailing slash; else ``default``."""
     return (os.getenv(name) or default).rstrip("/")
@@ -123,6 +139,10 @@ class Settings:
             Settings.API.TOPOLOGY_GENERATOR_URL = api["topology_generator_url"]
         if "ova_deploy_url" in api:
             Settings.API.OVA_DEPLOY_URL = api["ova_deploy_url"]
+        if "ova_deploy_parallel" in api:
+            Settings.API.OVA_DEPLOY_PARALLEL = clamp_ova_deploy_parallel(
+                api["ova_deploy_parallel"]
+            )
 
         logger.info(f"Loaded settings overrides from {path}")
 
@@ -326,6 +346,13 @@ class Settings:
         """How long to wait for a response from the OVA-deploy API. This
         is a synchronous call that blocks for the entire server-side
         transfer, with no progress polling exposed over HTTP."""
+        OVA_DEPLOY_PARALLEL: int = clamp_ova_deploy_parallel(
+            os.getenv("OVA_DEPLOY_PARALLEL", "2")
+        )
+        """How many OVA imports may run at the same time on one ESXi host while a topology is deployed (environment
+        variable of the same name, or `api.ova_deploy_parallel` in the settings file). 1 deploys the VMs strictly one
+        after the other, exactly as before; the default is 2, the hard cap 4 (an ESXi host and the deploy service both
+        slow down when more transfers run at once)."""
         OVA_CHECK_TIMEOUT_SECONDS: int = 60
         """How long to wait for the OVA-deploy API to prove that an OVA can be
         read (it reads the start and the end of the file from the NFS share)."""

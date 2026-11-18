@@ -349,3 +349,61 @@ def settings_010(tmp_path) -> None:
     assert urls["esxi"] == "http://from-file:8000"  # the file wins
     assert urls["gns3"] == "http://from-env:8001"  # not in the file: the environment
     assert urls["ova"] == "http://10.20.20.172:8003"  # neither: the built-in value
+
+
+@allure.title("OVA_DEPLOY_PARALLEL wird auf 1 bis 4 begrenzt")
+@allure.description(
+    "Überprüft, dass die Anzahl gleichzeitiger OVA-Importe pro ESXi-Host nie unter 1 (streng nacheinander) und nie über 4 "
+    "liegt und ein unbrauchbarer Wert den Standard 2 ergibt"
+)
+@allure.tag("positiv-test", "settings")
+@allure.feature("settings")
+@allure.severity(allure.severity_level.NORMAL)
+def settings_ova_parallel_001() -> None:
+    from src.settings.settings import clamp_ova_deploy_parallel
+
+    assert clamp_ova_deploy_parallel(1) == 1
+    assert clamp_ova_deploy_parallel("3") == 3
+    assert clamp_ova_deploy_parallel(0) == 1
+    assert clamp_ova_deploy_parallel(-5) == 1
+    assert clamp_ova_deploy_parallel(99) == 4
+    assert clamp_ova_deploy_parallel("viele") == 2
+    assert clamp_ova_deploy_parallel(None) == 2
+
+
+@allure.title("OVA_DEPLOY_PARALLEL aus Umgebung und Settings-Datei")
+@allure.description(
+    "Der eingebaute Wert ist 2, die Umgebungsvariable und der Schlüssel api.ova_deploy_parallel setzen ihn (begrenzt auf 1 bis 4)"
+)
+@allure.tag("positiv-test", "settings")
+@allure.feature("settings")
+@allure.severity(allure.severity_level.NORMAL)
+def settings_ova_parallel_002(tmp_path) -> None:
+    code = (
+        "import sys\n"
+        "from src.settings import Settings\n"
+        "if len(sys.argv) > 1:\n"
+        "    Settings.initialise_settings(sys.argv[1])\n"
+        "print(Settings.API.OVA_DEPLOY_PARALLEL)\n"
+    )
+
+    def run(env: dict[str, str], *args: str) -> int:
+        environment = {
+            k: v for k, v in os.environ.items() if k != "OVA_DEPLOY_PARALLEL"
+        }
+        environment.update(env)
+        result = subprocess.run(
+            [sys.executable, "-c", code, *args],
+            capture_output=True,
+            text=True,
+            env=environment,
+            check=True,
+            cwd=Path(__file__).resolve().parent.parent,
+        )
+        return int(result.stdout.strip().splitlines()[-1])
+
+    path = _write_settings(tmp_path, {"api": {"ova_deploy_parallel": 4}})
+    assert run({}) == 2
+    assert run({"OVA_DEPLOY_PARALLEL": "1"}) == 1
+    assert run({"OVA_DEPLOY_PARALLEL": "50"}) == 4
+    assert run({"OVA_DEPLOY_PARALLEL": "1"}, str(path)) == 4  # the file wins

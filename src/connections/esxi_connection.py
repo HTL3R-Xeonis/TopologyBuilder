@@ -3,6 +3,7 @@ from __future__ import annotations
 import atexit
 import re
 import ssl
+import threading
 import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, TypeVar
@@ -20,8 +21,33 @@ if TYPE_CHECKING:
     from src.graph.blocks import GenericNode, VirtualLan
 
 from src.settings import Settings, Verbosity
+from src.settings.settings import clamp_ova_deploy_parallel
 
 T = TypeVar("T")
+
+# Parallel OVA deploys (see VMOrchestrator.deploy_graph): the long part of deploying a VM is the upload, which is one blocking
+# HTTP request to the OVA-deploy service - the service logs in to ESXi with its OWN session, so it does not touch ours. Everything
+# else deploy_virtual_machine does (finding the VM, annotating it, powering it on, fixing its NICs) goes through the shared
+# pyvmomi session, whose views and property collectors are not safe to use from several threads at once - those short parts
+# run under this one lock, the upload runs outside of it.
+_PYVMOMI_LOCK = threading.RLock()
+
+# At most Settings.API.OVA_DEPLOY_PARALLEL uploads at the same time per ESXi host, counted over EVERY caller in this process
+# (several graphs, the live canvas' add node), not just one deploy_graph call.
+_HOST_DEPLOY_SLOTS: dict[tuple[str, int], threading.BoundedSemaphore] = {}
+_HOST_DEPLOY_SLOTS_LOCK = threading.Lock()
+
+
+def _deploy_slots(host: tuple[str, int]) -> threading.BoundedSemaphore:
+    with _HOST_DEPLOY_SLOTS_LOCK:
+        slots = _HOST_DEPLOY_SLOTS.get(host)
+        if slots is None:
+            slots = threading.BoundedSemaphore(
+                clamp_ova_deploy_parallel(Settings.API.OVA_DEPLOY_PARALLEL)
+            )
+            _HOST_DEPLOY_SLOTS[host] = slots
+        return slots
+
 
 # A long-lived ESXiConnection's underlying pyvmomi/SOAP session can go
 # stale with no warning - observed twice in production against the same
@@ -828,16 +854,17 @@ class ESXiConnection(GenericConnection):
         if Settings.ONLY_ON_GNS3:
             return
         if incremental:
-            existing = self.find_vms_matching(node.name)
-            if existing:
-                Verbosity.volumatic_print(
-                    Verbosity.NORMAL,
-                    f"ESXi VM {node.name} already exists, skipping OVA "
-                    f"import (incremental)",
-                )
-                vm = next((v for v in existing if v.name == node.name), existing[0])
-                self._ensure_vm_nics(vm, node)
-                return
+            with _PYVMOMI_LOCK:
+                existing = self.find_vms_matching(node.name)
+                if existing:
+                    Verbosity.volumatic_print(
+                        Verbosity.NORMAL,
+                        f"ESXi VM {node.name} already exists, skipping OVA "
+                        f"import (incremental)",
+                    )
+                    vm = next((v for v in existing if v.name == node.name), existing[0])
+                    self._ensure_vm_nics(vm, node)
+                    return
         # --------------------------------------------------------------------------------------------------------------
         if Settings.IS_DRY_RUN:
             Verbosity.volumatic_print(
@@ -860,27 +887,29 @@ class ESXiConnection(GenericConnection):
             network_mapping[interface.name] = interface.vlan.name
 
         ova_filename = APIHandler.find_esxi_template_file(node.image)
-        APIHandler.deploy_ova(
-            self.ip,
-            self.port,
-            node.name,
-            ova_filename,
-            datastore,
-            network_mapping,
-            self.username,
-            self.password,
-        )
-
-        vm = self.get_vm(node.name)
-        if vm is None:
-            logger.error(
-                msg := f"OVA deploy for {node.name} reported success, but no "
-                f"matching VM was found afterwards."
+        with _deploy_slots((self.ip, self.port)):
+            APIHandler.deploy_ova(
+                self.ip,
+                self.port,
+                node.name,
+                ova_filename,
+                datastore,
+                network_mapping,
+                self.username,
+                self.password,
             )
-            raise RuntimeError(msg)
 
-        self.set_vm_annotation(vm, f"topologybuilder-image:{node.image}")
-        self.power_on_vm(vm)
+        with _PYVMOMI_LOCK:
+            vm = self.get_vm(node.name)
+            if vm is None:
+                logger.error(
+                    msg := f"OVA deploy for {node.name} reported success, but no "
+                    f"matching VM was found afterwards."
+                )
+                raise RuntimeError(msg)
+
+            self.set_vm_annotation(vm, f"topologybuilder-image:{node.image}")
+            self.power_on_vm(vm)
 
     def _ensure_vm_nics(self, vm: vim.VirtualMachine, node: GenericNode) -> None:
         """

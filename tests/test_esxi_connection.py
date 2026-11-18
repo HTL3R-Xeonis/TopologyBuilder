@@ -1813,9 +1813,9 @@ def esxi_connection_071() -> None:
     with (
         patch("src.connections.esxi_connection.time.sleep"),
         patch("src.connections.esxi_connection.time.monotonic", side_effect=[0, 11]),
+        pytest.raises(TimeoutError, match=r"did not finish within 10s"),
     ):
-        with pytest.raises(TimeoutError, match=r"did not finish within 10s"):
-            ESXiConnection._wait_for_task(task)
+        ESXiConnection._wait_for_task(task)
 
 
 @allure.title("connect übergibt Settings.ESXI.HTTP_TIMEOUT_SECONDS an SmartConnect")
@@ -1842,3 +1842,101 @@ def esxi_connection_072() -> None:
         conn.connect()
 
     assert smart_connect.call_args.kwargs["httpConnectionTimeout"] == 42
+
+
+@allure.title("Pro ESXi-Host gilt ein gemeinsames Limit für gleichzeitige OVA-Importe")
+@allure.description(
+    "Zwei Verbindungen zum selben Host teilen sich dieselben Slots, ein anderer Host hat eigene; die Zahl der Slots ist "
+    "OVA_DEPLOY_PARALLEL begrenzt auf 1 bis 4"
+)
+@allure.tag("positiv-test", "esxi-connection", "parallel")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_parallel_001() -> None:
+    from src.connections import esxi_connection as module
+
+    module._HOST_DEPLOY_SLOTS.clear()
+    Settings.API.OVA_DEPLOY_PARALLEL = 2
+    try:
+        slots = module._deploy_slots(("10.0.0.1", 443))
+        assert module._deploy_slots(("10.0.0.1", 443)) is slots
+        assert module._deploy_slots(("10.0.0.2", 443)) is not slots
+        assert slots.acquire(blocking=False) and slots.acquire(blocking=False)
+        assert not slots.acquire(blocking=False)  # the third import has to wait
+    finally:
+        module._HOST_DEPLOY_SLOTS.clear()
+        Settings.API.OVA_DEPLOY_PARALLEL = 2
+
+
+@allure.title("Die pyvmomi-Sperre ist während des OVA-Uploads frei")
+@allure.description(
+    "Der lange Upload (ein HTTP-Request an den Deploy-Dienst) läuft ohne die gemeinsame pyvmomi-Sperre, sonst gäbe es keine "
+    "Parallelität; Annotation und Einschalten laufen danach unter der Sperre"
+)
+@allure.tag("positiv-test", "esxi-connection", "parallel")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_parallel_002() -> None:
+    import threading
+
+    from src.connections import esxi_connection as module
+    from src.graph.blocks.generic_node import GenericNode
+    from src.graph.blocks.vlan import VirtualLan
+
+    _reset_settings()
+    Settings.API.LITERAL_API_VALUES = True
+    module._HOST_DEPLOY_SLOTS.clear()
+    conn = _make_esxi_connection()
+    conn._ip_address = "10.20.20.202"
+    conn._port = 443
+    conn._username = "root"
+    conn._password = "pw"
+    node = GenericNode("Ubuntu-Server", "VM", "VM1")
+    interface = node.add_interface("ens160")
+    interface.vlan = VirtualLan("VM1", "ens160")
+
+    in_upload = threading.Event()
+    release = threading.Event()
+    lock_free_during_upload: list[bool] = []
+
+    def blocking_upload(*args, **kwargs):
+        in_upload.set()
+        # another thread must be able to take the pyvmomi lock while this upload runs
+        free = []
+
+        def try_lock():
+            got = module._PYVMOMI_LOCK.acquire(blocking=False)
+            free.append(got)
+            if got:
+                module._PYVMOMI_LOCK.release()
+
+        probe = threading.Thread(target=try_lock)
+        probe.start()
+        probe.join()
+        lock_free_during_upload.extend(free)
+        release.wait(5)
+
+    fake_vm = MagicMock()
+    with (
+        patch(
+            "src.connections.esxi_connection.APIHandler.find_esxi_template_file",
+            return_value="ubuntu-server.ova",
+        ),
+        patch(
+            "src.connections.esxi_connection.APIHandler.deploy_ova",
+            side_effect=blocking_upload,
+        ),
+        patch.object(conn, "get_vm", return_value=fake_vm),
+        patch.object(conn, "set_vm_annotation"),
+        patch.object(conn, "power_on_vm"),
+    ):
+        worker = threading.Thread(
+            target=conn.deploy_virtual_machine, args=(node, "datastore1")
+        )
+        worker.start()
+        assert in_upload.wait(5)
+        release.set()
+        worker.join(5)
+
+    module._HOST_DEPLOY_SLOTS.clear()
+    assert lock_free_during_upload == [True]

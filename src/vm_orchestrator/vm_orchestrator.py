@@ -9,6 +9,10 @@ __license__ = "GNU GPLv3"
 __status__ = "In development"
 
 import re
+import threading
+import time
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 
 from loguru import logger
 
@@ -21,6 +25,7 @@ from src.connections.gns3_connection import (
 from src.connections.ssh_connection import SSHConnection
 from src.graph import Environment, Graph
 from src.settings import Settings
+from src.settings.settings import clamp_ova_deploy_parallel
 from src.vm_orchestrator.gns3_vm_interface_setup import GNS3VMInterfaceSetup
 
 
@@ -77,6 +82,7 @@ class VMOrchestrator:
         gns3_username: str,
         gns3_password: str | None = None,
         incremental: bool = False,
+        on_progress: Callable[[str], None] | None = None,
     ) -> None:
         """
         Deploys the graph on the ESXi host and GNS3 VM. The connection between the nodes runs solely between GNS3.
@@ -102,6 +108,8 @@ class VMOrchestrator:
             briefly interrupts traffic on already-running Cloud-node
             bridges, unlike the ESXi/GNS3-node-level skipping incremental
             otherwise provides.
+        :param on_progress: Optional callback that gets one plain-text line per finished ESXi VM while the VMs are imported in
+            parallel ("ESXi VM PC1 deployed (2 of 5, 41 s)"); the same lines are always logged.
         :return:
 
         :raises TimeoutError: Is thrown when it took too long to receive a response.
@@ -150,13 +158,20 @@ class VMOrchestrator:
                 f"({free_gb:.1f} GB free)"
             )
 
+        # The OVA imports are the slow part and independent of each other: with Settings.API.OVA_DEPLOY_PARALLEL > 1 they run
+        # side by side first; the GNS3 side below stays strictly sequential, so node creation and linking keep their order.
+        deployed_in_parallel = self._deploy_esxi_nodes_in_parallel(
+            graph, datastore_name, incremental, on_progress
+        )
+
         for node in graph.nodes.values():
             if node.env == Environment.ON_ESXI:
-                self.esxi_connection.deploy_virtual_machine(
-                    node=node,
-                    datastore=datastore_name,
-                    incremental=incremental,
-                )
+                if not deployed_in_parallel:
+                    self.esxi_connection.deploy_virtual_machine(
+                        node=node,
+                        datastore=datastore_name,
+                        incremental=incremental,
+                    )
                 gns3_conn.create_node(node)
 
             if node.env == Environment.ON_GNS3:
@@ -174,6 +189,90 @@ class VMOrchestrator:
             raise
 
         logger.info(f"Deployment complete: project '{Settings.GNS3.PROJECT_NAME}'")
+
+    def _deploy_esxi_nodes_in_parallel(
+        self,
+        graph: Graph,
+        datastore_name: str | None,
+        incremental: bool,
+        on_progress: Callable[[str], None] | None,
+    ) -> bool:
+        """
+        Imports the graph's ESXi-hosted nodes side by side - at most Settings.API.OVA_DEPLOY_PARALLEL at a time (the same cap
+        is enforced per host inside ESXiConnection.deploy_virtual_machine, so other callers count too). Every started import
+        runs to its end; one failing VM does not abort the others, and the VMs that did deploy stay on the host (an
+        incremental re-run picks them up). Nothing here creates GNS3 nodes: the caller does that afterwards, in graph order.
+        :param graph: the topology being deployed
+        :param datastore_name: datastore for the VMs
+        :param incremental: True skips VMs that already exist
+        :param on_progress: optional callback for one text line per finished VM
+        :return: True when the parallel phase handled the ESXi nodes, False when the caller has to deploy them one by one
+            (a single ESXi node, OVA_DEPLOY_PARALLEL=1, a dry run, or a GNS3-only run).
+        :raises RuntimeError: Is thrown, after every import has ended, when at least one VM failed; the text names the VMs
+            that were deployed and each failed one with its error.
+        """
+        nodes = [n for n in graph.nodes.values() if n.env == Environment.ON_ESXI]
+        workers = min(
+            clamp_ova_deploy_parallel(Settings.API.OVA_DEPLOY_PARALLEL), len(nodes)
+        )
+        if workers <= 1 or Settings.IS_DRY_RUN or Settings.ONLY_ON_GNS3:
+            return False
+
+        logger.info(
+            f"Importing {len(nodes)} ESXi VM(s), up to {workers} at the same time"
+        )
+        finished = 0
+        counter_lock = threading.Lock()
+        outcomes: dict[str, str | None] = {}
+
+        def announce(line: str) -> None:
+            logger.info(line)
+            if on_progress is not None:
+                try:
+                    on_progress(line)
+                except Exception:  # noqa: BLE001  # a broken progress sink must never fail a deploy
+                    logger.exception("on_progress callback failed")
+
+        def deploy_one(node) -> None:
+            nonlocal finished
+            started = time.monotonic()
+            error: str | None = None
+            try:
+                self.esxi_connection.deploy_virtual_machine(
+                    node=node, datastore=datastore_name, incremental=incremental
+                )
+            except Exception as exc:  # noqa: BLE001  # collected and reported below, per VM
+                error = f"{type(exc).__name__}: {exc}"
+            with counter_lock:
+                finished += 1
+                outcomes[node.name] = error
+                position = f"{finished} of {len(nodes)}"
+            seconds = time.monotonic() - started
+            if error is None:
+                announce(f"ESXi VM {node.name} deployed ({position}, {seconds:.0f} s)")
+            else:
+                announce(
+                    f"ESXi VM {node.name} FAILED ({position}, {seconds:.0f} s): {error}"
+                )
+
+        with ThreadPoolExecutor(
+            max_workers=workers, thread_name_prefix="esxi-deploy"
+        ) as pool:
+            for future in [pool.submit(deploy_one, node) for node in nodes]:
+                future.result()
+
+        failed = {name: err for name, err in outcomes.items() if err is not None}
+        if failed:
+            deployed = sorted(name for name, err in outcomes.items() if err is None)
+            msg = (
+                f"{len(deployed)} of {len(nodes)} ESXi VM(s) deployed"
+                f" ({', '.join(deployed) or 'none'}); failed: "
+                + "; ".join(f"{name}: {err}" for name, err in sorted(failed.items()))
+                + ". The deployed VMs stay on the host - fix the failure and deploy again incrementally."
+            )
+            logger.error(msg)
+            raise RuntimeError(msg)
+        return True
 
     @staticmethod
     def check_templates_readable(graph: Graph) -> None:

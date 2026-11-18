@@ -1709,3 +1709,220 @@ def vm_orchestrator_049() -> None:
 
     find_file.assert_called_once_with("debian")
     check.assert_called_once_with("debian.ova")
+
+
+# --- parallele OVA-Importe (OVA_DEPLOY_PARALLEL) -----------------------------------------------------------------------
+
+
+class _FakeNode:
+    def __init__(self, name: str, env) -> None:
+        self.name = name
+        self.env = env
+        self.interfaces: dict = {}
+        self.gns3_node_info = None
+
+
+def _graph_with(esxi_names: list[str], gns3_names: tuple[str, ...] = ()):
+    from src.graph import Environment
+
+    graph = MagicMock()
+    nodes = [_FakeNode(n, Environment.ON_ESXI) for n in esxi_names]
+    nodes += [_FakeNode(n, Environment.ON_GNS3) for n in gns3_names]
+    graph.nodes = {n.name: n for n in nodes}
+    return graph
+
+
+def _deploy(orchestrator, graph, parallel: int, **kwargs):
+    Settings.API.OVA_DEPLOY_PARALLEL = parallel
+    Settings.IS_DRY_RUN = False
+    Settings.ONLY_ON_GNS3 = False
+    Settings.ESXI.DATASTORE = "datastore1"
+    with (
+        patch("src.vm_orchestrator.vm_orchestrator.SSHConnection"),
+        patch("src.vm_orchestrator.vm_orchestrator.GNS3VMInterfaceSetup"),
+        patch(
+            "src.vm_orchestrator.vm_orchestrator.GNS3Connection"
+        ) as gns3_connection_cls,
+    ):
+        try:
+            orchestrator.deploy_graph(
+                graph, "gns3", "gns3pw", incremental=True, **kwargs
+            )
+        finally:
+            Settings.API.OVA_DEPLOY_PARALLEL = 2
+        return gns3_connection_cls.return_value
+
+
+@allure.title("deploy_graph importiert höchstens OVA_DEPLOY_PARALLEL VMs gleichzeitig")
+@allure.description(
+    "Sechs ESXi-Nodes mit Limit 3: nie mehr als drei Importe gleichzeitig, aber mehr als einer, jede Node genau einmal"
+)
+@allure.tag("positiv-test", "vm-orchestrator", "parallel")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_050() -> None:
+    import threading
+    import time
+
+    orchestrator, esxi_connection = _make_orchestrator()
+    running = 0
+    peak = 0
+    deployed: list[str] = []
+    lock = threading.Lock()
+
+    def fake_deploy(node, datastore, incremental=False):
+        nonlocal running, peak
+        with lock:
+            running += 1
+            peak = max(peak, running)
+        time.sleep(0.05)
+        with lock:
+            running -= 1
+            deployed.append(node.name)
+
+    esxi_connection.deploy_virtual_machine.side_effect = fake_deploy
+    names = [f"VM{i}" for i in range(6)]
+    _deploy(orchestrator, _graph_with(names), parallel=3)
+
+    assert sorted(deployed) == names
+    assert 1 < peak <= 3
+
+
+@allure.title("deploy_graph legt GNS3-Nodes nach den Importen in Graph-Reihenfolge an")
+@allure.description(
+    "Auch wenn die Importe in beliebiger Reihenfolge fertig werden, bleibt die GNS3-Seite streng nacheinander in der "
+    "Reihenfolge des Graphen"
+)
+@allure.tag("positiv-test", "vm-orchestrator", "parallel")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_051() -> None:
+    import time
+
+    orchestrator, esxi_connection = _make_orchestrator()
+    delays = {"A": 0.15, "B": 0.0, "C": 0.08}
+    esxi_connection.deploy_virtual_machine.side_effect = (
+        lambda node, datastore, incremental=False: time.sleep(delays[node.name])
+    )
+    gns3 = _deploy(orchestrator, _graph_with(["A", "B", "C"], ("G",)), parallel=3)
+
+    created = [call.args[0].name for call in gns3.create_node.call_args_list]
+    assert created == ["A", "B", "C", "G"]
+
+
+@allure.title("Ein fehlgeschlagener Import verliert die anderen nicht")
+@allure.description(
+    "Ein VM-Import schlägt fehl: alle anderen laufen zu Ende, die Fehlermeldung nennt die fertigen VMs und die fehlgeschlagene "
+    "mit ihrem Fehler, es werden keine GNS3-Nodes angelegt"
+)
+@allure.tag("negativ-test", "vm-orchestrator", "parallel")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_052() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    called: list[str] = []
+
+    def fake_deploy(node, datastore, incremental=False):
+        called.append(node.name)
+        if node.name == "B":
+            raise RuntimeError("the OVA service answered HTTP 500")
+
+    esxi_connection.deploy_virtual_machine.side_effect = fake_deploy
+    graph = _graph_with(["A", "B", "C", "D"])
+    with pytest.raises(RuntimeError) as raised:
+        _deploy(orchestrator, graph, parallel=2)
+
+    assert sorted(called) == ["A", "B", "C", "D"]
+    text = str(raised.value)
+    assert "3 of 4 ESXi VM(s) deployed (A, C, D)" in text
+    assert "B: RuntimeError: the OVA service answered HTTP 500" in text
+
+
+@allure.title("OVA_DEPLOY_PARALLEL=1 verhält sich exakt wie vorher")
+@allure.description(
+    "Mit Limit 1 wird jede VM direkt vor ihrer GNS3-Node importiert: Import A, Node A, Import B, Node B"
+)
+@allure.tag("positiv-test", "vm-orchestrator", "parallel")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_053() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    events: list[str] = []
+    esxi_connection.deploy_virtual_machine.side_effect = (
+        lambda node, datastore, incremental=False: events.append(f"import {node.name}")
+    )
+    with patch("src.vm_orchestrator.vm_orchestrator.GNS3Connection") as gns3_cls:
+        gns3_cls.return_value.create_node.side_effect = lambda node: events.append(
+            f"node {node.name}"
+        )
+        with (
+            patch("src.vm_orchestrator.vm_orchestrator.SSHConnection"),
+            patch("src.vm_orchestrator.vm_orchestrator.GNS3VMInterfaceSetup"),
+        ):
+            Settings.API.OVA_DEPLOY_PARALLEL = 1
+            Settings.IS_DRY_RUN = False
+            Settings.ONLY_ON_GNS3 = False
+            Settings.ESXI.DATASTORE = "datastore1"
+            try:
+                orchestrator.deploy_graph(
+                    _graph_with(["A", "B"]), "gns3", "gns3pw", incremental=True
+                )
+            finally:
+                Settings.API.OVA_DEPLOY_PARALLEL = 2
+
+    assert events == ["import A", "node A", "import B", "node B"]
+
+
+@allure.title("Eine einzelne ESXi-Node und ein Trockenlauf bleiben sequentiell")
+@allure.description(
+    "Die Parallelphase startet nur bei mindestens zwei ESXi-Nodes und nicht im Trockenlauf"
+)
+@allure.tag("positiv-test", "vm-orchestrator", "parallel")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.NORMAL)
+def vm_orchestrator_054() -> None:
+    orchestrator, _ = _make_orchestrator()
+    Settings.API.OVA_DEPLOY_PARALLEL = 4
+    try:
+        Settings.IS_DRY_RUN = False
+        Settings.ONLY_ON_GNS3 = False
+        assert (
+            orchestrator._deploy_esxi_nodes_in_parallel(
+                _graph_with(["A"]), "ds", True, None
+            )
+            is False
+        )
+        Settings.IS_DRY_RUN = True
+        try:
+            assert (
+                orchestrator._deploy_esxi_nodes_in_parallel(
+                    _graph_with(["A", "B"]), "ds", True, None
+                )
+                is False
+            )
+        finally:
+            Settings.IS_DRY_RUN = False
+    finally:
+        Settings.API.OVA_DEPLOY_PARALLEL = 2
+
+
+@allure.title(
+    "Fortschritt: eine Zeile pro fertiger VM, ein kaputter Callback stört nicht"
+)
+@allure.description(
+    "on_progress bekommt je VM eine Textzeile mit Position und Dauer; wirft der Callback, läuft der Deploy weiter"
+)
+@allure.tag("positiv-test", "vm-orchestrator", "parallel")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.NORMAL)
+def vm_orchestrator_055() -> None:
+    orchestrator, _ = _make_orchestrator()
+    lines: list[str] = []
+    _deploy(orchestrator, _graph_with(["A", "B"]), parallel=2, on_progress=lines.append)
+    assert len(lines) == 2
+    assert all("deployed (" in line and " of 2, " in line for line in lines)
+
+    def broken(_line: str) -> None:
+        raise ValueError("sink is broken")
+
+    _deploy(orchestrator, _graph_with(["A", "B"]), parallel=2, on_progress=broken)
