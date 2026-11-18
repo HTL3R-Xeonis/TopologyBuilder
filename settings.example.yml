@@ -117,3 +117,6 @@ api:
   gns3_template_server_url: http://10.20.20.171:8001
   topology_generator_url: http://10.20.20.172:8002
   ova_deploy_url: http://10.20.20.172:8003
+  # How many OVA imports may run at the same time onto one ESXi host (environment variable OVA_DEPLOY_PARALLEL).
+  # Default 3, at most 4; 1 imports one VM after the other. An entry here wins over the variable.
+  # ova_deploy_parallel: 3

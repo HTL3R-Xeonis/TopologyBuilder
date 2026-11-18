@@ -10,19 +10,21 @@ from .verbosity import Verbosity
 load_dotenv()
 
 
+OVA_DEPLOY_PARALLEL_DEFAULT = 3
+"""Simultaneous OVA imports onto one ESXi host when nothing is configured."""
 OVA_DEPLOY_PARALLEL_MAX = 4
 """Hard cap of simultaneous OVA imports onto one ESXi host, whatever is configured."""
 
 
 def clamp_ova_deploy_parallel(value: object) -> int:
     """The number of OVA imports that may run at the same time on one host: at least 1 (strictly one after the other,
-    exactly the behaviour before parallel deploys existed), at most OVA_DEPLOY_PARALLEL_MAX. An unusable value gives 2."""
+    exactly the behaviour before parallel deploys existed), at most OVA_DEPLOY_PARALLEL_MAX. An unusable value gives the default, 3."""
     try:
         number = int(value)  # type: ignore[call-overload]
     except ValueError:
-        return 2
+        return OVA_DEPLOY_PARALLEL_DEFAULT
     except TypeError:
-        return 2
+        return OVA_DEPLOY_PARALLEL_DEFAULT
     return max(1, min(OVA_DEPLOY_PARALLEL_MAX, number))
 
 
@@ -347,7 +349,7 @@ class Settings:
         is a synchronous call that blocks for the entire server-side
         transfer, with no progress polling exposed over HTTP."""
         OVA_DEPLOY_PARALLEL: int = clamp_ova_deploy_parallel(
-            os.getenv("OVA_DEPLOY_PARALLEL", "2")
+            os.getenv("OVA_DEPLOY_PARALLEL", str(OVA_DEPLOY_PARALLEL_DEFAULT))
         )
         """How many OVA imports may run at the same time on one ESXi host while a topology is deployed (environment
         variable of the same name, or `api.ova_deploy_parallel` in the settings file). 1 deploys the VMs strictly one
