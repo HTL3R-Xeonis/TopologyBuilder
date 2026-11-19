@@ -33,11 +33,11 @@ class GNS3Connection(APIHandler):
         self.url = f"http://{ip}:{port}"
 
         self.project_name = project_name
-        self.project = self._init_project(project_name)
+        self.project_gns3_info = self._init_project(project_name)
 
     def _init_project(self, name: str) -> dict[str, Any]:
         """
-        Create a new GNS3 project. If project already exists, it is deleted first.
+        Returns the existing GNS3 project or creates it if missing.
         :param name: Name of the GNS3 project.
         :return: Returns the newly generated GNS3 project information.
         :raises TimeoutError: Is thrown when it takes too long to receive a response.
@@ -51,12 +51,14 @@ class GNS3Connection(APIHandler):
             raise RuntimeError(msg) from exc
 
         project = next((p for p in projects if p["name"] == name), None)
-
         if project is None:
             return self._create_new_project(name)
-        else:
-            self._remove_project(project["project_id"])
-            return self._create_new_project(name)
+        if project.get("status") == "closed":
+            try:
+                return self.post(f"{self.url}/v2/projects/{project['project_id']}/open", json={})
+            except requests.exceptions.HTTPError as exc:
+                raise RuntimeError(f"Failed to open GNS3 project {name}.") from exc
+        return project
 
     def _remove_project(self, project_id: str) -> None:
         """
@@ -93,6 +95,10 @@ class GNS3Connection(APIHandler):
             raise RuntimeError(
                 f"Something went wrong with the creation of the GNS3 project {name} on {self.ip}"
             ) from exc
+
+    def get_project_url(self) -> str:
+        """:return: URL for the connected GNS3 project."""
+        return f"{self.url}/v2/projects/{self.project_gns3_info['project_id']}"
 
     @staticmethod
     def _create_ports_mapping(node: GenericNode) -> list[dict[str, str]]:
@@ -152,7 +158,7 @@ class GNS3Connection(APIHandler):
         payload = {"name": node.name, "x": 100, "y": 100}
         try:
             response = self.post(
-                f"{self.url}/v2/projects/{self.project['project_id']}/templates/{template['template_id']}",
+                f"{self.url}/v2/projects/{self.project_gns3_info['project_id']}/templates/{template['template_id']}",
                 json=payload,
             )
         except requests.exceptions.HTTPError as exc:
@@ -161,7 +167,7 @@ class GNS3Connection(APIHandler):
                 raise RuntimeError(msg) from exc
             raise RuntimeError("Something went wrong with the creation of the node request.") from exc
 
-        node.gns3_node_info = response
+        node.node_gns3_info = response
         return response
 
     def _create_builtin_nodes(
@@ -203,7 +209,7 @@ class GNS3Connection(APIHandler):
 
         try:
             response = self.post(
-                f"{self.url}/v2/projects/{self.project['project_id']}/nodes",
+                f"{self.url}/v2/projects/{self.project_gns3_info['project_id']}/nodes",
                 json=payload,
             )
         except requests.exceptions.HTTPError as exc:
@@ -212,7 +218,7 @@ class GNS3Connection(APIHandler):
                 raise RuntimeError(msg) from exc
             raise RuntimeError("Something went wrong with the creation of the node request.") from exc
 
-        node.gns3_node_info = response
+        node.node_gns3_info = response
         return response
 
     def _get_template(self, template_name: str) -> Any:
@@ -285,8 +291,8 @@ class GNS3Connection(APIHandler):
         )
         # --------------------------------------------------------------------------------------------------------------
 
-        gns3_info_1 = node_1.gns3_node_info
-        gns3_info_2 = node_2.gns3_node_info
+        gns3_info_1 = node_1.node_gns3_info
+        gns3_info_2 = node_2.node_gns3_info
 
         if gns3_info_1 is None:
             raise RuntimeError(f"Node {node_1.name} does not exist on GNS3.")
@@ -300,19 +306,19 @@ class GNS3Connection(APIHandler):
             "nodes": [
                 {
                     "adapter_number": adapter_1["adapter_number"],
-                    "node_id": node_1.gns3_node_info["node_id"],
+                    "node_id": node_1.node_gns3_info["node_id"],
                     "port_number": adapter_1["port_number"],
                 },
                 {
                     "adapter_number": adapter_2["adapter_number"],
-                    "node_id": node_2.gns3_node_info["node_id"],
+                    "node_id": node_2.node_gns3_info["node_id"],
                     "port_number": adapter_2["port_number"],
                 },
             ]
         }
         try:
             return self.post(
-                f"{self.url}/v2/projects/{self.project['project_id']}/links",
+                f"{self.url}/v2/projects/{self.project_gns3_info['project_id']}/links",
                 json=payload,
             )
         except requests.exceptions.HTTPError as exc:

@@ -75,12 +75,10 @@ def deploy_graph(graph, dry_run: bool = False, incremental: bool = False) -> Non
         esxi_port=Settings.ESXI.PORT,
         esxi_username=Settings.ESXI.USERNAME,
         esxi_password=Settings.ESXI.PASSWORD,
-    )
-    orchestrator.execute_graph_deployment(
-        graph=graph,
         gns3_username=Settings.GNS3.USERNAME,
         gns3_password=Settings.GNS3.PASSWORD,
     )
+    orchestrator.execute_graph_deployment(graph=graph)
     typer.secho("Deployment complete.", fg=typer.colors.GREEN)
 
 

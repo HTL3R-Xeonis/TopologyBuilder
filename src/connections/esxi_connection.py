@@ -1,5 +1,4 @@
 import atexit
-import re
 import ssl
 
 import pyVmomi
@@ -100,11 +99,31 @@ class ESXiConnection(GenericConnection):
             for obj in view.view:
                 if name is None:
                     return obj
-                if re.match(rf"^{re.escape(name)}( \(\d+\))?$", obj.name):
+                if self.compare_regular_to_esxi_name(name, obj.name):
                     return obj
             return None
         finally:
             view.Destroy()
+
+    @staticmethod
+    def compare_regular_to_esxi_name(regular_name: str | set[str], true_name: str) -> bool:
+        """
+        Compares two names or checks whether a name is contained in given set. Useful if Esxihost is connected to a vCenter,
+        where multiple objects with the same name get numbered.
+         e.g.: VM1 (1), VM1 (2), VM1 (3) etc.
+        :param regular_name: The regular name of the ESXi object, without numbering. Still works with numbering. e.g.: VM1.
+         Can also be a set containing multiple regular names which get compared to the true name
+        :param true_name: The true name of the ESXi object, with possible numbering. e.g.: VM1 (1)
+        :return: Returns True if the regular name equals the ESXi objects name without the numbering, otherwise returns False.
+        """
+        import re
+
+        if isinstance(regular_name, set):
+            for reg_name in regular_name:
+                if re.match(rf"^{re.escape(reg_name)}( \(\d+\))?$", true_name) is not None:
+                    return True
+            return False
+        return re.match(rf"^{re.escape(regular_name)}( \(\d+\))?$", true_name) is not None
 
     def get_virtual_switch(self, virtual_switch_name: str) -> vim.host.VirtualSwitch | None:
         """
@@ -158,30 +177,45 @@ class ESXiConnection(GenericConnection):
             raise RuntimeError(msg)
         return vswitch
 
-    def add_port_group(self, pg_name: str, pg_id: int) -> None:
+    def add_port_group(
+        self,
+        pg_name: str,
+        pg_id: int,
+        update: bool = False,
+        virtual_switch_name: str | None = None,
+        policy: vim.host.NetworkPolicy | None = None,
+    ) -> None:
         """
-        Creates a port groups on the virtual switch based on the given ``vlan``.
-        The policies are inherited from the virtual Switch on ESXi.
+        Creates or updates an ESXi port group.
         :param pg_name: Name of the port group.
-        :param pg_id: ID of the port group.
-        :return:
-        :raises RuntimeError: Is thrown when a portgroup already exists  on the ESXi host.
-        May also be thrown when no host-system or network-system was found on the ESXi host.
+        :param pg_id: VLAN ID of the port group.
+        :param update: Whether to update an existing port group.
+        :param virtual_switch_name: Switch for a new port group; defaults to the managed switch.
+        :param policy: Optional network policy for a new port group.
+        :raises RuntimeError: If the ESXi port group cannot be configured.
         """
-        if pg_name in Settings.ESXI.IGNORE_PORT_GROUPS:
+        if pg_name in (Settings.ESXI.IGNORE_PORT_GROUPS or ()):
             return
         # ----------------------------------------------------------------------------------------------------------
+        action = "update" if update else "add"
         if Settings.IS_DRY_RUN:
-            Verbosity.volumatic_print(Verbosity.NORMAL, f"Would add portgroup {pg_name}")
+            Verbosity.volumatic_print(Verbosity.NORMAL, f"Would {action} portgroup {pg_name} (VLAN {pg_id})")
             return
-        Verbosity.volumatic_print(Verbosity.NORMAL, f"Adds portgroup {pg_name}")
+        Verbosity.volumatic_print(Verbosity.NORMAL, f"{action.capitalize()}s portgroup {pg_name} (VLAN {pg_id})")
         # ----------------------------------------------------------------------------------------------------------
 
-        spec = vim.host.PortGroup.Specification()
-        spec.name = pg_name
-        spec.vswitchName = Settings.ESXI.VIRTUAL_SWITCH
-        spec.vlanId = pg_id
-        spec.policy = vim.host.NetworkPolicy()
+        if update:
+            current = self.get_all_port_groups().get(pg_name)
+            if current is None:
+                raise RuntimeError(f"Port group {pg_name} does not exist on ESXi.")
+            spec = current.spec
+            spec.vlanId = pg_id
+        else:
+            spec = vim.host.PortGroup.Specification()
+            spec.name = pg_name
+            spec.vswitchName = virtual_switch_name or Settings.ESXI.VIRTUAL_SWITCH
+            spec.vlanId = pg_id
+            spec.policy = policy if policy is not None else vim.host.NetworkPolicy()
 
         host_system = self.get_esxi_object(vim.HostSystem)
         if host_system is None:
@@ -193,12 +227,15 @@ class ESXiConnection(GenericConnection):
             raise RuntimeError(msg)
 
         try:
-            network_system.AddPortGroup(spec)
+            if update:
+                network_system.UpdatePortGroup(pgName=pg_name, portgrp=spec)
+            else:
+                network_system.AddPortGroup(spec)
         except vim.fault.AlreadyExists as exc:
             logger.error(msg := f"Port group {pg_name} already exists on ESXi.")
             raise RuntimeError(msg) from exc
         except Exception as exc:
-            logger.error(msg := f"Something went wrong while adding port group {pg_name}.")
+            logger.error(msg := f"Could not {action} port group {pg_name}: {type(exc).__name__}: {exc}")
             raise RuntimeError(msg) from exc
 
     def get_all_port_groups(self) -> dict[str, pyVmomi.vim.host.PortGroup]:

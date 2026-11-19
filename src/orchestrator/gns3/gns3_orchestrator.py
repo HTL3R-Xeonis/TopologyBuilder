@@ -2,10 +2,7 @@ from typing import Any
 
 from src.connections import SSHConnection
 from src.connections.gns3_connection import GNS3Connection
-from src.graph import Graph
 from src.graph.blocks import GenericNode
-from src.orchestrator.gns3.gns3_vm_interface_setup import GNS3VMInterfaceSetup
-from src.settings import Settings
 
 
 class GNS3Orchestrator:
@@ -13,11 +10,12 @@ class GNS3Orchestrator:
     Orchestration object for GNS3.
     """
 
-    def __init__(self, gns3_connection: GNS3Connection):
+    def __init__(self, gns3_connection: GNS3Connection, gns3_ssh_connection: SSHConnection) -> None:
         """
         :param gns3_connection: API connection to the GNS3 host.
         """
         self.gns3_connection = gns3_connection
+        self.gns3_ssh_connection = gns3_ssh_connection
 
     def create_node(self, node: GenericNode) -> dict[str, Any] | None:
         """
@@ -40,26 +38,6 @@ class GNS3Orchestrator:
         """
         for interface in node.interfaces:
             neighbour = node.get_neighbour(interface)
-            if neighbour is None or neighbour.gns3_node_info is None:
+            if neighbour is None or neighbour.node_gns3_info is None:
                 continue
             self.gns3_connection.connect_nodes(node, neighbour)
-
-    def configure_gns3_vm_interfaces(self, graph: Graph, gns3_username: str, gns3_password: str | None) -> None:
-        """
-        Configures the interfaces of the GNS3 VM to fit the graph. This is done to have an interface for each VLAN on the vSwitch.
-        :param graph: Create the interfaces based on given graph.
-        :param gns3_username: Username to connect to the GNS3 VM via ssh.
-        :param gns3_password: Password to connect to the GNS3 VM via ssh.
-        :return:
-        :raises ValueError: Is thrown when the IPv4 address is not a public, private or loopback address. Is also thrown when the credentials are not valid.
-        :raises TimeoutError: Is thrown when the connection buildup takes too long.
-        :raises ConnectionError: Is thrown when the connection fails.
-        :raises RuntimeError: Is thrown when an error occurs while trying to get subinterface information or when the execution of the script fails.
-        """
-        port = 22
-
-        gns3_connection = SSHConnection(self.gns3_connection.ip, port, gns3_username, gns3_password)
-        gns3_interface_setup = GNS3VMInterfaceSetup(gns3_connection, Settings.GNS3.PARENT_INTERFACE)
-
-        gns3_interface_setup.initialize_yaml(graph)
-        gns3_interface_setup.apply_yaml()

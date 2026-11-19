@@ -1,22 +1,20 @@
-"""
-Provides a class to make the provisioning of the GNS3 and ESXi VMs easier and setting certain
-settings accordingly to the built topology.
-"""
+"""Provides ESXi and GNS3 topology inspection and provisioning."""
 
 __autor__ = "Leon Eiböck"
 __date__ = "28/07/2026"
 __license__ = "GNU GPLv3"
 __status__ = "In development"
 
-import time
-
+import requests
 from loguru import logger
 
+from src.connections import SSHConnection
 from src.connections.esxi_connection import ESXiConnection
 from src.connections.gns3_connection import GNS3Connection
+from src.doctor.topology_state import TopologyChanges, TopologyState
 from src.graph import Environment, Graph
+from src.orchestrator import GNS3Orchestrator
 from src.orchestrator.esxi.esxi_orchestrator import ESXiOrchestrator
-from src.orchestrator.gns3.gns3_orchestrator import GNS3Orchestrator
 from src.settings import Settings
 
 
@@ -24,9 +22,7 @@ from src.settings import Settings
 # @TODO Complete and recursive Exception Documentation.
 # @TODO upgrade Logging
 class GraphOrchestrator:
-    """
-    Object which controls the process of the VMs provisioning.
-    """
+    """Inspects and synchronizes graph resources on ESXi and GNS3."""
 
     def __init__(
         self,
@@ -34,133 +30,111 @@ class GraphOrchestrator:
         esxi_port: int,
         esxi_username: str,
         esxi_password: str | None,
+        gns3_username: str,
+        gns3_password: str | None,
+        gns3_ssh_port: int = 22,
     ) -> None:
         """
-        :param esxi_host: IPv4 address of the ESXi host.
-        :param esxi_port: Port number of the ESXi host, where the API requests are expected.
-        :param esxi_username: username of the ESXi host.
-        :param esxi_password: corresponding password for user.
-        :raises RuntimeError: Is thrown when the GNS3 VM is not found on the ESXi host.
-        :raises ValueError: Is thrown when invalid credentials are provided or the IPv4 address is not a public, private or loopback address.
-        :raises TimeoutError: Is thrown when timeout occurs.
-        :raises ConnectionError: Is thrown when the connection buildup fails.
+        Initializes the ESXi connection for topology management.
+        :param esxi_host: ESXi server IP address.
+        :param esxi_port: ESXi API port.
+        :param esxi_username: ESXi username.
+        :param esxi_password: ESXi password.
         """
         esxi_connection = ESXiConnection(esxi_host, esxi_port, esxi_username, esxi_password)
-
         self.esxi_orchestrator = ESXiOrchestrator(esxi_connection)
-        self.gns3_orchestrator = None
 
-    def execute_graph_deployment(self, graph: Graph, gns3_username: str, gns3_password: str | None = None) -> None:
+        gns3_ip = self._get_gns3_ip(Settings.ESXI.GNS3_VM_NAME)
+        if gns3_ip is None:
+            raise RuntimeError("GNS3 VM not found.")
+        gns3_connection = GNS3Connection(gns3_ip, Settings.GNS3.PORT, Settings.GNS3.PROJECT_NAME)
+        gns3_ssh_connection = SSHConnection(gns3_connection.ip, gns3_ssh_port, gns3_username, gns3_password)
+        self.gns3_orchestrator = GNS3Orchestrator(gns3_connection, gns3_ssh_connection)
+
+    def execute_graph_deployment(self, graph: Graph) -> None:
         """
-        Deploys the graph on the ESXi host and GNS3 VM. The connection between the nodes runs solely between GNS3.
-        This is established with multiple port groups with unique vlans on the vSwitch in ESXi.
-        :param graph: Graph to deploy.
-        :param gns3_username: Username for the GNS3 VM
-        :param gns3_password: Password for the GNS3 VM. Set to  ``None`` if no password is set.
-        :return:
+        Deploys a graph completely or synchronizes an existing topology.
+        :param graph: Desired topology.
         """
-        # Get needed Portgroups
-        needed_port_groups = self._get_needed_port_group_names(graph)
-        # Disconnect adapters from ignored VMs from needed portgroups
-        self.esxi_orchestrator.ensure_adapter_connection(
-            vm_names=Settings.ESXI.IGNORE_VIRTUAL_MACHINES,
-            port_group_names=needed_port_groups,
-            should_connect=False,
-        )
-        # Destroy VMs in Portgroups and disconnect ignored VMs.
-        self.esxi_orchestrator.destroy_old_vms(needed_port_groups)
-        # Destroy Portgroups and Trunk_Port_group
-        self.esxi_orchestrator.remove_port_groups(needed_port_groups)
-        # Create vSwitch if necessary
-        self.esxi_orchestrator.ensure_virtual_switch(Settings.ESXI.VIRTUAL_SWITCH)
-        # Create Portgroups and Trunk_Port_group
-        self.esxi_orchestrator.create_port_groups(needed_port_groups)
-        # Deploy GNS3 VM if necessary
-        # @TODO
-        # Alter GNS3 Adapter portgroups
-        self.esxi_orchestrator.ensure_gns3_vm_adapter(
-            gns3_vm_name=Settings.ESXI.GNS3_VM_NAME,
-            mgmt_port_group=Settings.ESXI.MANAGEMENT_PORT_GROUP,
-            trunk_port_group=Settings.ESXI.TRUNK_PORT_GROUP,
-        )
-        # Connect adapter from ignored VMs to needed portgroups
-        self.esxi_orchestrator.ensure_adapter_connection(
-            vm_names=Settings.ESXI.IGNORE_VIRTUAL_MACHINES,
-            port_group_names=needed_port_groups,
-            should_connect=True,
-        )
+        state = TopologyState()
+        state.get_topology_state(graph, self.esxi_orchestrator.esxi_connection, self.gns3_orchestrator.gns3_connection)
 
-        time.sleep(1)
+        changes = TopologyChanges(self.esxi_orchestrator, self.gns3_orchestrator)
+        changes.init_topology_changes(graph, state)
 
-        gns3_connection = GNS3Connection(
-            ip=self._get_gns3_ip(Settings.ESXI.GNS3_VM_NAME),
-            port=Settings.GNS3.PORT,
-            project_name=Settings.GNS3.PROJECT_NAME,
-        )
-        self.gns3_orchestrator = GNS3Orchestrator(gns3_connection)
-
-        # Configure GNS3 Interfaces
-        self.gns3_orchestrator.configure_gns3_vm_interfaces(graph, gns3_username, gns3_password)
-        # Deploy VMs
-        self.deploy_vm(graph)
+        self.apply_topology_changes(changes)
 
     def deploy_vm(self, graph: Graph) -> None:
         """
-        Deploys the nodes in the graph on GNS3 and if necessary also on ESXi.
-        :param graph: Graph to deploy
-        :return:
-        :raises TimeoutError: Is thrown when it took too long to receive a response.
-        :raises ConnectionError: Is thrown when something on the connection buildup fails.
-        :raises ValueError: Is thrown when the IPv4 address is not a public, private or loopback address.
-            Is also thrown when the credentials are not valid.
-            May also be thrown when the image of the node does not exist on the GNS3 instance.
-            May also be thrown when no adapter can be associated with the given interface.
-        :raises RuntimeError: Is thrown when it fails to collect GNS3 template information. May also be thrown when it fails to create the node.
-            May also be thrown when an error occurs while trying to get subinterface information or when the execution of the script fails.
-            May also be thrown when there are issues with removing the port group, like it does not exist, or it is currently in use.
-            May also be thrown when a portgroup already exists on the ESXi host. May also be thrown when no host-system or network-system was found on the ESXi host.
+        Deploys graph devices to ESXi and GNS3.
+        :param graph: Graph to deploy.
         """
         for node in graph.nodes.values():
             if node.env == Environment.ON_ESXI:
                 self.esxi_orchestrator.deploy_virtual_machine(node=node, datastore=Settings.ESXI.DATASTORE)
                 self.gns3_orchestrator.create_node(node)
-
             if node.env == Environment.ON_GNS3:
                 self.gns3_orchestrator.create_node(node)
-
             self.gns3_orchestrator.partially_link_gns3_nodes(node)
 
-    @staticmethod
-    def _get_needed_port_group_names(graph: Graph) -> dict[str, int]:
+    def apply_topology_changes(self, changes: TopologyChanges) -> None:
         """
-        Determines which portgroups will be needed on the ESXi host for given graph.
-        :param graph: Graph which represents the network.
-        :return: Returns a mapping of portgroup-name to vlan-id
+        Applies validated topology changes using existing provisioning methods.
+        :param changes: Additions, modifications and deletions to apply.
+        :raises RuntimeError: If the plan contains conflicts.
         """
-        port_groups = {}
-        for node in graph.nodes.values():
-            for interface in node.interfaces.values():
-                vlan = interface.vlan
-                if vlan is None:
-                    continue
+        if changes.conflicts:
+            raise RuntimeError("Cannot synchronize topology:\n- " + "\n- ".join(changes.conflicts))
+        if not changes.has_changes:
+            return
 
-                port_groups[vlan.name] = vlan.id
-        port_groups[Settings.ESXI.TRUNK_PORT_GROUP] = 4095
-        port_groups[Settings.ESXI.MANAGEMENT_PORT_GROUP] = 0
-        return port_groups
+        if changes.to_add["virtual_switch"] or changes.to_change["virtual_switch"]:
+            self.esxi_orchestrator.ensure_virtual_switch(Settings.ESXI.VIRTUAL_SWITCH)
+        self.esxi_orchestrator.create_port_groups(dict(changes.to_add["port_group"]))
+        self.esxi_orchestrator.create_port_groups(dict(changes.to_change["port_group"]), update=True)
+        for vm, nic, group in changes.to_change["gns3_vm_adapter"]:
+            self.esxi_orchestrator._configure_network_adapter(vm, nic, group)
+        if changes.to_change["vlans"]:
+            changes.gns3_vlan_setup.apply_yaml()
+
+        for node in changes.to_add["esxi_vm"]:
+            self.esxi_orchestrator.deploy_virtual_machine(node, Settings.ESXI.DATASTORE)
+        for vm, nic, group in changes.to_change["esxi_nic"]:
+            self.esxi_orchestrator._configure_network_adapter(vm, nic, group)
+        for vm, port_groups in changes.to_add["esxi_nic"]:
+            self.esxi_orchestrator._add_virtual_machine_adapters(vm, port_groups)
+        if changes.to_delete["port_group"]:
+            self.esxi_orchestrator.remove_port_groups(set(changes.to_delete["port_group"]))
+
+        connection = self.gns3_orchestrator.gns3_connection
+        base = connection.get_project_url()
+        # Remove links before their nodes to avoid stale link IDs.
+        for link_id in changes.to_delete["gns3_link"]:
+            connection.delete(f"{base}/links/{link_id}")
+        for node in changes.to_delete["gns3_node"]:
+            connection.delete(f"{base}/nodes/{node.node_gns3_info['node_id']}")
+        for node in changes.to_add["gns3_node"]:
+            result = self.gns3_orchestrator.create_node(node)
+            if result is not None:
+                node.node_gns3_info = result
+        for node, properties in changes.to_change["gns3_node"]:
+            url = f"{self.gns3_orchestrator.gns3_connection.get_project_url()}/nodes/{node.node_gns3_info['node_id']}"
+            response = requests.put(url, json=properties, timeout=30)
+            response.raise_for_status()
+        for first, second in changes.to_add["gns3_link"]:
+            connection.connect_nodes(first, second)
 
     def _get_gns3_ip(self, gns3_name: str) -> str:
         """
-        Determines the IP address of the GNS3 VM.
-        :param gns3_name: Name of the GNS3 VM.
-        :return: Returns the first IPv4 address found on the VM. The reachability to the VM is not insured.
-        :raises RuntimeError: Is thrown when no GNS3 VM is found on the ESXi host.
+        Returns the primary IPv4 address of a GNS3 VM.
+        :param gns3_name: ESXi virtual machine name.
+        :return: GNS3 VM IPv4 address.
         """
-        gns3_ip = self.esxi_orchestrator.esxi_connection.get_vm_ip_address(gns3_name)
-        if gns3_ip is None:
-            logger.error(
-                msg
-                := f"No VM found on ESXi Host: {self.esxi_orchestrator.esxi_connection.ip} with the name: {gns3_name}"
+        address = self.esxi_orchestrator.esxi_connection.get_vm_ip_address(gns3_name)
+        if address is None:
+            message = (
+                f"No VM found on ESXi Host: {self.esxi_orchestrator.esxi_connection.ip} with the name: {gns3_name}"
             )
-            raise RuntimeError(msg)
-        return gns3_ip
+            logger.error(message)
+            raise RuntimeError(message)
+        return address

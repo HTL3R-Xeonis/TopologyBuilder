@@ -2,7 +2,7 @@ verbosity_level: "n"
 topology_file: "./topology_example.yaml"
 is_dry_run: false
 esxi:
-  ip: "10.20.20.200"
+  ip: "10.20.20.203"
   port: 443
   username: "root"
   password:
@@ -17,7 +17,7 @@ esxi:
     - "VM Network"
     - "Management Network"
   ignore_virtual_machines:
-    - "GNS3 (1)"
+    - "GNS3"
 
 gns3:
   username: "gns3"

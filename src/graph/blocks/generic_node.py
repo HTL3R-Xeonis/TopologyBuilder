@@ -33,7 +33,7 @@ class GenericNode:
         self._name: str = name
 
         self._interfaces: dict[str, Interface] = {}
-        self._gns3_node_info: dict[str, Any] | None = None
+        self._node_gns3_info: dict[str, Any] | None = None
         self._env: Environment = Environment.get_environment(image)
 
         if self._env == Environment.ON_NOTHING:
@@ -73,24 +73,24 @@ class GenericNode:
         return self._interfaces
 
     @property
-    def gns3_node_info(self) -> dict[str, Any] | None:
+    def node_gns3_info(self) -> dict[str, Any] | None:
         """
         The gns3 node info of this node. Will only be set, if a Node on gns3 exists.
         :return: Returns this attribute
         """
-        return self._gns3_node_info
+        return self._node_gns3_info
 
-    @gns3_node_info.setter
-    def gns3_node_info(self, gns3_node_info: dict[str, Any]) -> None:
+    @node_gns3_info.setter
+    def node_gns3_info(self, node_gns3_info: dict[str, Any]) -> None:
         """
         Sets the gns3 node info for this node.
-        :param gns3_node_info: the gns3 node info which is acquired through the GNS3 API
+        :param node_gns3_info: the gns3 node info which is acquired through the GNS3 API
         :return:
         :raise TypeError: Is thrown when the parameters are of the wrong types.
         """
-        if not isinstance(gns3_node_info, dict):
-            raise TypeError
-        self._gns3_node_info = gns3_node_info
+        if not isinstance(node_gns3_info, dict):
+            raise TypeError(f"Expected a dict, got {type(node_gns3_info)}")
+        self._node_gns3_info = node_gns3_info
 
     @property
     def env(self) -> Environment:
@@ -169,7 +169,7 @@ class GenericNode:
             f"  name: {self.name}\n"
             f"  role: {self.role}\n"
             f"  interfaces: {list(self.interfaces)}\n"
-            f"  gns3 info set: {self.gns3_node_info is not None}\n"
+            f"  gns3 info set: {self.node_gns3_info is not None}\n"
             f"  environment: {self.env}"
         )
 
@@ -183,7 +183,7 @@ class GenericNode:
             f"  image: {self.image}\n"
             f"  name: {self.name}\n"
             f"  role: {self.role}\n"
-            f"  gns3_node_info: {self.gns3_node_info}\n"
+            f"  gns3_node_info: {self.node_gns3_info}\n"
             f"  environment: {self.env}\n"
             f"  interfaces: {nested_formatter('  interfaces: ', list(self.interfaces.values()))}\n"
         )

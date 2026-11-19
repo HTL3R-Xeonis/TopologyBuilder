@@ -11,15 +11,27 @@ nodes:
     names:
        # Names Empty
 
+  - image: Rocky 9.2
+    role: VM
+    names:
+      - PC5
+
+  - image: debian
+    role: VM
+    names:
+      - PC6
+
+  - image: Ubuntu-Server
+    role: VM
+    names:
+      - PC7
+
   - image: OPNsense
     role: VM
     names:
       - PC4
 
-  - image: Rocky 9.2
-    role: VM
-    names:
-      - PC5
+
 
   - image: Cisco IOSvL2 15.2.1
     role: SWITCH

@@ -345,7 +345,7 @@ class Settings:
         PASSWORD: str | None = None
         """Password to use for the GNS3 connections."""
         PROJECT_NAME: str = None
-        """Name of the GNS3 project to work on. If this project already exists on the GNS3 server, it is going to be overwritten."""
+        """Name of the GNS3 project to reuse or create if missing."""
         PORT: int = None
         """Port of the GNS3 client, where the API requests are expected."""
         PARENT_INTERFACE: str = None

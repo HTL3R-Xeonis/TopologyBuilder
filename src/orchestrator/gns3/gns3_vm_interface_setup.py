@@ -30,6 +30,7 @@ class GNS3VMInterfaceSetup:
         self.parent_interface = parent_interface
         self.vlans: dict[str, int] = {}
         self.netplan_yaml = ""
+        self._requested_vlan_names: set[str] = set()
 
     def _run_command(self, command: str, input_data: str | None = None) -> str:
         """
@@ -128,6 +129,7 @@ class GNS3VMInterfaceSetup:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,14}", self.parent_interface):
             raise ValueError(f"Invalid parent interface: {self.parent_interface!r}")
         self._create_subinterface_creation_commands(graph)
+        self._requested_vlan_names = set(self.vlans)
 
         if Settings.IS_DRY_RUN:
             Verbosity.volumatic_print(

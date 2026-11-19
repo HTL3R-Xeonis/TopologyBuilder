@@ -22,38 +22,34 @@ class ESXiOrchestrator:
         """
         self.esxi_connection = esxi_connection
 
-    def ensure_virtual_switch(self, virtual_switch_name: str) -> vim.host.VirtualSwitch:
+    def ensure_virtual_switch(self, virtual_switch_name: str) -> vim.host.VirtualSwitch | None:
         """
-        Ensures that the virtual switch exists on the ESXi Host. If it does not, it will be created.
+        Ensures the ESXi virtual switch exists and has the required security policy.
         :param virtual_switch_name: Name of the virtual Switch.
-        :return: Returns the found or created virtual switch.
+        :return: The switch, or ``None`` for a missing switch in dry-run.
         """
         virtual_switch = self.esxi_connection.get_virtual_switch(virtual_switch_name)
-        if Settings.IS_DRY_RUN and virtual_switch is None:
-            # ----------------------------------------------------------------------------------------------------------
-            Verbosity.volumatic_print(
-                Verbosity.NORMAL,
-                f"Would create virtual switch: {Settings.ESXI.VIRTUAL_SWITCH}",
-            )
-            return {}
         if virtual_switch is None:
-            Verbosity.volumatic_print(
-                Verbosity.NORMAL,
-                f"Creates virtual switch: {Settings.ESXI.VIRTUAL_SWITCH}",
-            )
-            # ----------------------------------------------------------------------------------------------------------
-
+            if Settings.IS_DRY_RUN:
+                Verbosity.volumatic_print(Verbosity.NORMAL, f"Would create virtual switch: {virtual_switch_name}")
+                return None
+            Verbosity.volumatic_print(Verbosity.NORMAL, f"Creates virtual switch: {virtual_switch_name}")
             virtual_switch = self.esxi_connection.create_virtual_switch(virtual_switch_name)
+        self._ensure_virtual_switch_policy(virtual_switch)
         return virtual_switch
 
     def _ensure_virtual_switch_policy(self, virtual_switch: vim.host.VirtualSwitch) -> None:
         """
-        Checks whether the virtual switch has the needed policies and sets updates them if needed.
+        Ensures the required security policy of the virtual switch.
         :param virtual_switch: Virtual switch to check.
         :return:
-        :raises RuntimeError: Is thrown when the virtual switch already exists on the ESXi host. May also be thrown when no host-system or network-system was found.
+        :raises RuntimeError: If the ESXi host network is unavailable.
         """
         update_spec = virtual_switch.spec
+        if update_spec.policy is None:
+            update_spec.policy = vim.host.NetworkPolicy()
+        if update_spec.policy.security is None:
+            update_spec.policy.security = vim.host.NetworkPolicy.SecurityPolicy()
 
         is_change_needed = False
         if not update_spec.policy.security.allowPromiscuous:
@@ -66,6 +62,11 @@ class ESXiOrchestrator:
             update_spec.policy.security.macChanges = True
             is_change_needed = True
         if is_change_needed:
+            if Settings.IS_DRY_RUN:
+                Verbosity.volumatic_print(
+                    Verbosity.NORMAL, f"Would update virtual switch policy: {virtual_switch.name}"
+                )
+                return
             host = self.esxi_connection.get_esxi_object(vim.HostSystem)
             if host is None:
                 logger.error(msg := f"Hostsystem not found on ESXi host: {self.esxi_connection.ip}")
@@ -197,7 +198,9 @@ class ESXiOrchestrator:
         virtual_machines = self.esxi_connection.get_esxi_object(vim.VirtualMachine, get_all=True)
         tasks = []
         for vm in virtual_machines:
-            if vm.name == Settings.ESXI.GNS3_VM_NAME or vm.name in Settings.ESXI.IGNORE_VIRTUAL_MACHINES:
+            if ESXiConnection.compare_regular_to_esxi_name(
+                Settings.ESXI.GNS3_VM_NAME, vm.name
+            ) or ESXiConnection.compare_regular_to_esxi_name(Settings.ESXI.IGNORE_VIRTUAL_MACHINES, vm.name):
                 continue
 
             hardware = getattr(vm.config, "hardware", [])
@@ -213,16 +216,63 @@ class ESXiOrchestrator:
 
         return tasks
 
-    def create_port_groups(self, needed_port_groups: dict[str, int]) -> None:
+    def create_port_groups(self, needed_port_groups: dict[str, int], update: bool = False) -> None:
         """
-        Creates the needed port groups on the virtual switch.
-        :param needed_port_groups: A dictionary with the portgroup names mapped to their VLAN id
-        :return:
-        :raises RuntimeError: Is thrown when a portgroup already exists  on the ESXi host.
-        May also be thrown when no host-system or network-system was found on the ESXi host.
+        Creates or updates port groups while preserving VM connections.
+        :param needed_port_groups: Port-group names mapped to VLAN IDs.
+        :param update: Whether to update existing port groups.
         """
+        existing = self.esxi_connection.get_all_port_groups() if update and not Settings.IS_DRY_RUN else {}
         for pg_name, pg_id in needed_port_groups.items():
-            self.esxi_connection.add_port_group(pg_name, pg_id)
+            current = existing.get(pg_name)
+            if current is None or current.spec.vswitchName == Settings.ESXI.VIRTUAL_SWITCH:
+                self.esxi_connection.add_port_group(pg_name, pg_id, update=update)
+                continue
+
+            host = self.esxi_connection.get_esxi_object(vim.HostSystem)
+            if any(nic.portgroup == pg_name for nic in (host.config.network.vnic or [])):
+                raise RuntimeError(f"Cannot move port group {pg_name}: used by an ESXi VMkernel adapter")
+
+            adapters = [
+                (
+                    vm,
+                    nic,
+                    getattr(nic.connectable, "connected", False),
+                    getattr(nic.connectable, "startConnected", False),
+                )
+                for vm in (self.esxi_connection.get_esxi_object(vim.VirtualMachine, get_all=True) or [])
+                for nic in self.esxi_connection.get_virtual_machine_nics(vm)
+                if self.esxi_connection.get_nic_port_group(nic) == pg_name
+            ]
+            source_spec = current.spec
+            try:
+                self.ensure_adapter_connection({vm.name for vm, _, _, _ in adapters}, {pg_name}, False)
+                self.esxi_connection.remove_port_group(pg_name)
+                try:
+                    self.esxi_connection.add_port_group(pg_name, pg_id)
+                except Exception as exc:
+                    if pg_name not in self.esxi_connection.get_all_port_groups():
+                        try:
+                            self.esxi_connection.add_port_group(
+                                pg_name,
+                                source_spec.vlanId,
+                                virtual_switch_name=source_spec.vswitchName,
+                                policy=source_spec.policy,
+                            )
+                        except RuntimeError as rollback_exc:
+                            raise RuntimeError(
+                                f"Could not restore port group {pg_name} on {source_spec.vswitchName}: {rollback_exc}"
+                            ) from exc
+                    raise
+            finally:
+                restore_errors = []
+                for vm, nic, connected, start_connected in adapters:
+                    try:
+                        self._configure_network_adapter(vm, nic, pg_name, connected, start_connected)
+                    except Exception as exc:  # noqa: BLE001
+                        restore_errors.append(f"{vm.name} NIC {nic.key}: {exc}")
+                if restore_errors:
+                    raise RuntimeError(f"Could not restore adapters on {pg_name}: " + "; ".join(restore_errors))
 
     @staticmethod
     def _create_mapped_network(node: GenericNode) -> dict[str, str]:
@@ -270,3 +320,54 @@ class ESXiOrchestrator:
             network_mapping=self._create_mapped_network(node),
         )
         importer.deploy_ova()
+
+    def _add_virtual_machine_adapters(self, vm: vim.VirtualMachine, groups: list[str]) -> None:
+        """
+        Adds ESXi adapters connected to the specified port groups.
+        :param vm: Existing ESXi virtual machine.
+        :param groups: Port groups for new adapters.
+        """
+        changes = []
+        for index, name in enumerate(groups):
+            network = self.esxi_connection.get_esxi_object(vim.Network, name)
+            if not isinstance(network, vim.Network):
+                raise TypeError(f"ESXi port group {name} is not available")
+            changes.append(OvaImporter._create_new_nic(network, -151 - index))
+        spec = vim.vm.ConfigSpec()
+        spec.deviceChange = changes
+        WaitForTasks([vm.ReconfigVM_Task(spec=spec)])
+
+    def _configure_network_adapter(
+        self,
+        vm: vim.VirtualMachine,
+        nic: vim.vm.device.VirtualEthernetCard,
+        group: str,
+        connected: bool | None = None,
+        start_connected: bool | None = None,
+    ) -> None:
+        """
+        Assigns an ESXi adapter to a port group and restores its connection state.
+        :param vm: Existing virtual machine.
+        :param nic: Network adapter to update.
+        :param group: Target port-group name.
+        :param connected: Connection state to restore, or ``None`` to connect a running VM.
+        :param start_connected: Startup connection state, or ``None`` to enable it.
+        """
+        network = self.esxi_connection.get_esxi_object(vim.Network, group)
+        if not isinstance(network, vim.Network):
+            raise TypeError(f"ESXi port group {group} is not available")
+        nic.backing = vim.vm.device.VirtualEthernetCard.NetworkBackingInfo(
+            deviceName=group, network=network, useAutoDetect=False
+        )
+        if nic.connectable is None:
+            nic.connectable = vim.vm.device.VirtualDevice.ConnectInfo()
+        nic.connectable.startConnected = True if start_connected is None else start_connected
+        if connected is not None:
+            nic.connectable.connected = connected
+        elif vm.runtime.powerState == vim.VirtualMachinePowerState.poweredOn:
+            nic.connectable.connected = True
+        spec = vim.vm.ConfigSpec()
+        spec.deviceChange = [
+            vim.vm.device.VirtualDeviceSpec(operation=vim.vm.device.VirtualDeviceSpec.Operation.edit, device=nic)
+        ]
+        WaitForTasks([vm.ReconfigVM_Task(spec=spec)])
