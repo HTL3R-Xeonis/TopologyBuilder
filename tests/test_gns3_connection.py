@@ -1645,22 +1645,27 @@ def gns3_connection_059() -> None:
 
 @allure.title("create_node meldet lesbar, wenn GNS3 das Hinzufügen eines Ports ablehnt")
 @allure.description(
-    "GNS3 darf Änderungen an einem laufenden Cloud-Node ablehnen (HTTP 409). Das wird eine RuntimeError mit "
-    "Node, Port und der Anweisung, den Node zu stoppen oder voll zu deployen; kein stiller Fallback auf einen "
-    "falschen Port"
+    "GNS3 lehnt Portänderungen an verbundenen Cloud-Nodes mit HTTP 409 ab. Die Meldung nennt das Entfernen "
+    "der Links oder einen vollständigen Deploy. Andere HTTP-Fehler behalten ihren allgemeinen Hinweis."
 )
 @allure.tag("negativ-test", "gns3-connection")
 @allure.feature("gns3_connection")
 @allure.severity(allure.severity_level.CRITICAL)
-def gns3_connection_060() -> None:
+@pytest.mark.parametrize(
+    ("status", "advice"),
+    [(409, "Detach its existing links"), (500, "stop the Cloud node")],
+)
+def gns3_connection_060(status: int, advice: str) -> None:
     _reset_settings()
-    api = _FakeGns3Api([_cloud_node("PC1", [_port(0, "eth0", 2)])], refuse_status=409)
+    api = _FakeGns3Api(
+        [_cloud_node("PC1", [_port(0, "eth0", 2)])], refuse_status=status
+    )
     conn = _connection_with_cloud(api.nodes["id-PC1"], api)
     node = _esxi_node_with_links("PC1", ("eth0", 2), ("eth1", 5))
 
     with (
         patch.object(GNS3Connection, "put", side_effect=api.put),
-        pytest.raises(RuntimeError, match=r"'PC1'.*eth1.*409.*stop the Cloud node"),
+        pytest.raises(RuntimeError, match=rf"'PC1'.*eth1.*{status}.*{advice}"),
     ):
         conn.create_node(node)
 

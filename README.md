@@ -124,8 +124,10 @@ from before this fix), the deploy stops before changing anything and names
 them; `verify` reports them too and `verify --fix` re-tags the conflicting
 port group. A new link on an ESXi VM that already has a Cloud node in GNS3
 adds a port for it to that node (existing ports and their links stay); if
-GNS3 refuses to change the node while it runs, the deploy stops with a
-message telling you to stop the Cloud node or do a full deploy.
+GNS3 refuses the update, the deploy stops with an actionable message.
+GNS3 2.2.61 rejects port changes while a Cloud has existing links, including
+when the Cloud is stopped. Detach its links before editing ports, or use a
+full deploy to rebuild the Cloud and its links.
 
 Both mechanisms above only ever run as part of a non-incremental `deploy`.
 For a live, one-node/one-link-at-a-time consumer of this library (like

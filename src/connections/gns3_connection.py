@@ -684,8 +684,8 @@ class GNS3Connection(APIHandler):
         :param node: the ESXi node the Cloud node represents
         :param existing: the Cloud node as GNS3 returned it
         :return: the Cloud node with its up to date ports
-        :raises RuntimeError: Is thrown when GNS3 refuses the update (it may refuse while the node runs: stop the
-            Cloud node, or do a full deploy) or the new ports do not show up afterwards.
+        :raises RuntimeError: Is thrown when GNS3 refuses the update (a connected Cloud needs its links detached
+            before ports can change) or the new ports do not show up afterwards.
         """
         wanted = self._create_ports_mapping(node)
         current = [
@@ -737,6 +737,12 @@ class GNS3Connection(APIHandler):
                 updated = self.get(node_url)
         except requests.exceptions.HTTPError as exc:
             status = getattr(exc.response, "status_code", None)
+            if status == 409:
+                raise RuntimeError(
+                    f"GNS3 refused to update the ports of the Cloud node '{node.name}' ({changes}; HTTP 409). "
+                    "Detach its existing links before changing its ports, or use a full deploy "
+                    "to rebuild the Cloud node and its links."
+                ) from exc
             raise RuntimeError(
                 f"GNS3 refused to update the ports of the Cloud node '{node.name}' ({changes}; HTTP {status}). "
                 "GNS3 may not allow changing a node's ports while it is running: stop the Cloud node "
