@@ -196,7 +196,7 @@ def api_handler_007() -> None:
     "Überprüft, dass ein explizit übergebener timeout-Parameter den "
     "5-Sekunden-Standardwert von APIHandler.delete überschreibt - real "
     "gebraucht von GNS3Connection.delete_node, das ein Node löschen kann, "
-    "dessen Prozess erst gestoppt werden muss (siehe HANDOFF.md)"
+    "dessen Prozess erst gestoppt werden muss"
 )
 @allure.tag("positiv-test", "api-handler")
 @allure.feature("api_handler")

@@ -221,6 +221,18 @@ fails the error names the manual command
 first checks that every needed OVA is readable at its URL, before anything is
 removed.
 
+A pull import that fails or is aborted (error, timeout, Ctrl-C) cleans up after
+itself, but only what that import created: after the lease is aborted, the VM
+of that name is destroyed if it did not exist before, and the datastore folder
+`<vm name>` (or the numbered `<vm name>_<n>` ESXi picks when the name is taken)
+is deleted if it did not exist before and no registered VM lives in it. A
+failing cleanup step only logs a warning with the manual hint and never
+replaces the original error. The error text of a failed pull task includes the
+whole ESXi fault (type, message, HTTP status code, nested causes). Open: once,
+right after an aborted import, the next import of the same name failed with an
+HTTP 403 reported by the pull task that a retry did not repeat; the cause is
+not known.
+
 ## Usage
 
 Every command below can be run either as `topologybuilder <command> ...` (if

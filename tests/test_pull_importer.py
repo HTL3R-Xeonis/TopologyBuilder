@@ -563,6 +563,10 @@ class _FakeTask:
 
     def __init__(self, *states: SimpleNamespace) -> None:
         self._states = list(states)
+        self.cancelled = 0
+
+    def CancelTask(self) -> None:  # noqa: N802 - pyVmomi name
+        self.cancelled += 1
 
     @property
     def info(self) -> SimpleNamespace:
@@ -587,10 +591,40 @@ def _running(progress: int = 10) -> SimpleNamespace:
     )
 
 
+def fake_vm(
+    moid: str, name: str, path: str, powered_on: bool = False
+) -> SimpleNamespace:
+    state = vim.VirtualMachine.PowerState
+    return SimpleNamespace(
+        _moId=moid,
+        name=name,
+        runtime=SimpleNamespace(
+            powerState=state.poweredOn if powered_on else state.poweredOff
+        ),
+        summary=SimpleNamespace(config=SimpleNamespace(vmPathName=path)),
+    )
+
+
 class _Rig:
     """A fake ESXi connection with everything ``import_ova`` touches, plus the objects tests assert on."""
 
-    def __init__(self, task: _FakeTask | None = None, result=None) -> None:
+    def __init__(
+        self,
+        task: _FakeTask | None = None,
+        result=None,
+        vms: list[SimpleNamespace] | None = None,
+        folders: list[str] | None = None,
+        new_folder: str | None = "UBUNTU1",
+        abort_removes_vm: bool = True,
+    ) -> None:
+        # the fake datastore: VMs registered on the host and folders in the datastore root; ImportVApp adds the new
+        # VM (and its folder), the aborted lease removes the VM again like the host does, the folder stays
+        self.vms = list(vms or [])
+        self.folders = list(folders or [])
+        self.new_folder = new_folder
+        self.abort_removes_vm = abort_removes_vm
+        self.deleted_vms: list[str] = []
+        self.deleted_paths: list[str] = []
         self.connection = MagicMock()
         self.connection.ip = "10.20.20.204"
         self.host = self.connection.get_host_system.return_value
@@ -610,9 +644,50 @@ class _Rig:
             SimpleNamespace(importKey=None, key="ignored"),
         ]
         self.vm = self.lease.info.entity
-        self.lease.HttpNfcLeasePullFromUrls_Task.return_value = task or _FakeTask(
-            _success()
+        self.task = task or _FakeTask(_success())
+        self.lease.HttpNfcLeasePullFromUrls_Task.return_value = self.task
+
+        self.resource_pool.ImportVApp.side_effect = self._import_vapp
+        self.lease.HttpNfcLeaseAbort.side_effect = self._abort
+        self.connection.get_all_vms.side_effect = lambda: list(self.vms)
+        self.connection.delete_vm.side_effect = self._delete_vm
+        datastore = self.connection.find_datastore.return_value
+        datastore.browser.SearchDatastore_Task.side_effect = self._search
+        file_manager = self.connection.content.fileManager
+        file_manager.DeleteDatastoreFile_Task.side_effect = self._delete_path
+
+    def _import_vapp(self, **_kwargs) -> MagicMock:
+        if self.new_folder is not None and self.new_folder not in self.folders:
+            self.folders.append(self.new_folder)
+        self.created = fake_vm(
+            "vm-new", "UBUNTU1", f"[datastore1] {self.new_folder or 'UBUNTU1'}/x.vmx"
         )
+        self.vms.append(self.created)
+        return self.lease
+
+    def _abort(self) -> None:
+        if self.abort_removes_vm and self.created in self.vms:
+            self.vms.remove(self.created)
+
+    def _delete_vm(self, vm: SimpleNamespace) -> None:
+        self.deleted_vms.append(vm._moId)
+        self.vms.remove(vm)
+
+    def _search(self, **kwargs) -> SimpleNamespace:
+        assert kwargs["datastorePath"] == "[datastore1]"
+        result = SimpleNamespace(file=[SimpleNamespace(path=f) for f in self.folders])
+        return SimpleNamespace(info=SimpleNamespace(result=result))
+
+    def _delete_path(self, name: str, datacenter) -> MagicMock:
+        assert datacenter is self.datacenter
+        self.deleted_paths.append(name)
+        self.folders.remove(name.removeprefix("[datastore1] "))
+        return MagicMock()
+
+    def run_failing(self, exception: type[BaseException], **kwargs) -> None:
+        """Runs the import and expects ``exception``."""
+        with pytest.raises(exception):
+            self.run(**kwargs)
 
     def _find_network(self, name: str) -> MagicMock:
         network = MagicMock(spec=vim.Network)
@@ -624,6 +699,8 @@ class _Rig:
         with (
             patch("src.pull_importer._ovf_descriptor", return_value="<descriptor/>"),
             patch("src.pull_importer.ensure_http_client_enabled") as firewall,
+            patch.object(PullImporter, "_CLEANUP_TASK_WAIT_SECONDS", 0),
+            patch.object(PullImporter, "_CLEANUP_RETRY_SECONDS", 0),
         ):
             self.firewall = firewall
             return PullImporter(self.connection).import_ova(
@@ -650,7 +727,7 @@ def pull_importer_050() -> None:
     assert kwargs["ovfDescriptor"] == "<descriptor/>"
     assert kwargs["resourcePool"] is rig.resource_pool
     assert kwargs["datastore"] is rig.connection.find_datastore.return_value
-    rig.connection.find_datastore.assert_called_once_with("datastore1")
+    rig.connection.find_datastore.assert_called_with("datastore1")
     assert kwargs["cisp"].entityName == "UBUNTU1"
     assert kwargs["cisp"].diskProvisioning == "thin"
     rig.resource_pool.ImportVApp.assert_called_once_with(
@@ -1012,3 +1089,242 @@ def pull_importer_066() -> None:
 
     with pytest.raises(TimeoutError, match="did not become ready"):
         PullImporter._wait_for_lease_ready(lease, timeout=-1)
+
+
+_NEW_VM_PATH = "[datastore1] UBUNTU1_1/UBUNTU1.vmx"
+
+
+def _old_vm(powered_on: bool = False) -> SimpleNamespace:
+    return fake_vm("vm-old", "UBUNTU1", "[datastore1] UBUNTU1/UBUNTU1.vmx", powered_on)
+
+
+@allure.title(
+    "Ein abgebrochener Import löscht nur seine eigene VM und seinen eigenen Ordner, nie die gleichnamige alte VM"
+)
+@allure.description(
+    "Existiert die VM UBUNTU1 samt Ordner schon, legt der Host den neuen Ordner als UBUNTU1_1 an. Scheitert der Pull, "
+    "wird nach dem Lease-Abbruch nur die neue VM (falls noch da) und UBUNTU1_1 gelöscht; die alte VM, ihr Ordner und "
+    "fremde Ordner mit ähnlichem Namen bleiben; der Ursprungsfehler wird geworfen"
+)
+@allure.tag("negativ-test", "pull-importer")
+@allure.feature("pull_importer")
+@allure.severity(allure.severity_level.CRITICAL)
+def pull_importer_070() -> None:
+    old = _old_vm()
+    other = fake_vm("vm-other", "UBUNTU10", "[datastore1] UBUNTU10/UBUNTU10.vmx")
+    rig = _Rig(
+        task=_FakeTask(_failed("403")),
+        vms=[old, other],
+        folders=["UBUNTU1", "UBUNTU10", "UBUNTU1_x", "other"],
+        new_folder="UBUNTU1_1",
+        abort_removes_vm=False,
+    )
+
+    with pytest.raises(RuntimeError, match="could not pull"):
+        rig.run()
+
+    rig.lease.HttpNfcLeaseAbort.assert_called_once_with()
+    assert rig.deleted_vms == ["vm-new"]
+    assert rig.deleted_paths == ["[datastore1] UBUNTU1_1"]
+    assert old in rig.vms
+    assert other in rig.vms
+    assert rig.folders == ["UBUNTU1", "UBUNTU10", "UBUNTU1_x", "other"]
+
+
+@allure.title(
+    "Ein abgebrochener Import entfernt den übrig gebliebenen Ordner, auch wenn der Host die VM schon selbst entfernt hat"
+)
+@allure.description(
+    "Der abgebrochene Lease entfernt die VM, die zwei vmdk-Dateien im Ordner bleiben (der live gefundene Fall); es wird "
+    "keine VM gelöscht, aber der Ordner UBUNTU1, der vorher nicht existierte"
+)
+@allure.tag("negativ-test", "pull-importer")
+@allure.feature("pull_importer")
+@allure.severity(allure.severity_level.CRITICAL)
+def pull_importer_071() -> None:
+    rig = _Rig(task=_FakeTask(_running()))
+
+    rig.run_failing(TimeoutError, timeout=-1)
+
+    assert rig.deleted_vms == []
+    assert rig.deleted_paths == ["[datastore1] UBUNTU1"]
+    assert rig.folders == []
+    assert rig.task.cancelled >= 1
+
+
+@allure.title("Ein Ordner, der schon vor dem Import existierte, wird nie gelöscht")
+@allure.description(
+    "Existiert UBUNTU1 als Ordner (ohne VM) bereits und der Import scheitert, bleibt der Ordner unberührt, auch wenn der "
+    "Host dafür keinen neuen Ordner angelegt hat"
+)
+@allure.tag("negativ-test", "pull-importer")
+@allure.feature("pull_importer")
+@allure.severity(allure.severity_level.CRITICAL)
+def pull_importer_072() -> None:
+    rig = _Rig(task=_FakeTask(_failed("x")), folders=["UBUNTU1"])
+
+    rig.run_failing(RuntimeError)
+
+    assert rig.deleted_paths == []
+    assert rig.folders == ["UBUNTU1"]
+
+
+@allure.title("Ein Ordner mit registrierter VM wird nicht gelöscht")
+@allure.description(
+    "Lässt sich die neue VM nicht löschen und bleibt registriert, wird ihr Ordner nicht angefasst; der Ursprungsfehler "
+    "bleibt die geworfene Ausnahme, nicht der Fehler beim Aufräumen"
+)
+@allure.tag("negativ-test", "pull-importer")
+@allure.feature("pull_importer")
+@allure.severity(allure.severity_level.CRITICAL)
+def pull_importer_073() -> None:
+    rig = _Rig(task=_FakeTask(_failed("no route")), abort_removes_vm=False)
+    rig.connection.delete_vm.side_effect = vim.fault.NoPermission()
+
+    with pytest.raises(RuntimeError, match="no route"):
+        rig.run()
+
+    assert rig.deleted_paths == []
+    assert rig.folders == ["UBUNTU1"]
+
+
+@allure.title(
+    "Scheitert das Löschen des Ordners, bleibt der Ursprungsfehler die Ausnahme"
+)
+@allure.description(
+    "Das Löschen wird dreimal versucht (Dateien können noch gesperrt sein) und dann mit einer Warnung aufgegeben; "
+    "geworfen wird der Fehler des Pulls"
+)
+@allure.tag("negativ-test", "pull-importer")
+@allure.feature("pull_importer")
+@allure.severity(allure.severity_level.CRITICAL)
+def pull_importer_074() -> None:
+    rig = _Rig(task=_FakeTask(_failed("no route")))
+    file_manager = rig.connection.content.fileManager
+    file_manager.DeleteDatastoreFile_Task.side_effect = vim.fault.NoPermission()
+
+    with pytest.raises(RuntimeError, match="no route"):
+        rig.run()
+
+    assert file_manager.DeleteDatastoreFile_Task.call_count == 3
+
+
+@allure.title("Ein erfolgreicher Import räumt nichts auf")
+@allure.tag("positiv-test", "pull-importer")
+@allure.feature("pull_importer")
+@allure.severity(allure.severity_level.CRITICAL)
+def pull_importer_075() -> None:
+    rig = _Rig(vms=[_old_vm()], folders=["UBUNTU1"], new_folder="UBUNTU1_1")
+
+    rig.run()
+
+    assert rig.deleted_vms == []
+    assert rig.deleted_paths == []
+    assert rig.folders == ["UBUNTU1", "UBUNTU1_1"]
+    assert len(rig.vms) == 2
+    rig.lease.HttpNfcLeaseAbort.assert_not_called()
+
+
+@allure.title("Ein Fehler vor dem Lease (z.B. Import-Spec) löst kein Aufräumen aus")
+@allure.tag("negativ-test", "pull-importer")
+@allure.feature("pull_importer")
+@allure.severity(allure.severity_level.NORMAL)
+def pull_importer_076() -> None:
+    rig = _Rig(
+        result=_spec_result(
+            errors=[vmodl.LocalizedMethodFault(localizedMessage="bad")]
+        ),
+        folders=["UBUNTU1"],
+    )
+
+    rig.run_failing(RuntimeError)
+
+    assert rig.deleted_vms == []
+    assert rig.deleted_paths == []
+
+
+@allure.title(
+    "Ohne Ausgangsbild (Auflisten scheitert) läuft der Import weiter und räumt bei Fehlern nicht auf"
+)
+@allure.description(
+    "Scheitert das Auflisten der VMs vor dem Import, wird trotzdem importiert; scheitert der Import danach, wird mangels "
+    "Wissen, was schon da war, nichts gelöscht"
+)
+@allure.tag("negativ-test", "pull-importer")
+@allure.feature("pull_importer")
+@allure.severity(allure.severity_level.CRITICAL)
+def pull_importer_077() -> None:
+    rig = _Rig()
+    rig.connection.get_all_vms.side_effect = RuntimeError("no view")
+    assert rig.run() is rig.vm
+
+    rig = _Rig(task=_FakeTask(_failed("x")), abort_removes_vm=False)
+    rig.connection.get_all_vms.side_effect = RuntimeError("no view")
+
+    rig.run_failing(RuntimeError)
+
+    rig.connection.delete_vm.assert_not_called()
+    rig.connection.content.fileManager.DeleteDatastoreFile_Task.assert_not_called()
+
+
+@allure.title("Eine eingeschaltete VM gleichen Namens wird vom Aufräumen nie gelöscht")
+@allure.tag("negativ-test", "pull-importer")
+@allure.feature("pull_importer")
+@allure.severity(allure.severity_level.NORMAL)
+def pull_importer_078() -> None:
+    rig = _Rig(task=_FakeTask(_failed("x")), abort_removes_vm=False)
+    original = rig._import_vapp
+
+    def powered_on(**kwargs):
+        lease = original(**kwargs)
+        rig.created.runtime.powerState = vim.VirtualMachine.PowerState.poweredOn
+        return lease
+
+    rig.resource_pool.ImportVApp.side_effect = powered_on
+
+    rig.run_failing(RuntimeError)
+
+    assert rig.deleted_vms == []
+    assert rig.deleted_paths == []
+
+
+@allure.title(
+    "Der Fehlertext des Pull-Tasks enthält den ganzen Fault samt HTTP-Status und URL"
+)
+@allure.description(
+    "Ein vim.fault.HttpFault mit leerer msg-Zeile liefert früher nur 'A general system error'; jetzt stehen Fault-Typ, "
+    "Meldung, Statuscode und Status-Text sowie verschachtelte Ursachen im Fehler"
+)
+@allure.tag("negativ-test", "pull-importer")
+@allure.feature("pull_importer")
+@allure.severity(allure.severity_level.CRITICAL)
+def pull_importer_079() -> None:
+    cause = vim.fault.HttpFault(
+        statusCode=403,
+        statusMessage="Forbidden",
+        msg="Received HTTP 403 from http://10.0.0.1/a.ova",
+    )
+    fault = vim.fault.GenericVmConfigFault(
+        msg="A general system error occurred",
+        faultMessage=[vmodl.LocalizableMessage(message="Failed to pull")],
+        faultCause=cause,
+        reason="nfc",
+    )
+    rig = _Rig(
+        task=_FakeTask(
+            SimpleNamespace(state=vim.TaskInfo.State.error, progress=None, error=fault)
+        )
+    )
+
+    with pytest.raises(RuntimeError) as error:
+        rig.run()
+
+    text = str(error.value)
+    assert "GenericVmConfigFault" in text
+    assert "A general system error occurred" in text
+    assert "Failed to pull" in text
+    assert "reason=nfc" in text
+    assert "HttpFault" in text
+    assert "statusCode=403" in text
+    assert "statusMessage=Forbidden" in text
+    assert "http://10.0.0.1/a.ova" in text

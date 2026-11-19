@@ -1,0 +1,117 @@
+# Release workflow. It runs only when a tag v* is pushed (nothing else starts it): the tests and
+# ruff must pass and the tag must equal the version in pyproject.toml, then the source
+# tarball and its checksum are attached to a new GitHub Release (notes are generated).
+# The assets of a public repository are downloadable without a token.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+# Nothing by default; each job asks for exactly what it needs.
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  COMPONENT: TopologyBuilder
+  PYTHON_VERSION: "3.14"
+
+jobs:
+  verify:
+    name: Gates (tag, tests, ruff)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+
+      # The tag name only reaches the shell as an environment variable, never pasted into the script.
+      - name: The tag equals the version in pyproject.toml
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?$'
+          version="${TAG#v}"
+          if [[ "$TAG" != v* || ! "$version" =~ $semver ]]; then
+            echo "::error::The tag must look like vX.Y.Z or vX.Y.Z-rc.N (SemVer)."
+            exit 1
+          fi
+          file_version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          if [[ "$file_version" != "$version" ]]; then
+            echo "::error::The tag says $version but pyproject.toml says $file_version."
+            exit 1
+          fi
+          echo "Releasing $COMPONENT $version"
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r ./requirements.txt
+          pip install pytest ruff
+
+      - name: Execute tests with pytest
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          LITERAL_API_VALUES: "true"
+        run: python -m pytest ./tests
+
+      - name: Ruff
+        run: |
+          ruff check --output-format=github --target-version=py314 .
+          ruff format --output-format=github --diff --check --target-version=py314 .
+
+  release:
+    name: Build assets and create the GitHub Release
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write  # only to create the release and attach the assets
+
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build the source tarball and its SHA-256
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          name="${COMPONENT}-${version}"
+          mkdir dist
+          git archive --format=tar.gz --prefix="${name}/" --output="dist/${name}.tar.gz" HEAD
+          (cd dist && sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256" && sha256sum --check "${name}.tar.gz.sha256")
+          ls -l dist
+
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          name="${COMPONENT}-${version}"
+          flags=(--verify-tag --generate-notes --title "$TAG")
+          if [[ "$version" == *-* ]]; then
+            flags+=(--prerelease)
+          fi
+          gh release create "$TAG" "${flags[@]}" "dist/${name}.tar.gz" "dist/${name}.tar.gz.sha256"

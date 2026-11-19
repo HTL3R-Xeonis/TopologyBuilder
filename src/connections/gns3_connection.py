@@ -29,7 +29,7 @@ from .api_handler import APIHandler
 # potentially-slow wait as starting one (confirmed live: the default
 # APIHandler.delete timeout of 5s is nowhere near enough for that,
 # causing a real TimeoutError/502 even though the delete had actually
-# succeeded server-side moments later - see HANDOFF.md). Deleting a whole
+# succeeded server-side moments later). Deleting a whole
 # project with running nodes needs the same stop-first wait: an import that
 # replaced a 12-node project failed with "DELETE request timed out" after 5s
 # although GNS3 finished deleting it moments later.

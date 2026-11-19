@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "topologybuilder"
-version = "0.1.0"
+version = "1.0.0"
 description = "Builds and deploys network topologies to GNS3/ESXi from a YAML config file."
 readme = "README.md"
 requires-python = ">=3.12"

@@ -6,19 +6,31 @@ separate upload service is needed.
 
 The host needs its ``httpClient`` firewall ruleset enabled to fetch from an HTTP server; ``ensure_http_client_enabled``
 does that through the host API with the login the connection already has.
+
+A failed or aborted import cleans up after itself, but only what *that* import created: after the lease is aborted
+the VM of that name is destroyed if it was not there before, and a datastore folder ``<vm name>`` (or the numbered
+``<vm name>_<n>`` ESXi picks when the name is taken) is deleted if it did not exist before and no registered VM lives
+in it. Every cleanup step is best effort and never replaces the original error.
+
+Open: once, right after an aborted import, the next import of the same VM name failed with an HTTP 403 reported by the
+pull task; a retry worked at once. The cause could not be found in this code (the URL, lease and spec are built fresh
+for every import, nothing is shared between two imports). The task error text now carries the full fault (type,
+message, status code, nested causes), so a repeat shows which side answered 403.
 """
 
 from __future__ import annotations
 
 import io
+import re
 import tarfile
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from urllib.parse import quote
 
 import requests
 from loguru import logger
-from pyVmomi import vim
+from pyVmomi import vim, vmodl
 
 from src.connections.esxi_connection import _PYVMOMI_LOCK, ESXiConnection
 from src.settings import Settings
@@ -28,6 +40,8 @@ _PULL_POLL_INTERVAL_SECONDS = 2
 _KEEPALIVE_INTERVAL_SECONDS = 30
 _HTTP_CLIENT_RULESET = "httpClient"
 _FIREWALL_COMMAND = "esxcli network firewall ruleset set -r httpClient -e true"
+_FAULT_SKIPPED_FIELDS = {"dynamicType", "dynamicProperty", "msg", "faultMessage"}
+_MAX_ERROR_TEXT = 1500
 
 
 def ova_url(base_url: str, source_dir: str, file_name: str) -> str:
@@ -167,6 +181,42 @@ def _ovf_descriptor(url: str) -> str:
         return stream.read().decode("utf-8-sig")
 
 
+def describe_task_error(error: object) -> str:
+    """
+    Turns the error of a vSphere task into one readable text. ``error.msg`` alone is often empty or only says "A general
+    system error occurred"; the useful part (an HTTP status code and URL, a nested cause) sits in the other fields of the
+    fault, so they are all included.
+    :param error: ``TaskInfo.error``, normally a pyVmomi fault.
+    :return: fault type, message, localized messages and the remaining fault fields, never empty.
+    """
+    parts = []
+    name = type(error).__name__
+    if name not in ("SimpleNamespace", "str", "NoneType"):
+        parts.append(name)
+    message = getattr(error, "msg", None)
+    if message:
+        parts.append(str(message))
+    for localized in getattr(error, "faultMessage", None) or []:
+        text = getattr(localized, "message", None)
+        if text:
+            parts.append(str(text))
+    properties = getattr(error, "_GetPropertyList", None)
+    if properties is not None:
+        for prop in properties():
+            if prop.name in _FAULT_SKIPPED_FIELDS:
+                continue
+            value = getattr(error, prop.name, None)
+            if value is None or value == []:
+                continue
+            if prop.name == "faultCause":
+                parts.append(f"cause: {describe_task_error(value)}")
+            else:
+                parts.append(f"{prop.name}={value}")
+    if not parts:
+        parts.append(str(error))
+    return "; ".join(parts)[:_MAX_ERROR_TEXT]
+
+
 def ensure_http_client_enabled(esxi_connection: ESXiConnection) -> None:
     """
     Makes sure the host may download over HTTP: enables the ``httpClient`` firewall ruleset if it is off. Needs no
@@ -205,8 +255,24 @@ def ensure_http_client_enabled(esxi_connection: ESXiConnection) -> None:
     )
 
 
+@dataclass(frozen=True)
+class _ImportBaseline:
+    """What existed before an import started, so a failed one only removes what it created itself."""
+
+    vm_moids: frozenset[str]
+    """managed object ids of the VMs that already carry exactly the import's VM name"""
+    folders: frozenset[str]
+    """names of the datastore folders ``<vm name>`` / ``<vm name>_<n>`` that already existed"""
+
+
 class PullImporter:
     """Imports an OVA served over HTTP as a new VM, the ESXi host downloading it itself."""
+
+    _CLEANUP_TASK_WAIT_SECONDS = 60.0
+    """how long a cleanup waits for the (cancelled) pull task to stop writing before it deletes files"""
+    _CLEANUP_RETRY_SECONDS = 5.0
+    """pause between the attempts to delete a folder whose files are still locked"""
+    _CLEANUP_ATTEMPTS = 3
 
     def __init__(self, esxi_connection: ESXiConnection) -> None:
         """
@@ -238,6 +304,8 @@ class PullImporter:
         descriptor = _ovf_descriptor(url)
         ensure_http_client_enabled(self.esxi_connection)
         lease = None
+        task = None
+        baseline = self._baseline(vm_name, datastore_name)
         try:
             with _PYVMOMI_LOCK:
                 content = self.esxi_connection.content
@@ -293,7 +361,186 @@ class PullImporter:
                         lease.HttpNfcLeaseAbort()
                 except Exception:  # noqa: BLE001
                     logger.error(f"Aborting the import lease of '{vm_name}' failed.")
+            if lease is not None or task is not None:
+                self._cleanup_failed_import(vm_name, datastore_name, baseline, task)
             raise
+
+    def _baseline(self, vm_name: str, datastore_name: str) -> _ImportBaseline | None:
+        """Records the VMs and datastore folders of this name that exist right now; ``None`` when that fails."""
+        try:
+            with _PYVMOMI_LOCK:
+                vms = self._vms_named(vm_name)
+                folders = self._folders(datastore_name, vm_name)
+            return _ImportBaseline(
+                frozenset(vm._moId for vm in vms), frozenset(folders)
+            )
+        except Exception as error:  # noqa: BLE001 - without a baseline nothing is cleaned up, the import goes on
+            logger.warning(
+                f"Could not record what exists for '{vm_name}' on {datastore_name} before the import "
+                f"({error}); a failed import will not be cleaned up automatically."
+            )
+            return None
+
+    def _vms_named(self, vm_name: str) -> list[vim.VirtualMachine]:
+        vms = []
+        for vm in self.esxi_connection.get_all_vms():
+            try:
+                if vm.name == vm_name:
+                    vms.append(vm)
+            except vmodl.fault.ManagedObjectNotFound:
+                continue  # removed while listing
+        return vms
+
+    def _folders(self, datastore_name: str, vm_name: str) -> set[str]:
+        """Names of the datastore folders ``<vm_name>`` and ``<vm_name>_<n>`` in the root of the datastore."""
+        datastore = self.esxi_connection.find_datastore(datastore_name)
+        spec = vim.host.DatastoreBrowser.SearchSpec(
+            query=[vim.host.DatastoreBrowser.FolderQuery()],
+            matchPattern=[vm_name, f"{vm_name}_*"],
+        )
+        task = datastore.browser.SearchDatastore_Task(
+            datastorePath=f"[{datastore_name}]", searchSpec=spec
+        )
+        self.esxi_connection._wait_for_task(task)  # noqa: SLF001
+        pattern = re.compile(rf"{re.escape(vm_name)}(_\d+)?")
+        return {
+            entry.path
+            for entry in task.info.result.file or []
+            if pattern.fullmatch(entry.path)
+        }
+
+    def _cleanup_failed_import(
+        self,
+        vm_name: str,
+        datastore_name: str,
+        baseline: _ImportBaseline | None,
+        task: vim.Task | None,
+    ) -> None:
+        """
+        Removes what a failed import left behind, after its lease was aborted: the VM of this name that was not there
+        before and every datastore folder of this name that did not exist before and holds no registered VM. Never
+        raises (a failing step only logs a warning with the manual command), so the original error stays the one the
+        caller sees.
+        """
+        if baseline is None:
+            logger.warning(
+                f"No cleanup for the failed import of '{vm_name}': remove a leftover VM '{vm_name}' and the "
+                f"folder '[{datastore_name}] {vm_name}' by hand in the ESXi host client if they exist."
+            )
+            return
+        hint = (
+            f"Remove it by hand in the ESXi host client (Storage > {datastore_name} > Datastore browser > "
+            f"'{vm_name}')."
+        )
+        try:
+            self._wait_for_pull_to_stop(task)
+        except Exception as error:  # noqa: BLE001
+            logger.warning(f"Could not stop the pull task of '{vm_name}': {error}")
+        try:
+            self._destroy_new_vms(vm_name, baseline)
+        except Exception as error:  # noqa: BLE001
+            logger.warning(
+                f"Could not delete the VM '{vm_name}' left by the failed import: {error}. "
+                f"Delete that VM by hand in the ESXi host client."
+            )
+        try:
+            self._delete_new_folders(vm_name, datastore_name, baseline)
+        except Exception as error:  # noqa: BLE001
+            logger.warning(
+                f"Could not clean the datastore folder of '{vm_name}' after the failed import: {error}. {hint}"
+            )
+
+    def _wait_for_pull_to_stop(self, task: vim.Task | None) -> None:
+        """Cancels the pull task if it still runs and waits until it stopped writing (or the wait is over)."""
+        if task is None:
+            return
+        deadline = time.monotonic() + self._CLEANUP_TASK_WAIT_SECONDS
+        cancelled = False
+        while True:
+            with _PYVMOMI_LOCK:
+                info = task.info
+                if info.state not in (
+                    vim.TaskInfo.State.queued,
+                    vim.TaskInfo.State.running,
+                ):
+                    return
+                if not cancelled and getattr(info, "cancelable", True):
+                    cancelled = True
+                    try:
+                        task.CancelTask()
+                    except Exception as error:  # noqa: BLE001
+                        logger.warning(f"Cancelling the pull task failed: {error}")
+            if time.monotonic() >= deadline:
+                logger.warning("The pull task still runs; cleaning up anyway.")
+                return
+            time.sleep(_PULL_POLL_INTERVAL_SECONDS)
+
+    def _destroy_new_vms(self, vm_name: str, baseline: _ImportBaseline) -> None:
+        """Destroys VMs named ``vm_name`` that are not in the baseline and not powered on."""
+        with _PYVMOMI_LOCK:
+            created = [
+                vm
+                for vm in self._vms_named(vm_name)
+                if vm._moId not in baseline.vm_moids
+            ]
+        for vm in created:
+            with _PYVMOMI_LOCK:
+                try:
+                    if vm.runtime.powerState == vim.VirtualMachine.PowerState.poweredOn:
+                        logger.warning(
+                            f"The VM '{vm_name}' is powered on, so it is not deleted by the import cleanup."
+                        )
+                        continue
+                    self.esxi_connection.delete_vm(vm)
+                except vmodl.fault.ManagedObjectNotFound:
+                    continue  # the host removed it already
+            logger.info(f"Deleted the VM '{vm_name}' left by the failed import")
+
+    def _delete_new_folders(
+        self, vm_name: str, datastore_name: str, baseline: _ImportBaseline
+    ) -> None:
+        """Deletes datastore folders of this name that did not exist before the import and hold no registered VM."""
+        with _PYVMOMI_LOCK:
+            new = sorted(self._folders(datastore_name, vm_name) - baseline.folders)
+            registered = set()
+            for vm in self.esxi_connection.get_all_vms():
+                try:
+                    registered.add(
+                        vm.summary.config.vmPathName.split("] ", 1)[-1].split("/")[0]
+                    )
+                except vmodl.fault.ManagedObjectNotFound:
+                    continue
+        for folder in new:
+            if folder in registered:
+                logger.warning(
+                    f"The folder '[{datastore_name}] {folder}' holds a registered VM and is kept."
+                )
+                continue
+            self._delete_folder(datastore_name, folder)
+
+    def _delete_folder(self, datastore_name: str, folder: str) -> None:
+        for attempt in range(1, self._CLEANUP_ATTEMPTS + 1):
+            try:
+                with _PYVMOMI_LOCK:
+                    content = self.esxi_connection.content
+                    self.esxi_connection._wait_for_task(  # noqa: SLF001
+                        content.fileManager.DeleteDatastoreFile_Task(
+                            name=f"[{datastore_name}] {folder}",
+                            datacenter=content.rootFolder.childEntity[0],
+                        )
+                    )
+            except Exception as error:  # noqa: BLE001
+                if attempt == self._CLEANUP_ATTEMPTS:
+                    raise
+                logger.info(
+                    f"Deleting '[{datastore_name}] {folder}' failed ({error}); trying again."
+                )
+                time.sleep(self._CLEANUP_RETRY_SECONDS)
+            else:
+                logger.info(
+                    f"Deleted the folder '[{datastore_name}] {folder}' left by the failed import"
+                )
+                return
 
     def _edit_nics(
         self, result: vim.OvfManager.CreateImportSpecResult, network_names: list[str]
@@ -399,7 +646,7 @@ class PullImporter:
                 info = task.info
                 state, progress = info.state, getattr(info, "progress", None)
                 if state == vim.TaskInfo.State.error:
-                    message = getattr(info.error, "msg", info.error)
+                    message = describe_task_error(info.error)
                     raise RuntimeError(
                         f"ESXi host {self.esxi_connection.ip} could not pull the OVA: {message}. "
                         f"Check that the host reaches the OVA server and its '{_HTTP_CLIENT_RULESET}' firewall "
