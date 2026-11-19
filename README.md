@@ -83,6 +83,13 @@ purely for convenience when a value would otherwise be retyped constantly.
 
 ## ESXi VM/Port Group Cleanup
 
+VM actions prefer the exact topology name. If ESXi has assigned a numeric
+suffix such as `PC4 (10)` or `PC4_1`, they also recognize a unique matching
+VM tagged `topologybuilder-image:...`. Untagged aliases are ignored, and
+multiple managed aliases produce an error instead of selecting a VM.
+After an OVA import, tagging and power-on use the VM reference returned by
+the importer, so a changed inventory name cannot break that step.
+
 A non-incremental `deploy` resets the ESXi vSwitch before wiring up the new
 topology, which involves deleting port groups and (see below) VMs left over
 from earlier deploys. Two safety mechanisms keep this from ever touching

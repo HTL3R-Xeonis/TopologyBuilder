@@ -276,11 +276,27 @@ class ESXiConnection(GenericConnection):
 
     def get_vm(self, vm_name: str) -> vim.ManagedEntity | None:
         """
-        Searches for a VM with given name.
+        Searches for an exact name, then a unique managed, numbered alias.
         :param vm_name: Name of VM to look for.
         :return: Returns Virtual Machine if found, else None.
         """
-        return self._get_object_by_name(vim.VirtualMachine, vm_name)
+        vm = self._get_object_by_name(vim.VirtualMachine, vm_name)
+        if vm is not None:
+            return vm
+        matches = [
+            candidate
+            for candidate in self.find_vms_matching(vm_name)
+            if (getattr(candidate.config, "annotation", None) or "").startswith(
+                "topologybuilder-image:"
+            )
+        ]
+        if len(matches) > 1:
+            names = sorted(candidate.name for candidate in matches)
+            raise RuntimeError(
+                f"Multiple managed ESXi VMs match {vm_name!r}: {names}. "
+                "Cannot safely choose a VM; resolve the duplicate names first."
+            )
+        return matches[0] if matches else None
 
     def get_all_vms(self) -> list[vim.VirtualMachine]:
         """
@@ -968,16 +984,15 @@ class ESXiConnection(GenericConnection):
 
         url = APIHandler.find_esxi_template_url(node.image)
         with _deploy_slots((self.ip, self.port)):
-            PullImporter(self).import_ova(
+            vm = PullImporter(self).import_ova(
                 url, node.name, datastore, list(network_mapping.values())
             )
 
         with _PYVMOMI_LOCK:
-            vm = self.get_vm(node.name)
             if vm is None:
                 logger.error(
                     msg := f"OVA deploy for {node.name} reported success, but no "
-                    f"matching VM was found afterwards."
+                    f"VM reference was returned by the importer."
                 )
                 raise RuntimeError(msg)
 

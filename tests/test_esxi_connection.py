@@ -306,10 +306,11 @@ def esxi_connection_011() -> None:
             return_value="http://ova.example/ubuntu-server.ova",
         ) as mock_find_url,
         patch("src.pull_importer.PullImporter") as mock_importer,
-        patch.object(conn, "get_vm", return_value=fake_vm),
+        patch.object(conn, "get_vm", side_effect=AssertionError("Use imported VM")),
         patch.object(conn, "set_vm_annotation") as mock_set_annotation,
         patch.object(conn, "power_on_vm") as mock_power_on,
     ):
+        mock_importer.return_value.import_ova.return_value = fake_vm
         conn.deploy_virtual_machine(node, "datastore1")
 
     mock_find_url.assert_called_once_with("Ubuntu-Server")
@@ -326,14 +327,10 @@ def esxi_connection_011() -> None:
     mock_power_on.assert_called_once_with(fake_vm)
 
 
-@allure.title(
-    "deploy_virtual_machine wirft RuntimeError, wenn die VM nach dem Deploy "
-    "nicht gefunden wird"
-)
+@allure.title("deploy_virtual_machine wirft RuntimeError ohne VM-Referenz vom Importer")
 @allure.description(
     "Überprüft, dass deploy_virtual_machine einen RuntimeError wirft, wenn "
-    "PullImporter.import_ova erfolgreich zurückkehrt, aber get_vm die VM "
-    "danach nicht findet"
+    "PullImporter.import_ova ohne VM-Referenz zurückkehrt"
 )
 @allure.tag("negativ-test", "esxi-connection")
 @allure.feature("esxi_connection")
@@ -357,8 +354,7 @@ def esxi_connection_012() -> None:
             "src.connections.esxi_connection.APIHandler.find_esxi_template_url",
             return_value="http://ova.example/ubuntu-server.ova",
         ),
-        patch("src.pull_importer.PullImporter"),
-        patch.object(conn, "get_vm", return_value=None),
+        patch("src.pull_importer.PullImporter.import_ova", return_value=None),
         pytest.raises(RuntimeError),
     ):
         conn.deploy_virtual_machine(node, "datastore1")
@@ -1911,6 +1907,7 @@ def esxi_connection_parallel_002() -> None:
         probe.join()
         lock_free_during_upload.extend(free)
         release.wait(5)
+        return fake_vm
 
     fake_vm = MagicMock()
     with (
@@ -2057,3 +2054,67 @@ def esxi_connection_077() -> None:
         conn.set_port_group_vlan_id("PC9_eth0", 7)
 
     host_system.configManager.networkSystem.UpdatePortGroup.assert_not_called()
+
+
+@allure.title("get_vm bevorzugt den exakten Namen vor nummerierten VMs")
+@allure.feature("esxi_connection")
+def esxi_connection_078() -> None:
+    conn = _make_esxi_connection()
+    exact = MagicMock()
+    conn._get_object_by_name = MagicMock(return_value=exact)
+    conn.find_vms_matching = MagicMock()
+
+    assert conn.get_vm("PC4") is exact
+    conn.find_vms_matching.assert_not_called()
+
+
+@allure.title("get_vm findet eindeutig nummerierte, verwaltete VMs")
+@allure.feature("esxi_connection")
+@pytest.mark.parametrize("alias", ["PC4 (10)", "PC4_1", "PC4 2"])
+def esxi_connection_079(alias: str) -> None:
+    conn = _make_esxi_connection()
+    conn.content = MagicMock()
+    managed = MagicMock()
+    managed.name = alias
+    managed.config.annotation = "topologybuilder-image:Rocky 9.2"
+    unrelated = MagicMock()
+    unrelated.name = "PC40"
+    unrelated.config.annotation = "topologybuilder-image:Rocky 9.2"
+    conn._get_object_by_name = MagicMock(return_value=None)
+    view = conn.view_manager.CreateContainerView.return_value
+    view.view = [managed, unrelated]
+
+    assert conn.get_vm("PC4") is managed
+    view.Destroy.assert_called_once()
+
+
+@allure.title("get_vm übernimmt keine fremden oder unlesbaren nummerierten VMs")
+@allure.feature("esxi_connection")
+@pytest.mark.parametrize("annotation", [None, "", "someone else's VM"])
+def esxi_connection_080(annotation: str | None) -> None:
+    conn = _make_esxi_connection()
+    conn._get_object_by_name = MagicMock(return_value=None)
+    foreign = MagicMock()
+    foreign.config.annotation = annotation
+    orphan = MagicMock()
+    orphan.config = None
+    conn.find_vms_matching = MagicMock(return_value=[foreign, orphan])
+
+    assert conn.get_vm("PC4") is None
+
+
+@allure.title("get_vm verweigert eine mehrdeutige Zuordnung nummerierter VMs")
+@allure.feature("esxi_connection")
+def esxi_connection_081() -> None:
+    conn = _make_esxi_connection()
+    conn._get_object_by_name = MagicMock(return_value=None)
+    matches = []
+    for name in ["PC4 (1)", "PC4 (10)"]:
+        vm = MagicMock()
+        vm.name = name
+        vm.config.annotation = "topologybuilder-image:Rocky 9.2"
+        matches.append(vm)
+    conn.find_vms_matching = MagicMock(return_value=matches)
+
+    with pytest.raises(RuntimeError, match="Multiple managed ESXi VMs match 'PC4'"):
+        conn.get_vm("PC4")
