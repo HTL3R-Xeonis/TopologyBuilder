@@ -256,6 +256,110 @@ class OvaImporter:
 
         return source_files
 
+    def _remove_created_file_placeholders(
+        self,
+        lease: vim.HttpNfcLease,
+        import_spec_result: vim.OvfManager.CreateImportSpecResult,
+        datacenter: vim.Datacenter,
+    ) -> None:
+        """
+        Removes small, generated placeholders for files that the import must create.
+        :param lease: Ready lease for the newly created virtual machine.
+        :param import_spec_result: File requirements from the OVF import plan.
+        :param datacenter: Datacenter containing the target datastore.
+        :return:
+        """
+        import re
+
+        from pyVim.task import WaitForTask
+
+        file_types = {
+            15: (vim.vm.device.VirtualCdrom, vim.vm.device.VirtualCdrom.IsoBackingInfo, (".iso",)),
+            14: (vim.vm.device.VirtualFloppy, vim.vm.device.VirtualFloppy.ImageBackingInfo, (".flp", ".img")),
+        }
+        created_items = [item for item in import_spec_result.fileItem if item.create]
+        if not created_items:
+            return
+
+        vm = lease.info.entity
+        if not isinstance(vm, vim.VirtualMachine):
+            logger.warning("Lease does not identify one VM; skipping placeholder cleanup.")
+            return
+        if vm.runtime.powerState != vim.VirtualMachinePowerState.poweredOff:
+            raise RuntimeError("Cannot remove import placeholders from a running VM.")
+
+        config = vm.config
+        vmx_path = getattr(getattr(config, "files", None), "vmPathName", "")
+        match = re.fullmatch(r"\[([^]]+)] (.+)/[^/]+\.vmx", vmx_path)
+        if not match or match.group(1) != self._datastore.name:
+            raise RuntimeError(f"Cannot determine the new VM's datastore folder: {vmx_path}")
+
+        vm_folder = match.group(2)
+        if any(part in ("", ".", "..") for part in vm_folder.split("/")):
+            raise RuntimeError(f"Invalid VM datastore folder: {vm_folder}")
+        folder_path = f"[{self._datastore.name}] {vm_folder}"
+        devices = getattr(getattr(config, "hardware", None), "device", None) or []
+
+        for cim_type, (device_type, backing_type, suffixes) in file_types.items():
+            expected = [
+                item for item in created_items if item.cimType == cim_type and item.path.lower().endswith(suffixes)
+            ]
+            if not expected:
+                continue
+
+            paths = set()
+            for device in devices:
+                if not isinstance(device, device_type) or not isinstance(device.backing, backing_type):
+                    continue
+                file_name = getattr(device.backing, "fileName", "")
+                if not isinstance(file_name, str):
+                    continue
+                basename = file_name.rsplit("/", 1)[-1]
+                suffix_pattern = "|".join([str(re.escape(suffix)) for suffix in suffixes])
+                if not re.fullmatch(rf"_deviceImage-\d+(?:{suffix_pattern})", basename, re.IGNORECASE):
+                    continue
+                full_path = f"{folder_path}/{basename}"
+                if file_name not in (basename, full_path):
+                    continue
+                paths.add(full_path)
+
+            # Only remove backings if every affected device has a matching new file.
+            if len(paths) != len(expected):
+                logger.warning(
+                    f"Skipping {', '.join(suffixes)} placeholder cleanup for {vm.name}: "
+                    f"{len(expected)} create=True items, {len(paths)} generated backings."
+                )
+                continue
+
+            for path in sorted(paths):
+                basename = path.rsplit("/", 1)[-1]
+                browser_spec = vim.host.DatastoreBrowser.SearchSpec(
+                    matchPattern=[basename],
+                    details=vim.host.DatastoreBrowser.FileInfo.Details(fileSize=True),
+                )
+                browse_task = self._datastore.browser.SearchDatastore_Task(
+                    datastorePath=folder_path, searchSpec=browser_spec
+                )
+                WaitForTask(browse_task)
+                files = getattr(browse_task.info.result, "file", None) or []
+                matching_files = [info for info in files if info.path == basename]
+                if not matching_files:
+                    continue
+                file_size = matching_files[0].fileSize if len(matching_files) == 1 else None
+                if not isinstance(file_size, int) or not 0 <= file_size <= 65536:
+                    logger.warning(f"Skipping non-empty or ambiguous import placeholder: {path}")
+                    continue
+
+                logger.info(f"Removing generated import placeholder: {path}")
+                delete_task = self.esxi_connection.content.fileManager.DeleteDatastoreFile_Task(
+                    name=path, datacenter=datacenter
+                )
+                WaitForTask(delete_task)
+
+        for item in created_items:
+            if item.cimType not in file_types:
+                logger.debug(f"No placeholder cleanup for create=True import file: {item.path}")
+
     def _edit_nics(
         self,
         import_spec_result: vim.HttpNfcLease.CreateImportSpecResult,
@@ -353,6 +457,7 @@ class OvaImporter:
             self._raise_if_not_supports_pull_mode(lease)
 
             source_files = self._get_nfc_lease_source_files(lease, import_spec_result)
+            self._remove_created_file_placeholders(lease, import_spec_result, dc)
             pull_task = lease.HttpNfcLeasePullFromUrls_Task(source_files)
 
             logger.info(f"Starting pull task: {self._ova_url}")
