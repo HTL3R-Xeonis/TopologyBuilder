@@ -13,8 +13,8 @@ from src.topology_file_validation import TopologyFileValidation
 from src.vm_orchestrator.vm_orchestrator import VMOrchestrator
 
 app = typer.Typer(
-    name="TopologyBuilder",
-    help="Build and deploy network topologies to GNS3/ESXi from a YAML config file.",
+    name="Mjonyr",
+    help="Mjonyr (formerly TopologyBuilder): build and deploy network topologies to GNS3/ESXi from a YAML config file.",
     add_completion=False,
 )
 
@@ -145,7 +145,7 @@ def _apply_deploy_options(
 
 def _generate_topology(prompt: str, output_path: Path) -> Graph:
     """
-    Requests a topology from the Topology Generator API, retrying up to
+    Requests a topology from the Mimyr (topology generator) API, retrying up to
     Settings.GENERATE_MAX_RETRIES times if a result fails validation.
     Writes the valid result to output_path, prints the resulting graph,
     and returns it. Shared by `generate` and `generate-deploy`.
@@ -258,7 +258,7 @@ def generate(
 ) -> None:
     """
     Generates a topology file from a natural-language prompt via the
-    Topology Generator API, validates it, and prints the resulting graph.
+    Mimyr (topology generator) API, validates it, and prints the resulting graph.
     Retries generation up to Settings.GENERATE_MAX_RETRIES times if the
     result doesn't validate. Does not deploy the generated topology - see
     `generate-deploy` for that.

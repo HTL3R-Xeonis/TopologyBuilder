@@ -1,4 +1,4 @@
-# Optional settings overrides for TopologyBuilder, loaded via
+# Optional settings overrides for Mjonyr (formerly TopologyBuilder), loaded via
 # `main.py --settings settings.yml` (or `-s settings.yml`).
 # Copy this file to settings.yml (git-ignored) and fill in your own
 # values - only the keys you actually list here get overridden, everything
@@ -16,12 +16,12 @@
 topology_file: ./topology_example.yaml
 
 # How many times the `generate` command retries requesting a new topology
-# from the Topology Generator API after one fails validation, before
+# from the Mimyr (topology generator) API after one fails validation, before
 # giving up.
 generate_max_retries: 3
 
 # Whether a whole-file deploy (TopologyBackend.deploy_topology - the path
-# used by `deploy` when a project already exists, and by TopologyOperator's
+# used by `deploy` when a project already exists, and by Igdrasyl's
 # .topoproj import) is incremental. True (default) reuses anything already
 # live by name and only creates what's new/changed, so one slow or failing
 # device doesn't undo devices that already deployed successfully. Set to
@@ -105,7 +105,7 @@ gns3:
 
 api:
   # Base URLs of the ESXi/NFS template-listing service, the GNS3
-  # template-listing service, the Topology Generator service (used by
+  # template-listing service, the Mimyr (topology generator) service (used by
   # the `generate` command), and the HTTP server that serves the template
   # OVA files (ova_base_url). An ESXi host pulls a template OVA itself from
   # <ova_base_url>/<source dir>/<file> (source dir and file come from the ESXi

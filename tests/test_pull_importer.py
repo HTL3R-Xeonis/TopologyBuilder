@@ -565,7 +565,7 @@ class _FakeTask:
         self._states = list(states)
         self.cancelled = 0
 
-    def CancelTask(self) -> None:  # noqa: N802 - pyVmomi name
+    def CancelTask(self) -> None:
         self.cancelled += 1
 
     @property

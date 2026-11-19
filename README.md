@@ -1,4 +1,10 @@
-# TopologyBuilder
+# Mjonyr (formerly TopologyBuilder)
+
+**Mjonyr is the deploy and orchestration library and command-line tool of [Ginnungagap](https://github.com/HTL3R-Xeonis/Ginnungagap-Appliance).**
+"Ginnungagap" is the name of the whole product; Mjonyr is the code name of this component. The repository used to be
+called TopologyBuilder; the Python distribution `topologybuilder`, the import root `src`, the `topologybuilder`
+console command and the markers it writes on ESXi and GNS3 objects (`topologybuilder-image:...`) keep their names on
+purpose. Its web app is [Igdrasyl (formerly TopologyOperator)](https://github.com/HTL3R-Xeonis/Igdrasyl).
 
 Build and deploy network topologies to GNS3 and ESXi from a YAML topology
 file. Nodes in the topology file can be either GNS3-simulated devices
@@ -9,8 +15,8 @@ behaves as one connected lab.
 ## How to Download
 
 ```bash
-git clone https://github.com/HTL3R-Xeonis/TopologyBuilder.git
-cd TopologyBuilder
+git clone https://github.com/HTL3R-Xeonis/Mjonyr.git
+cd Mjonyr
 ```
 
 ## How to Setup (Debian-based systems)
@@ -123,7 +129,7 @@ message telling you to stop the Cloud node or do a full deploy.
 
 Both mechanisms above only ever run as part of a non-incremental `deploy`.
 For a live, one-node/one-link-at-a-time consumer of this library (like
-TopologyOperator), a delete can partially fail - e.g. the GNS3 side is
+Igdrasyl, formerly TopologyOperator), a delete can partially fail - e.g. the GNS3 side is
 removed but the matching ESXi VM delete times out, or vice versa - leaving
 a real, live resource with nothing in the topology file describing it
 anymore. Run `topologybuilder orphans` at any time (no deploy needed) to
@@ -132,7 +138,7 @@ the command table below.
 
 ## Library use: `TopologyBackend`
 
-[TopologyOperator](https://github.com/HTL3R-Xeonis/TopologyOperator) uses this project as a library, not through the
+[Igdrasyl](https://github.com/HTL3R-Xeonis/Igdrasyl) uses this project as a library, not through the
 CLI. `src.backend.TopologyBackend` is the stable surface for operating an already deployed topology one step at a
 time, keeping the topology YAML in sync - a change is deployed live first and written to the file only once that
 succeeded, so a failure leaves the file describing what is really there:
@@ -146,12 +152,12 @@ succeeded, so a failure leaves the file describing what is really there:
 | `repair_vlan_subinterfaces(file)` | Only the subinterface repair (re-create missing ones, restart the ESXi VMs' Cloud nodes); returns what was done, empty if nothing was missing |
 | `find_orphans(file)` / `delete_orphans(file, orphans)` | Live resources no node in the file describes (and their permanent deletion) |
 
-## GNS3 VM Deploy (used by TopologyOperator, not the CLI)
+## GNS3 VM Deploy (used by Igdrasyl, not the CLI)
 
 `src.gns3_vm_deploy.deploy_fresh_gns3_vm` replaces the configured GNS3 VM
 with a freshly imported one from its own OVA - no CLI command calls this
 directly (it's exposed as a GUI action and startup auto-recovery in
-[TopologyOperator](https://github.com/HTL3R-Xeonis/TopologyOperator)),
+[Igdrasyl](https://github.com/HTL3R-Xeonis/Igdrasyl)),
 but the settings it reads live here: `esxi.gns3_vm_ova_path`,
 `esxi.gns3_vm_mgmt_network`, and optionally `esxi.gns3_vm_mac_range`
 (`[start_mac, end_mac]` - pins a freshly deployed GNS3 VM's MAC to that
@@ -159,7 +165,7 @@ range instead of inheriting the old VM's own, e.g. so a DHCP server can
 be set up to only hand out addresses in that range; the old VM's MAC is
 kept as-is if it's already in range). Not yet in this repo's own
 [`settings.example.yml`](settings.example.yml) since the CLI never reads
-them - see TopologyOperator's own `settings.example.yml` and README for
+them - see Igdrasyl's own `settings.example.yml` and README for
 the full picture, including the GUI's delete-old-VM option. A freshly deployed
 GNS3 VM always gets **4 vCPUs and 8 GB RAM** (the stock OVA's 1 vCPU / 2 GB is far
 too little for a few IOSv nodes); `deploy_fresh_gns3_vm` takes `cpus` and
@@ -242,14 +248,14 @@ whichever is available in your environment.
 
 | Command | Purpose |
 |---|---|
-| `topologybuilder generate "<prompt>" [--output PATH]` | Generates a topology file from a natural-language prompt via the Topology Generator API, writes it to `--output` (defaults to `--topology`'s current value), validates it, and prints the resulting graph. Retries generation up to `generate_max_retries` (settings.yml, default 3) times if a result fails validation, then errors out. Does not deploy. |
+| `topologybuilder generate "<prompt>" [--output PATH]` | Generates a topology file from a natural-language prompt via the Mimyr (topology generator) API, writes it to `--output` (defaults to `--topology`'s current value), validates it, and prints the resulting graph. Retries generation up to `generate_max_retries` (settings.yml, default 3) times if a result fails validation, then errors out. Does not deploy. |
 | `topologybuilder validate` | Validate the topology file without building or deploying anything. |
 | `topologybuilder visualize [--detail \| --tree]` | Build the topology graph and print a force-directed ASCII diagram; `--tree` prints a colored tree of each device's exact interface-to-interface connections instead, and `--detail` prints the full internal representation. |
 | `topologybuilder deploy --address ... --esxi_username ... [--dry_run] [--incremental] [--only_on_gns3 \| --only_on_esxi]` | Validate, build, and deploy the topology to GNS3/ESXi. `--dry_run` prints what would happen without changing anything. `--incremental` reuses existing port groups/VMs/GNS3 project/nodes/links instead of recreating them - never removes anything dropped from the topology file. |
 | `topologybuilder generate-deploy "<prompt>" --address ... --esxi_username ... [--output PATH] [same deploy options as above]` | Generates a topology from a prompt exactly like `generate` (including its retry/validation behaviour), then immediately deploys it exactly like `deploy` - only if a valid topology was generated. |
 | `topologybuilder destroy --address ... --esxi_username ...` | Tear down a previously deployed topology: deletes its ESXi-hosted VMs/port groups and its GNS3 project entirely (not just its nodes). |
 | `topologybuilder verify --address ... --esxi_username ... [--fix]` | Structural health check against a deployed topology (GNS3 nodes started, ESXi VMs powered on, trunk NIC wiring, trunk port group security policy - promiscuous mode, MAC address changes and forged transmits must be accepted -, port groups present, and the "GNS3 VM VLAN subinterfaces" check: the `ip link` VLAN subinterfaces on the GNS3 VM vanish when that VM reboots, which silently cuts every link between a GNS3 node and an ESXi VM. Every `deploy` therefore also writes a managed boot-time service on the GNS3 VM (`/usr/local/sbin/topologybuilder-vlan-subinterfaces.sh` plus a systemd oneshot unit ordered before `gns3.service`), generated from the deployed topology and fully rewritten on each deploy, so it always matches the current VLANs and stale ones disappear; the "boot-time VLAN service" check compares it with the topology, and `--fix` (re)writes it, touching no running link; its SSH login uses `Settings.GNS3.USERNAME` / `GNS3_PASSWORD`). Not a ping test - this project never assigns IP addresses to nodes, so there's no address to ping; an ESXi VM's IP (if VMware Tools reports one) is shown for information only and never fails the check, since topology VLANs have no DHCP server. `--fix` applies a curated, low-risk set of automatic repairs first (power on a stopped ESXi VM, start a stopped GNS3 node, create a missing port group, re-tag a port group whose VLAN id differs from the topology's (`verify` reports such a port group, and two port groups sharing one id), set a deviating trunk port group's security policy to Accept) and re-checks afterward - never redeploys a genuinely missing VM/node, use `deploy --incremental` for that. **`--fix-vlan-subinterfaces`** additionally re-creates the missing VLAN subinterfaces on the GNS3 VM and restarts the Cloud nodes of the ESXi VMs so they bind to them again - **warning: on the project's lab this step twice took the ESXi host's network (and the GNS3 VM) down within seconds, the cause is not understood yet; only run it with someone ready to restart the blade**. |
-| `topologybuilder orphans --address ... --esxi_username ... [--fix]` | Lists live GNS3 nodes and ESXi VMs that don't correspond to any node in the topology file - typically left behind when a live node/link delete (as used by TopologyOperator) partially fails, e.g. the GNS3 side deletes but the following ESXi VM delete times out, or vice versa, before the topology file itself is updated. `--fix` permanently deletes everything found instead of only listing it. Exits non-zero if any orphans remain, so it's safe to run unattended as a periodic health check. |
+| `topologybuilder orphans --address ... --esxi_username ... [--fix]` | Lists live GNS3 nodes and ESXi VMs that don't correspond to any node in the topology file - typically left behind when a live node/link delete (as used by Igdrasyl) partially fails, e.g. the GNS3 side deletes but the following ESXi VM delete times out, or vice versa, before the topology file itself is updated. `--fix` permanently deletes everything found instead of only listing it. Exits non-zero if any orphans remain, so it's safe to run unattended as a periodic health check. |
 | `topologybuilder doctor --address ... --esxi_username ...` | Read-only preflight check against real infrastructure: vSwitch/trunk port group existence (or whether a deploy would auto-create them), which datastore would be used, GNS3 VM reachability, and Template-API reachability. Never mutates anything. No topology file needed. |
 | `topologybuilder status --address ... --esxi_username ...` | Check connectivity to the ESXi host and GNS3 VM, and list GNS3 projects with each one's node/started counts. No topology file needed. |
 | `topologybuilder templates` | List available ESXi and GNS3 template names - valid values for a node's `image` field. |

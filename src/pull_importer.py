@@ -245,7 +245,7 @@ def ensure_http_client_enabled(esxi_connection: ESXiConnection) -> None:
             return
         try:
             firewall.EnableRuleset(id=_HTTP_CLIENT_RULESET)
-        except Exception as error:  # noqa: BLE001 - any API fault means the manual path
+        except Exception as error:
             raise RuntimeError(
                 f"Could not enable the '{_HTTP_CLIENT_RULESET}' firewall ruleset on {esxi_connection.ip}: {error}. "
                 f"Run on the host: {_FIREWALL_COMMAND}"
@@ -401,7 +401,7 @@ class PullImporter:
         task = datastore.browser.SearchDatastore_Task(
             datastorePath=f"[{datastore_name}]", searchSpec=spec
         )
-        self.esxi_connection._wait_for_task(task)  # noqa: SLF001
+        self.esxi_connection._wait_for_task(task)
         pattern = re.compile(rf"{re.escape(vm_name)}(_\d+)?")
         return {
             entry.path
@@ -523,13 +523,13 @@ class PullImporter:
             try:
                 with _PYVMOMI_LOCK:
                     content = self.esxi_connection.content
-                    self.esxi_connection._wait_for_task(  # noqa: SLF001
+                    self.esxi_connection._wait_for_task(
                         content.fileManager.DeleteDatastoreFile_Task(
                             name=f"[{datastore_name}] {folder}",
                             datacenter=content.rootFolder.childEntity[0],
                         )
                     )
-            except Exception as error:  # noqa: BLE001
+            except Exception as error:
                 if attempt == self._CLEANUP_ATTEMPTS:
                     raise
                 logger.info(

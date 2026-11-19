@@ -1,7 +1,7 @@
 """The release workflow (test_release_workflow.py): starts only on a pushed version tag, writes only in the release job.
 
 Nothing here runs the workflow; it pins the properties that keep the public repository safe and the assets named as
-the appliance's update manifest expects (TopologyBuilder-<version>.tar.gz and TopologyBuilder-<version>.tar.gz.sha256).
+the appliance's update manifest expects (Mjonyr-<version>.tar.gz and Mjonyr-<version>.tar.gz.sha256).
 """
 
 import re
@@ -50,5 +50,5 @@ def release_workflow_pins_every_action_to_a_full_commit_002() -> None:
 
 
 def release_workflow_names_the_component_like_the_update_manifest_003() -> None:
-    assert _workflow()["env"]["COMPONENT"] == "TopologyBuilder"
+    assert _workflow()["env"]["COMPONENT"] == "Mjonyr"
     assert "git archive" in WORKFLOW.read_text()

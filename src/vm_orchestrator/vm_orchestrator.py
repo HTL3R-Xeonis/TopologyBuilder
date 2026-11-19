@@ -880,8 +880,10 @@ class VMOrchestrator:
                 failures.append(
                     (
                         False,
-                        f"Port group '{vlan.name}': VLAN id {actual} on ESXi, but the topology expects {vlan.id} "
-                        f"- the link is on the wrong VLAN; verify --fix re-tags it",
+                        (
+                            f"Port group '{vlan.name}': VLAN id {actual} on ESXi, but the topology expects {vlan.id} "
+                            f"- the link is on the wrong VLAN; verify --fix re-tags it"
+                        ),
                     )
                 )
         for actual, names in names_by_id.items():
@@ -890,8 +892,10 @@ class VMOrchestrator:
                 failures.append(
                     (
                         False,
-                        f"Port groups {quoted} share VLAN id {actual} - an unwanted Layer-2 connection "
-                        f"between different links; verify --fix gives all but one a free id",
+                        (
+                            f"Port groups {quoted} share VLAN id {actual} - an unwanted Layer-2 connection "
+                            f"between different links; verify --fix gives all but one a free id"
+                        ),
                     )
                 )
         return failures
