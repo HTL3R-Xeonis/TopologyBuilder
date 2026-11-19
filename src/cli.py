@@ -14,7 +14,7 @@ from src.vm_orchestrator.vm_orchestrator import VMOrchestrator
 
 app = typer.Typer(
     name="Mjonyr",
-    help="Mjonyr (formerly TopologyBuilder): build and deploy network topologies to GNS3/ESXi from a YAML config file.",
+    help="Mjonyr (repository TopologyBuilder): build and deploy network topologies to GNS3/ESXi from a YAML config file.",
     add_completion=False,
 )
 

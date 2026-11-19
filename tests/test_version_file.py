@@ -1,4 +1,4 @@
-"""The release version of Mjonyr (formerly TopologyBuilder): pyproject.toml is the one source and must be valid SemVer.
+"""The release version of Mjonyr (repository TopologyBuilder): pyproject.toml is the one source and must be valid SemVer.
 
 The release workflow compares the pushed tag vX.Y.Z with it, so a version that is not SemVer would block a release.
 """

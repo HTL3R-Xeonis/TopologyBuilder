@@ -40,9 +40,10 @@ SKIPPED_PARTS = {
     "__pycache__",
     "handoff",
 }
+# Repository names that no longer exist. TopologyBuilder is not one of them: this repository keeps that name,
+# only the component is called Mjonyr.
 OLD_NAMES = (
     "TopologyOperator",
-    "TopologyBuilder",
     "TopologyGenerator",
     "Docker-Server-Files",
 )
@@ -95,7 +96,7 @@ def test_no_standard_mythological_spelling_of_a_code_name():
 
 def test_the_readme_title_carries_the_new_name_and_the_old_one_in_brackets():
     title = (ROOT / "README.md").read_text(encoding="utf-8").splitlines()[0]
-    assert title == "# Mjonyr (formerly TopologyBuilder)"
+    assert title == "# Mjonyr (repository TopologyBuilder)"
 
 
 def test_documents_link_to_the_old_repositories_only_in_a_formerly_note():

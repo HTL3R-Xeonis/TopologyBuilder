@@ -1,8 +1,8 @@
-# Mjonyr (formerly TopologyBuilder)
+# Mjonyr (repository TopologyBuilder)
 
 **Mjonyr is the deploy and orchestration library and command-line tool of [Ginnungagap](https://github.com/HTL3R-Xeonis/Ginnungagap-Appliance).**
-"Ginnungagap" is the name of the whole product; Mjonyr is the code name of this component. The repository used to be
-called TopologyBuilder; the Python distribution `topologybuilder`, the import root `src`, the `topologybuilder`
+"Ginnungagap" is the name of the whole product; Mjonyr is the code name of this component. The repository keeps its
+name TopologyBuilder; the Python distribution `topologybuilder`, the import root `src`, the `topologybuilder`
 console command and the markers it writes on ESXi and GNS3 objects (`topologybuilder-image:...`) keep their names on
 purpose. Its web app is [Igdrasyl (formerly TopologyOperator)](https://github.com/HTL3R-Xeonis/Igdrasyl).
 
@@ -15,8 +15,8 @@ behaves as one connected lab.
 ## How to Download
 
 ```bash
-git clone https://github.com/HTL3R-Xeonis/Mjonyr.git
-cd Mjonyr
+git clone https://github.com/HTL3R-Xeonis/TopologyBuilder.git
+cd TopologyBuilder
 ```
 
 ## How to Setup (Debian-based systems)

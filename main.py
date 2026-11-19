@@ -1,5 +1,5 @@
 """
-Mjonyr (formerly TopologyBuilder): builds and deploys network topologies to GNS3/ESXi from
+Mjonyr (repository TopologyBuilder): builds and deploys network topologies to GNS3/ESXi from
 a YAML config file. Entry point for the `topologybuilder` console script.
 """
 

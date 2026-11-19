@@ -1,4 +1,4 @@
-# Security policy - Mjonyr (formerly TopologyBuilder)
+# Security policy - Mjonyr (repository TopologyBuilder)
 
 ## Reporting a vulnerability
 

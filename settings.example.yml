@@ -1,4 +1,4 @@
-# Optional settings overrides for Mjonyr (formerly TopologyBuilder), loaded via
+# Optional settings overrides for Mjonyr (repository TopologyBuilder), loaded via
 # `main.py --settings settings.yml` (or `-s settings.yml`).
 # Copy this file to settings.yml (git-ignored) and fill in your own
 # values - only the keys you actually list here get overridden, everything
