@@ -360,9 +360,9 @@ def settings_010(tmp_path) -> None:
     assert urls["ova"] == "http://10.20.20.181:80"  # neither: the built-in value
 
 
-@allure.title("OVA_DEPLOY_PARALLEL wird auf 1 bis 4 begrenzt")
+@allure.title("OVA_DEPLOY_PARALLEL wird auf 1 bis 8 begrenzt")
 @allure.description(
-    "Überprüft, dass die Anzahl gleichzeitiger OVA-Importe pro ESXi-Host nie unter 1 (streng nacheinander) und nie über 4 "
+    "Überprüft, dass die Anzahl gleichzeitiger OVA-Importe pro ESXi-Host nie unter 1 (streng nacheinander) und nie über 8 "
     "liegt und ein unbrauchbarer Wert den Standard 3 ergibt"
 )
 @allure.tag("positiv-test", "settings")
@@ -375,14 +375,14 @@ def settings_ova_parallel_001() -> None:
     assert clamp_ova_deploy_parallel("3") == 3
     assert clamp_ova_deploy_parallel(0) == 1
     assert clamp_ova_deploy_parallel(-5) == 1
-    assert clamp_ova_deploy_parallel(99) == 4
+    assert clamp_ova_deploy_parallel(99) == 8
     assert clamp_ova_deploy_parallel("viele") == 3
     assert clamp_ova_deploy_parallel(None) == 3
 
 
 @allure.title("OVA_DEPLOY_PARALLEL aus Umgebung und Settings-Datei")
 @allure.description(
-    "Der eingebaute Wert ist 2, die Umgebungsvariable und der Schlüssel api.ova_deploy_parallel setzen ihn (begrenzt auf 1 bis 4)"
+    "Der eingebaute Wert ist 2, die Umgebungsvariable und der Schlüssel api.ova_deploy_parallel setzen ihn (begrenzt auf 1 bis 8)"
 )
 @allure.tag("positiv-test", "settings")
 @allure.feature("settings")
@@ -411,11 +411,11 @@ def settings_ova_parallel_002(tmp_path) -> None:
         )
         return int(result.stdout.strip().splitlines()[-1])
 
-    path = _write_settings(tmp_path, {"api": {"ova_deploy_parallel": 4}})
+    path = _write_settings(tmp_path, {"api": {"ova_deploy_parallel": 6}})
     assert run({}) == 3
     assert run({"OVA_DEPLOY_PARALLEL": "1"}) == 1
-    assert run({"OVA_DEPLOY_PARALLEL": "50"}) == 4
-    assert run({"OVA_DEPLOY_PARALLEL": "1"}, str(path)) == 4  # the file wins
+    assert run({"OVA_DEPLOY_PARALLEL": "50"}) == 8
+    assert run({"OVA_DEPLOY_PARALLEL": "1"}, str(path)) == 6  # the file wins
 
 
 @allure.title("api.ova_base_url aus der Settings-Datei gewinnt gegen OVA_BASE_URL")

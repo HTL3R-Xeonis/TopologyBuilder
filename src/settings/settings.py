@@ -12,7 +12,7 @@ load_dotenv()
 
 OVA_DEPLOY_PARALLEL_DEFAULT = 3
 """Simultaneous OVA imports onto one ESXi host when nothing is configured."""
-OVA_DEPLOY_PARALLEL_MAX = 4
+OVA_DEPLOY_PARALLEL_MAX = 8
 """Hard cap of simultaneous OVA imports onto one ESXi host, whatever is configured."""
 
 
@@ -353,11 +353,11 @@ class Settings:
         )
         """How many OVA imports may run at the same time on one ESXi host while a topology is deployed (environment
         variable of the same name, or `api.ova_deploy_parallel` in the settings file). 1 deploys the VMs strictly one
-        after the other, exactly as before; the default is 2, the hard cap 4 (an ESXi host and the deploy service both
-        slow down when more transfers run at once)."""
+        after the other, exactly as before; the default is 3, the hard cap 8 (measured up to 8 at once without errors, but
+        the speed of every import drops with their number and a datastore or a 1 Gbit link reaches its limit)."""
         OVA_CHECK_TIMEOUT_SECONDS: int = 60
-        """How long to wait for the OVA-deploy API to prove that an OVA can be
-        read (it reads the start and the end of the file from the NFS share)."""
+        """How long to wait for the OVA server to prove that an OVA can be
+        read (size, range support and the first bytes)."""
 
         LITERAL_API_VALUES: bool = (
             os.getenv("LITERAL_API_VALUES", "false").lower() == "true"

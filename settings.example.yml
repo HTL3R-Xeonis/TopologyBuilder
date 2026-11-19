@@ -120,5 +120,5 @@ api:
   topology_generator_url: http://10.20.20.172:8002
   ova_base_url: http://10.20.20.181:80
   # How many OVA pull imports may run at the same time onto one ESXi host (environment variable OVA_DEPLOY_PARALLEL).
-  # Default 3, at most 4; 1 imports one VM after the other. An entry here wins over the variable.
+  # Default 3, at most 8; 1 imports one VM after the other. An entry here wins over the variable.
   # ova_deploy_parallel: 3

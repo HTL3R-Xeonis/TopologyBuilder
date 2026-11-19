@@ -1843,7 +1843,7 @@ def esxi_connection_072() -> None:
 @allure.title("Pro ESXi-Host gilt ein gemeinsames Limit für gleichzeitige OVA-Importe")
 @allure.description(
     "Zwei Verbindungen zum selben Host teilen sich dieselben Slots, ein anderer Host hat eigene; die Zahl der Slots ist "
-    "OVA_DEPLOY_PARALLEL begrenzt auf 1 bis 4"
+    "OVA_DEPLOY_PARALLEL begrenzt auf 1 bis 8"
 )
 @allure.tag("positiv-test", "esxi-connection", "parallel")
 @allure.feature("esxi_connection")

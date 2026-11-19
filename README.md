@@ -59,7 +59,7 @@ the template OVAs from, see below) - order of precedence: the `settings.yml`
 unset, a trailing `/` is dropped). That is how a deployment that runs all services together points
 every host at one place without touching any settings file.
 `OVA_DEPLOY_PARALLEL` (or `api.ova_deploy_parallel`) sets how many OVA pull imports run at the same time onto one ESXi host:
-default 3, at most 4, `1` imports one VM after the other.
+default 3, at most 8, `1` imports one VM after the other.
 
 **`settings.yml`** - copy [`settings.example.yml`](settings.example.yml) to
 `settings.yml` and override whichever keys you need (ESXi host/datastore/
