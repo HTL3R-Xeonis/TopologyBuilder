@@ -1439,3 +1439,307 @@ def gns3_connection_055() -> None:
         pytest.raises(RuntimeError),
     ):
         GNS3Connection.delete_link("10.20.20.231", 80, "proj-1", "link-1")
+
+
+class _FakeGns3Api:
+    """
+    Fake of the GNS3 nodes API for the Cloud port tests. Like GNS3 it derives the node's ``ports`` from
+    ``properties.ports_mapping`` on every update (adapter 0, port_number and name per entry).
+    """
+
+    def __init__(self, nodes: list[dict], refuse_status: int | None = None) -> None:
+        self.nodes = {n["node_id"]: n for n in nodes}
+        self.refuse_status = refuse_status
+        self.puts: list[tuple[str, dict]] = []
+        self.regenerate_ports_on_put = True
+
+    @staticmethod
+    def ports_of(mapping: list[dict]) -> list[dict]:
+        return [
+            {
+                "adapter_number": 0,
+                "port_number": port["port_number"],
+                "name": port["name"],
+                "link_type": "ethernet",
+            }
+            for port in mapping
+        ]
+
+    def put(self, url: str, json: dict | None = None, **kwargs):
+        self.puts.append((url, json))
+        if self.refuse_status is not None:
+            response = requests.Response()
+            response.status_code = self.refuse_status
+            raise requests.exceptions.HTTPError(response=response)
+        node = self.nodes[url.rsplit("/", 1)[1]]
+        node["properties"] = {**node["properties"], **json["properties"]}
+        if self.regenerate_ports_on_put:
+            node["ports"] = self.ports_of(node["properties"]["ports_mapping"])
+        return dict(node)
+
+    def get(self, url: str, *args, **kwargs):
+        return dict(self.nodes[url.rsplit("/", 1)[1]])
+
+
+def _cloud_node(name: str, mapping: list[dict], status: str = "started") -> dict:
+    return {
+        "node_id": f"id-{name}",
+        "name": name,
+        "node_type": "cloud",
+        "status": status,
+        "properties": {"ports_mapping": mapping},
+        "ports": _FakeGns3Api.ports_of(mapping),
+    }
+
+
+def _esxi_node_with_links(name: str, *interfaces: tuple[str, int]):
+    """An ESXi node whose interfaces (name, vlan id) are all linked to a GNS3 router, so each needs a Cloud port."""
+    from src.graph.blocks.generic_node import GenericNode
+    from src.graph.blocks.vlan import VirtualLan
+
+    router = MagicMock()
+    router.env = "gns3"
+    node = GenericNode("Ubuntu-Server", "VM", name)
+    for if_name, vlan_id in interfaces:
+        interface = node.add_interface(if_name)
+        interface.vlan = VirtualLan(name, if_name)
+        interface.vlan.id = vlan_id
+        interface.connect_to(router, MagicMock())
+    return node
+
+
+def _connection_with_cloud(cloud: dict, api: _FakeGns3Api) -> GNS3Connection:
+    existing_project = {"project_id": "p1", "name": "lab", "status": "opened"}
+    with patch.object(GNS3Connection, "delete"), patch.object(GNS3Connection, "post"):
+        conn = _make_incremental_connection(existing_project, [cloud], [])
+    return conn
+
+
+def _port(number: int, name: str, vlan_id: int) -> dict:
+    return {
+        "interface": f"vlan{vlan_id}",
+        "name": name,
+        "port_number": number,
+        "type": "ethernet",
+    }
+
+
+@allure.title(
+    "create_node ergänzt einem bestehenden Cloud-Node mit einem Port den Port des neuen Links"
+)
+@allure.description(
+    "Design 10.3, H2: der Cloud-Node der VM hatte einen Port, ein zweiter Link kam hinzu. Früher fiel "
+    "_get_adapter auf den einzigen Port zurück (falsches VLAN). Jetzt wird per Node-Update ein zweiter Port "
+    "angehängt, der erste bleibt mit Nummer, Name und Interface unverändert."
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_056() -> None:
+    _reset_settings()
+    api = _FakeGns3Api([_cloud_node("PC1", [_port(0, "eth0", 2)])])
+    conn = _connection_with_cloud(api.nodes["id-PC1"], api)
+    node = _esxi_node_with_links("PC1", ("eth0", 2), ("eth1", 5))
+
+    with (
+        patch.object(GNS3Connection, "put", side_effect=api.put),
+        patch.object(GNS3Connection, "get", side_effect=api.get),
+    ):
+        result = conn.create_node(node)
+
+    assert len(api.puts) == 1
+    url, payload = api.puts[0]
+    assert url == f"{conn.url}/v2/projects/p1/nodes/id-PC1"
+    assert payload == {
+        "properties": {
+            "ports_mapping": [_port(0, "eth0", 2), _port(1, "eth1", 5)],
+        }
+    }
+    assert result["ports"] == node.gns3_node_info["ports"]
+    adapter = GNS3Connection._get_adapter(result, node.interfaces["eth1"])
+    assert (adapter["adapter_number"], adapter["port_number"]) == (0, 1)
+    assert conn._existing_nodes_by_name["PC1"] is result
+
+
+@allure.title(
+    "create_node hängt an einen Cloud-Node mit mehreren Ports nur den fehlenden an"
+)
+@allure.description(
+    "Mit zwei bestehenden Ports hätte _get_adapter einen ValueError geworfen. Der neue Port bekommt die "
+    "nächste freie Nummer, auch wenn die bestehenden nicht lückenlos nummeriert sind; bestehende Ports "
+    "(und damit ihre Links) bleiben"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_057() -> None:
+    _reset_settings()
+    existing = [_port(0, "eth0", 2), _port(3, "eth2", 4)]
+    api = _FakeGns3Api([_cloud_node("PC1", existing)])
+    conn = _connection_with_cloud(api.nodes["id-PC1"], api)
+    node = _esxi_node_with_links("PC1", ("eth0", 2), ("eth2", 4), ("eth1", 7))
+
+    with (
+        patch.object(GNS3Connection, "put", side_effect=api.put),
+        patch.object(GNS3Connection, "get", side_effect=api.get),
+    ):
+        result = conn.create_node(node)
+
+    mapping = api.puts[0][1]["properties"]["ports_mapping"]
+    assert mapping == [*existing, _port(4, "eth1", 7)]
+    for if_name, number in (("eth0", 0), ("eth2", 3), ("eth1", 4)):
+        adapter = GNS3Connection._get_adapter(result, node.interfaces[if_name])
+        assert adapter["port_number"] == number
+
+
+@allure.title("create_node ändert einen Cloud-Node nicht, dessen Ports schon stimmen")
+@allure.description(
+    "Kein Node-Update, wenn jede Schnittstelle schon einen Port mit dem richtigen Interface hat"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_058() -> None:
+    _reset_settings()
+    cloud = _cloud_node("PC1", [_port(0, "eth0", 2), _port(1, "eth1", 5)])
+    api = _FakeGns3Api([cloud])
+    conn = _connection_with_cloud(cloud, api)
+    node = _esxi_node_with_links("PC1", ("eth0", 2), ("eth1", 5))
+
+    with (
+        patch.object(GNS3Connection, "put", side_effect=api.put),
+        patch.object(GNS3Connection, "get", side_effect=api.get),
+    ):
+        result = conn.create_node(node)
+
+    assert api.puts == []
+    assert result is cloud
+    assert node.gns3_node_info is cloud
+
+
+@allure.title("create_node bindet einen bestehenden Port an das neue VLAN-Interface")
+@allure.description(
+    "Wurde die VLAN-Id eines Ports repariert (verify --fix), zeigt der Port des Cloud-Nodes noch auf das "
+    "alte vlan<id>. Der Port behält Nummer und Namen, nur das Interface wird ersetzt."
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_connection_059() -> None:
+    _reset_settings()
+    api = _FakeGns3Api([_cloud_node("PC1", [_port(0, "eth0", 3), _port(1, "eth1", 5)])])
+    conn = _connection_with_cloud(api.nodes["id-PC1"], api)
+    node = _esxi_node_with_links("PC1", ("eth0", 8), ("eth1", 5))
+
+    with (
+        patch.object(GNS3Connection, "put", side_effect=api.put),
+        patch.object(GNS3Connection, "get", side_effect=api.get),
+    ):
+        conn.create_node(node)
+
+    assert api.puts[0][1]["properties"]["ports_mapping"] == [
+        _port(0, "eth0", 8),
+        _port(1, "eth1", 5),
+    ]
+
+
+@allure.title("create_node meldet lesbar, wenn GNS3 das Hinzufügen eines Ports ablehnt")
+@allure.description(
+    "GNS3 darf Änderungen an einem laufenden Cloud-Node ablehnen (HTTP 409). Das wird eine RuntimeError mit "
+    "Node, Port und der Anweisung, den Node zu stoppen oder voll zu deployen; kein stiller Fallback auf einen "
+    "falschen Port"
+)
+@allure.tag("negativ-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_060() -> None:
+    _reset_settings()
+    api = _FakeGns3Api([_cloud_node("PC1", [_port(0, "eth0", 2)])], refuse_status=409)
+    conn = _connection_with_cloud(api.nodes["id-PC1"], api)
+    node = _esxi_node_with_links("PC1", ("eth0", 2), ("eth1", 5))
+
+    with (
+        patch.object(GNS3Connection, "put", side_effect=api.put),
+        pytest.raises(RuntimeError, match=r"'PC1'.*eth1.*409.*stop the Cloud node"),
+    ):
+        conn.create_node(node)
+
+
+@allure.title(
+    "create_node prüft nach dem Update, dass die neuen Ports in der Port-Liste stehen"
+)
+@allure.description(
+    "Antwortet GNS3 auf das Update ohne neue Port-Liste, wird der Node nachgeladen; fehlt der Port auch dort, "
+    "wird ein lesbarer Fehler gemeldet statt später den falschen Port zu verbinden"
+)
+@allure.tag("negativ-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_connection_061() -> None:
+    _reset_settings()
+    api = _FakeGns3Api([_cloud_node("PC1", [_port(0, "eth0", 2)])])
+    api.regenerate_ports_on_put = False
+    conn = _connection_with_cloud(api.nodes["id-PC1"], api)
+    node = _esxi_node_with_links("PC1", ("eth0", 2), ("eth1", 5))
+
+    with (
+        patch.object(GNS3Connection, "put", side_effect=api.put),
+        patch.object(GNS3Connection, "get", side_effect=api.get),
+        pytest.raises(RuntimeError, match=r"does not contain \['eth1'\]"),
+    ):
+        conn.create_node(node)
+
+    # a node that does update its ports on the next read is accepted
+    api2 = _FakeGns3Api([_cloud_node("PC2", [_port(0, "eth0", 2)])])
+    api2.regenerate_ports_on_put = False
+    conn2 = _connection_with_cloud(api2.nodes["id-PC2"], api2)
+    node2 = _esxi_node_with_links("PC2", ("eth0", 2), ("eth1", 5))
+
+    def get_after_refresh(url: str, *args, **kwargs):
+        stored = api2.nodes["id-PC2"]
+        stored["ports"] = _FakeGns3Api.ports_of(stored["properties"]["ports_mapping"])
+        return dict(stored)
+
+    with (
+        patch.object(GNS3Connection, "put", side_effect=api2.put),
+        patch.object(GNS3Connection, "get", side_effect=get_after_refresh),
+    ):
+        result = conn2.create_node(node2)
+
+    assert [p["name"] for p in result["ports"]] == ["eth0", "eth1"]
+
+
+@allure.title(
+    "create_node legt für einen neuen Cloud-Node (Vollbetrieb) unverändert an"
+)
+@allure.description(
+    "Ohne incremental gibt es nichts zu reusen: der Node wird mit dem vollständigen ports_mapping angelegt, "
+    "es gibt kein Node-Update"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_062() -> None:
+    _reset_settings()
+    node = _esxi_node_with_links("PC1", ("eth0", 2), ("eth1", 5))
+    with (
+        patch.object(GNS3Connection, "get", return_value=[]),
+        patch.object(GNS3Connection, "post", return_value={"project_id": "p1"}),
+    ):
+        conn = GNS3Connection("10.20.20.231", 80, "lab")
+    template = {"template_type": "cloud", "builtin": True, "name": "Cloud"}
+    with (
+        patch.object(GNS3Connection, "_get_template", return_value=template),
+        patch.object(
+            GNS3Connection, "post", return_value={"node_id": "n1", "ports": []}
+        ) as mock_post,
+        patch.object(GNS3Connection, "put") as mock_put,
+    ):
+        conn.create_node(node)
+
+    mock_put.assert_not_called()
+    payload = mock_post.call_args.kwargs["json"]
+    assert payload["properties"]["ports_mapping"] == [
+        _port(0, "eth0", 2),
+        _port(1, "eth1", 5),
+    ]

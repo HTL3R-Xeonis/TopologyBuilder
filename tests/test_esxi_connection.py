@@ -271,14 +271,14 @@ def esxi_connection_010() -> None:
 
 
 @allure.title(
-    "deploy_virtual_machine löst die OVA-Datei auf, deployt sie über die "
-    "API und schaltet die VM ein"
+    "deploy_virtual_machine löst die OVA-URL auf, lässt den Host sie ziehen "
+    "und schaltet die VM ein"
 )
 @allure.description(
-    "Überprüft, dass deploy_virtual_machine im Normalbetrieb die OVA-Datei "
-    "über APIHandler.find_esxi_template_file auflöst, sie über "
-    "APIHandler.deploy_ova mit der korrekten network-Zuordnung deployt und "
-    "die neue VM danach taggt und einschaltet"
+    "Überprüft, dass deploy_virtual_machine im Normalbetrieb die OVA-URL "
+    "über APIHandler.find_esxi_template_url auflöst, sie über "
+    "PullImporter.import_ova mit den VLAN-Port-Groups in Adapter-Reihenfolge "
+    "importiert und die neue VM danach taggt und einschaltet"
 )
 @allure.tag("positiv-test", "esxi-connection")
 @allure.feature("esxi_connection")
@@ -302,28 +302,23 @@ def esxi_connection_011() -> None:
     fake_vm = MagicMock()
     with (
         patch(
-            "src.connections.esxi_connection.APIHandler.find_esxi_template_file",
-            return_value="ubuntu-server.ova",
-        ) as mock_find_file,
-        patch(
-            "src.connections.esxi_connection.APIHandler.deploy_ova"
-        ) as mock_deploy_ova,
+            "src.connections.esxi_connection.APIHandler.find_esxi_template_url",
+            return_value="http://ova.example/ubuntu-server.ova",
+        ) as mock_find_url,
+        patch("src.pull_importer.PullImporter") as mock_importer,
         patch.object(conn, "get_vm", return_value=fake_vm),
         patch.object(conn, "set_vm_annotation") as mock_set_annotation,
         patch.object(conn, "power_on_vm") as mock_power_on,
     ):
         conn.deploy_virtual_machine(node, "datastore1")
 
-    mock_find_file.assert_called_once_with("Ubuntu-Server")
-    mock_deploy_ova.assert_called_once_with(
-        "10.20.20.202",
-        443,
+    mock_find_url.assert_called_once_with("Ubuntu-Server")
+    mock_importer.assert_called_once_with(conn)
+    mock_importer.return_value.import_ova.assert_called_once_with(
+        "http://ova.example/ubuntu-server.ova",
         "VM1",
-        "ubuntu-server.ova",
         "datastore1",
-        {"ens160": interface.vlan.name},
-        "root",
-        "host-password",
+        [interface.vlan.name],
     )
     mock_set_annotation.assert_called_once_with(
         fake_vm, "topologybuilder-image:Ubuntu-Server"
@@ -337,7 +332,7 @@ def esxi_connection_011() -> None:
 )
 @allure.description(
     "Überprüft, dass deploy_virtual_machine einen RuntimeError wirft, wenn "
-    "APIHandler.deploy_ova erfolgreich zurückkehrt, aber get_vm die VM "
+    "PullImporter.import_ova erfolgreich zurückkehrt, aber get_vm die VM "
     "danach nicht findet"
 )
 @allure.tag("negativ-test", "esxi-connection")
@@ -359,10 +354,10 @@ def esxi_connection_012() -> None:
 
     with (
         patch(
-            "src.connections.esxi_connection.APIHandler.find_esxi_template_file",
-            return_value="ubuntu-server.ova",
+            "src.connections.esxi_connection.APIHandler.find_esxi_template_url",
+            return_value="http://ova.example/ubuntu-server.ova",
         ),
-        patch("src.connections.esxi_connection.APIHandler.deploy_ova"),
+        patch("src.pull_importer.PullImporter"),
         patch.object(conn, "get_vm", return_value=None),
         pytest.raises(RuntimeError),
     ):
@@ -372,7 +367,7 @@ def esxi_connection_012() -> None:
 @allure.title("deploy_virtual_machine überspringt alles im Dry-Run-Modus")
 @allure.description(
     "Überprüft, dass deploy_virtual_machine im Dry-Run-Modus die OVA-Datei "
-    "weder auflöst noch deployt"
+    "weder auflöst noch importiert"
 )
 @allure.tag("positiv-test", "esxi-connection")
 @allure.feature("esxi_connection")
@@ -389,7 +384,7 @@ def esxi_connection_013() -> None:
 
     try:
         with patch(
-            "src.connections.esxi_connection.APIHandler.find_esxi_template_file"
+            "src.connections.esxi_connection.APIHandler.find_esxi_template_url"
         ) as mock_find_file:
             conn.deploy_virtual_machine(node, "datastore1")
     finally:
@@ -570,13 +565,14 @@ def esxi_connection_020() -> None:
     _reset_settings()
     conn = _make_esxi_connection()
 
+    vlan = VirtualLan("VM1", "ens160")
     existing = MagicMock()
     existing.spec.name = "VM1_ens160"
+    existing.spec.vlanId = vlan.id
     host_system = MagicMock()
     host_system.configManager.networkSystem.networkInfo.portgroup = [existing]
     conn._get_object_by_name = MagicMock(return_value=host_system)
 
-    vlan = VirtualLan("VM1", "ens160")
     conn._add_port_group(vlan)
 
     host_system.configManager.networkSystem.AddPortGroup.assert_not_called()
@@ -613,7 +609,7 @@ def esxi_connection_021() -> None:
 )
 @allure.description(
     "Überprüft, dass deploy_virtual_machine im incremental-Modus die "
-    "OVA-Datei weder auflöst noch deployt, wenn bereits eine VM mit dem "
+    "OVA-Datei weder auflöst noch importiert, wenn bereits eine VM mit dem "
     "Node-Namen existiert, und auch kein ReconfigVM_Task ausgelöst wird, "
     "wenn diese VM bereits einen Adapter für jedes Interface hat"
 )
@@ -639,7 +635,7 @@ def esxi_connection_022() -> None:
     interface.vlan = VirtualLan("VM1", "ens160")
 
     with patch(
-        "src.connections.esxi_connection.APIHandler.find_esxi_template_file"
+        "src.connections.esxi_connection.APIHandler.find_esxi_template_url"
     ) as mock_find_file:
         conn.deploy_virtual_machine(node, "datastore1", incremental=True)
 
@@ -689,7 +685,7 @@ def esxi_connection_052() -> None:
     interface.vlan = VirtualLan("VM1", "ens160")
 
     with patch(
-        "src.connections.esxi_connection.APIHandler.find_esxi_template_file"
+        "src.connections.esxi_connection.APIHandler.find_esxi_template_url"
     ) as mock_find_file:
         conn.deploy_virtual_machine(node, "datastore1", incremental=True)
 
@@ -1919,11 +1915,11 @@ def esxi_connection_parallel_002() -> None:
     fake_vm = MagicMock()
     with (
         patch(
-            "src.connections.esxi_connection.APIHandler.find_esxi_template_file",
-            return_value="ubuntu-server.ova",
+            "src.connections.esxi_connection.APIHandler.find_esxi_template_url",
+            return_value="http://ova.example/ubuntu-server.ova",
         ),
         patch(
-            "src.connections.esxi_connection.APIHandler.deploy_ova",
+            "src.pull_importer.PullImporter.import_ova",
             side_effect=blocking_upload,
         ),
         patch.object(conn, "get_vm", return_value=fake_vm),
@@ -1940,3 +1936,124 @@ def esxi_connection_parallel_002() -> None:
 
     module._HOST_DEPLOY_SLOTS.clear()
     assert lock_free_during_upload == [True]
+
+
+def _host_with_port_groups(*groups: tuple[str, int]) -> MagicMock:
+    existing = []
+    for name, vlan_id in groups:
+        port_group = MagicMock()
+        port_group.spec.name = name
+        port_group.spec.vlanId = vlan_id
+        existing.append(port_group)
+    host_system = MagicMock()
+    host_system.configManager.networkSystem.networkInfo.portgroup = existing
+    return host_system
+
+
+@allure.title(
+    "_ensure_port_group meldet eine bestehende Port-Group mit anderer VLAN-Id"
+)
+@allure.description(
+    "Design 10.3, H1: eine bestehende Port-Group mit anderer Id wurde still übernommen, der Link lag auf "
+    "dem falschen VLAN. Jetzt: RuntimeError mit beiden Ids, nichts wird angelegt oder geändert."
+)
+@allure.tag("negativ-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_073() -> None:
+    _reset_settings()
+    conn = _make_esxi_connection()
+    host_system = _host_with_port_groups(("PC2_eth0", 3))
+    conn._get_object_by_name = MagicMock(return_value=host_system)
+
+    with pytest.raises(RuntimeError, match=r"PC2_eth0.*VLAN id 3.*VLAN id 4"):
+        conn._ensure_port_group("PC2_eth0", 4)
+
+    network_system = host_system.configManager.networkSystem
+    network_system.AddPortGroup.assert_not_called()
+    network_system.UpdatePortGroup.assert_not_called()
+
+
+@allure.title("_ensure_port_group mit fix_vlan setzt die erwartete VLAN-Id")
+@allure.description(
+    "Mit der Reparatur-Option wird die bestehende Port-Group mit der erwarteten Id neu getaggt, "
+    "ihre übrige Spec (Policy, vSwitch) bleibt, es wird keine zweite angelegt"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_074() -> None:
+    _reset_settings()
+    conn = _make_esxi_connection()
+    host_system = _host_with_port_groups(("PC2_eth0", 3))
+    conn._get_object_by_name = MagicMock(return_value=host_system)
+
+    conn._ensure_port_group("PC2_eth0", 4, fix_vlan=True)
+
+    network_system = host_system.configManager.networkSystem
+    network_system.AddPortGroup.assert_not_called()
+    network_system.UpdatePortGroup.assert_called_once()
+    kwargs = network_system.UpdatePortGroup.call_args.kwargs
+    assert kwargs["pgName"] == "PC2_eth0"
+    assert kwargs["portgrp"].vlanId == 4
+
+
+@allure.title("_ensure_port_group lässt eine Port-Group mit passender Id unangetastet")
+@allure.description("Gleiche Id: kein Fehler, kein Add, kein Update (wie bisher)")
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def esxi_connection_075() -> None:
+    _reset_settings()
+    conn = _make_esxi_connection()
+    host_system = _host_with_port_groups(("PC2_eth0", 4))
+    conn._get_object_by_name = MagicMock(return_value=host_system)
+
+    conn._ensure_port_group("PC2_eth0", 4)
+    conn._ensure_port_group("PC2_eth0", 4, fix_vlan=True)
+
+    network_system = host_system.configManager.networkSystem
+    network_system.AddPortGroup.assert_not_called()
+    network_system.UpdatePortGroup.assert_not_called()
+
+
+@allure.title(
+    "ensure_trunk_port_group_exists bricht bei abweichender Trunk-Id nicht ab"
+)
+@allure.description(
+    "Die Trunk-Port-Group hängt nicht von der Topologie ab; eine abweichende Id war bisher kein Fehler "
+    "und bleibt es (nur eine Warnung), damit bestehende Deploys weiterlaufen"
+)
+@allure.tag("positiv-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def esxi_connection_076() -> None:
+    _reset_settings()
+    conn = _make_esxi_connection()
+    host_system = _host_with_port_groups((Settings.ESXI.TRUNK_PORT_GROUP, 0))
+    conn._get_object_by_name = MagicMock(return_value=host_system)
+    conn.ensure_bridging_security_policy = MagicMock()
+
+    conn.ensure_trunk_port_group_exists()
+
+    host_system.configManager.networkSystem.AddPortGroup.assert_not_called()
+    conn.ensure_bridging_security_policy.assert_called_once()
+
+
+@allure.title("set_port_group_vlan_id meldet eine fehlende Port-Group lesbar")
+@allure.description(
+    "Eine nicht vorhandene Port-Group kann nicht neu getaggt werden: RuntimeError"
+)
+@allure.tag("negativ-test", "esxi-connection")
+@allure.feature("esxi_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def esxi_connection_077() -> None:
+    _reset_settings()
+    conn = _make_esxi_connection()
+    host_system = _host_with_port_groups()
+    conn._get_object_by_name = MagicMock(return_value=host_system)
+
+    with pytest.raises(RuntimeError, match="not found"):
+        conn.set_port_group_vlan_id("PC9_eth0", 7)
+
+    host_system.configManager.networkSystem.UpdatePortGroup.assert_not_called()

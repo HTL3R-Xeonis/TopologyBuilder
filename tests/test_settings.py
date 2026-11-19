@@ -26,6 +26,7 @@ _SERVICE_URL_VARS = (
     "ESXI_TEMPLATE_SERVER_URL",
     "GNS3_TEMPLATE_SERVER_URL",
     "TOPOLOGY_GENERATOR_URL",
+    "OVA_BASE_URL",
     "OVA_DEPLOY_URL",
 )
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -45,7 +46,7 @@ def _api_urls_in_fresh_process(
         "    Settings.initialise_settings(sys.argv[1])\n"
         "api = Settings.API\n"
         "print(json.dumps({'esxi': api.ESXI_TEMPLATE_SERVER_URL, 'gns3': api.GNS3_TEMPLATE_SERVER_URL, "
-        "'generator': api.TOPOLOGY_GENERATOR_URL, 'ova': api.OVA_DEPLOY_URL}))\n"
+        "'generator': api.TOPOLOGY_GENERATOR_URL, 'ova': api.OVA_BASE_URL}))\n"
     )
     clean = {k: v for k, v in os.environ.items() if k not in _SERVICE_URL_VARS}
     result = subprocess.run(
@@ -95,6 +96,11 @@ def _reset_esxi_gns3_defaults() -> None:
 @allure.feature("settings")
 @allure.severity(allure.severity_level.CRITICAL)
 def settings_000(tmp_path) -> None:
+    saved_api = (
+        Settings.API.ESXI_TEMPLATE_SERVER_URL,
+        Settings.API.GNS3_TEMPLATE_SERVER_URL,
+        Settings.API.OVA_BASE_URL,
+    )
     _reset_esxi_gns3_defaults()
     path = _write_settings(
         tmp_path,
@@ -127,7 +133,7 @@ def settings_000(tmp_path) -> None:
             "api": {
                 "esxi_template_server_url": "http://example.com:8000",
                 "gns3_template_server_url": "http://example.com:8001",
-                "ova_deploy_url": "http://example.com:8003",
+                "ova_base_url": "http://example.com:8003/",
             },
         },
     )
@@ -161,9 +167,12 @@ def settings_000(tmp_path) -> None:
         assert Settings.GNS3.INTERFACE_SETUP_TIMEOUT_SECONDS == 45
         assert Settings.API.ESXI_TEMPLATE_SERVER_URL == "http://example.com:8000"
         assert Settings.API.GNS3_TEMPLATE_SERVER_URL == "http://example.com:8001"
-        assert Settings.API.OVA_DEPLOY_URL == "http://example.com:8003"
+        assert Settings.API.OVA_BASE_URL == "http://example.com:8003"
     finally:
         _reset_esxi_gns3_defaults()
+        Settings.API.ESXI_TEMPLATE_SERVER_URL = saved_api[0]
+        Settings.API.GNS3_TEMPLATE_SERVER_URL = saved_api[1]
+        Settings.API.OVA_BASE_URL = saved_api[2]
 
 
 @allure.title("initialise_settings lässt fehlende Schlüssel unverändert")
@@ -283,13 +292,13 @@ def settings_007() -> None:
         "esxi": "http://10.20.20.171:8000",
         "gns3": "http://10.20.20.171:8001",
         "generator": "http://10.20.20.172:8002",
-        "ova": "http://10.20.20.172:8003",
+        "ova": "http://10.20.20.181:80",
     }
 
 
 @allure.title("Umgebungsvariablen ersetzen die eingebauten Dienst-Adressen")
 @allure.description(
-    "Überprüft, dass jede der vier Umgebungsvariablen genau ihre Adresse ersetzt und ein abschließender Schrägstrich "
+    "Überprüft, dass jede der Umgebungsvariablen genau ihre Adresse ersetzt und ein abschließender Schrägstrich "
     "entfernt wird"
 )
 @allure.tag("positiv-test", "settings")
@@ -301,7 +310,7 @@ def settings_008() -> None:
             "ESXI_TEMPLATE_SERVER_URL": "http://gateway:8000/",
             "GNS3_TEMPLATE_SERVER_URL": "http://gateway:8001",
             "TOPOLOGY_GENERATOR_URL": "https://gen.example/v1/",
-            "OVA_DEPLOY_URL": "http://ova:9000",
+            "OVA_BASE_URL": "http://ova:9000/",
         }
     )
     assert urls == {
@@ -321,7 +330,7 @@ def settings_008() -> None:
 @allure.severity(allure.severity_level.NORMAL)
 def settings_009() -> None:
     urls = _api_urls_in_fresh_process(
-        {"OVA_DEPLOY_URL": "http://ova:9000", "ESXI_TEMPLATE_SERVER_URL": ""}
+        {"OVA_BASE_URL": "http://ova:9000", "ESXI_TEMPLATE_SERVER_URL": ""}
     )
     assert urls["ova"] == "http://ova:9000"
     assert urls["esxi"] == "http://10.20.20.171:8000"
@@ -348,7 +357,7 @@ def settings_010(tmp_path) -> None:
     )
     assert urls["esxi"] == "http://from-file:8000"  # the file wins
     assert urls["gns3"] == "http://from-env:8001"  # not in the file: the environment
-    assert urls["ova"] == "http://10.20.20.172:8003"  # neither: the built-in value
+    assert urls["ova"] == "http://10.20.20.181:80"  # neither: the built-in value
 
 
 @allure.title("OVA_DEPLOY_PARALLEL wird auf 1 bis 4 begrenzt")
@@ -407,3 +416,62 @@ def settings_ova_parallel_002(tmp_path) -> None:
     assert run({"OVA_DEPLOY_PARALLEL": "1"}) == 1
     assert run({"OVA_DEPLOY_PARALLEL": "50"}) == 4
     assert run({"OVA_DEPLOY_PARALLEL": "1"}, str(path)) == 4  # the file wins
+
+
+@allure.title("api.ova_base_url aus der Settings-Datei gewinnt gegen OVA_BASE_URL")
+@allure.description(
+    "Der Schlüssel der Datei ersetzt die Umgebungsvariable, ein abschließender "
+    "Schrägstrich wird entfernt"
+)
+@allure.tag("positiv-test", "settings")
+@allure.feature("settings")
+@allure.severity(allure.severity_level.CRITICAL)
+def settings_ova_base_url_001(tmp_path) -> None:
+    path = _write_settings(
+        tmp_path, {"api": {"ova_base_url": "http://from-file:8080/ova//"}}
+    )
+    urls = _api_urls_in_fresh_process(
+        {"OVA_BASE_URL": "http://from-env:80"}, settings_file=path
+    )
+    assert urls["ova"] == "http://from-file:8080/ova"
+
+
+@allure.title("OVA_DEPLOY_URL gibt es nicht mehr")
+@allure.description(
+    "Der OVA-Deploy-Dienst ist aus dem Design entfernt: die Einstellung OVA_DEPLOY_URL "
+    "existiert nicht mehr, auch nicht über die Umgebung"
+)
+@allure.tag("positiv-test", "settings")
+@allure.feature("settings")
+@allure.severity(allure.severity_level.NORMAL)
+def settings_ova_base_url_002() -> None:
+    assert not hasattr(Settings.API, "OVA_DEPLOY_URL")
+    assert Settings.API.OVA_BASE_URL.startswith("http")
+    assert not Settings.API.OVA_BASE_URL.endswith("/")
+
+
+@allure.title("api.ova_deploy_url in einer alten Settings-Datei warnt nur")
+@allure.description(
+    "Ein übrig gebliebener Schlüssel api.ova_deploy_url ist kein Fehler: er ändert "
+    "OVA_BASE_URL nicht und wird nur mit 'no longer used' protokolliert"
+)
+@allure.tag("positiv-test", "settings")
+@allure.feature("settings")
+@allure.severity(allure.severity_level.NORMAL)
+def settings_ova_base_url_003(tmp_path) -> None:
+    from loguru import logger
+
+    path = _write_settings(
+        tmp_path, {"api": {"ova_deploy_url": "http://old-service:8003"}}
+    )
+    messages: list[str] = []
+    sink = logger.add(lambda m: messages.append(str(m)), level="WARNING")
+    saved = Settings.API.OVA_BASE_URL
+    try:
+        Settings.initialise_settings(path)
+        assert Settings.API.OVA_BASE_URL == saved
+        assert not hasattr(Settings.API, "OVA_DEPLOY_URL")
+    finally:
+        logger.remove(sink)
+        Settings.API.OVA_BASE_URL = saved
+    assert any("no longer used" in m and "ova_deploy_url" in m for m in messages)

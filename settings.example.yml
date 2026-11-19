@@ -106,17 +106,19 @@ gns3:
 api:
   # Base URLs of the ESXi/NFS template-listing service, the GNS3
   # template-listing service, the Topology Generator service (used by
-  # the `generate` command), and the OVA-deploy service (used to import
-  # ESXi VMs directly from its own NFS mount, with no local
-  # download/upload hop on this project's side). Only needed if these
-  # live somewhere other than this project's own internal network
-  # default. Instead of a settings file, the same four values can also come from environment variables of the same name
-  # in upper case (ESXI_TEMPLATE_SERVER_URL, GNS3_TEMPLATE_SERVER_URL, TOPOLOGY_GENERATOR_URL, OVA_DEPLOY_URL, also from
+  # the `generate` command), and the HTTP server that serves the template
+  # OVA files (ova_base_url). An ESXi host pulls a template OVA itself from
+  # <ova_base_url>/<source dir>/<file> (source dir and file come from the ESXi
+  # template service), so the server must support range requests and be
+  # reachable from the ESXi hosts. Only needed if these live somewhere other
+  # than this project's own internal network default. Instead of a settings
+  # file, the same four values can also come from environment variables of the same name
+  # in upper case (ESXI_TEMPLATE_SERVER_URL, GNS3_TEMPLATE_SERVER_URL, TOPOLOGY_GENERATOR_URL, OVA_BASE_URL, also from
   # .env); an entry here wins over them.
   esxi_template_server_url: http://10.20.20.171:8000
   gns3_template_server_url: http://10.20.20.171:8001
   topology_generator_url: http://10.20.20.172:8002
-  ova_deploy_url: http://10.20.20.172:8003
-  # How many OVA imports may run at the same time onto one ESXi host (environment variable OVA_DEPLOY_PARALLEL).
+  ova_base_url: http://10.20.20.181:80
+  # How many OVA pull imports may run at the same time onto one ESXi host (environment variable OVA_DEPLOY_PARALLEL).
   # Default 3, at most 4; 1 imports one VM after the other. An entry here wins over the variable.
   # ova_deploy_parallel: 3

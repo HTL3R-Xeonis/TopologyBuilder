@@ -511,29 +511,42 @@ class ESXiConnection(GenericConnection):
             raise RuntimeError(msg) from exc
         logger.info(f"Created vSwitch '{Settings.ESXI.VIRTUAL_SWITCH}'")
 
-    def _add_port_group(self, vlan: VirtualLan) -> None:
+    def _add_port_group(self, vlan: VirtualLan, fix_vlan: bool = False) -> None:
         """
         Ensures a port group for the given ``vlan`` exists on the virtual
         switch, creating it if it's missing.
         :param vlan: VLAN Object of the ``graph.blocks.Interface`` to create the port group
+        :param fix_vlan: re-tag an existing port group that has another VLAN id instead of raising (see ``_ensure_port_group``)
         :return:
         :raises RuntimeError: Is thrown when no host-system or network-system was found on the ESXi host.
         """
-        self._ensure_port_group(vlan.name, vlan.id)
+        self._ensure_port_group(vlan.name, vlan.id, fix_vlan=fix_vlan)
 
-    def _ensure_port_group(self, name: str, vlan_id: int) -> None:
+    def _ensure_port_group(
+        self,
+        name: str,
+        vlan_id: int,
+        fix_vlan: bool = False,
+        strict: bool = True,
+    ) -> None:
         """
         Ensures a port group with the given ``name``/``vlan_id`` exists on
-        the virtual switch, creating it if it's missing. A no-op if a port
-        group with that name already exists - AddPortGroup itself has no
+        the virtual switch, creating it if it's missing. AddPortGroup itself has no
         "create if missing" mode, so the existing-names check happens here
         instead, which is what lets a redeployed/incremental topology
         reuse port groups from an earlier deploy instead of erroring out.
+        An existing port group is reused only if it carries the expected VLAN id: with another id the link
+        would silently be on the wrong VLAN (or share a VLAN with a different link), so that is an error,
+        unless ``fix_vlan`` re-tags the port group with the expected id.
         The policies are inherited from the virtual Switch on ESXi.
         :param name: name of the port group
         :param vlan_id: VLAN ID to tag the port group with
+        :param fix_vlan: re-tag an existing port group that has another VLAN id instead of raising
+        :param strict: False only logs a warning for a VLAN id mismatch (used for the trunk port group, whose
+            id never depended on the topology)
         :return:
-        :raises RuntimeError: Is thrown when no host-system or network-system was found on the ESXi host.
+        :raises RuntimeError: Is thrown when no host-system or network-system was found on the ESXi host,
+            or when an existing port group has another VLAN id than expected (and ``fix_vlan`` is not set).
         """
         if Settings.ONLY_ON_GNS3:
             return
@@ -552,11 +565,26 @@ class ESXiConnection(GenericConnection):
             logger.error(msg := "No network system found on ESXi.")
             raise RuntimeError(msg)
 
-        existing_names = {
-            portgroup.spec.name for portgroup in network_system.networkInfo.portgroup
+        existing = {
+            portgroup.spec.name: portgroup.spec.vlanId
+            for portgroup in network_system.networkInfo.portgroup
         }
-        if name in existing_names:
-            return
+        if name in existing:
+            actual = existing[name]
+            if actual == vlan_id:
+                return
+            if fix_vlan:
+                self.set_port_group_vlan_id(name, vlan_id)
+                return
+            message = (
+                f"Port group '{name}' already exists with VLAN id {actual}, but the topology expects VLAN id {vlan_id}. "
+                "Reusing it would put the link on the wrong VLAN. Run 'verify --fix' to re-tag it, or do a full deploy."
+            )
+            if not strict:
+                logger.warning(message)
+                return
+            logger.error(message)
+            raise RuntimeError(message)
 
         Verbosity.volumatic_print(Verbosity.NORMAL, f"Adds portgroup {name}")
         spec = vim.host.PortGroup.Specification()
@@ -571,6 +599,57 @@ class ESXiConnection(GenericConnection):
             logger.error(msg := f"Something went wrong while adding port group {name}.")
             raise RuntimeError(msg) from exc
 
+    def set_port_group_vlan_id(self, name: str, vlan_id: int) -> None:
+        """
+        Re-tags an existing port group with another VLAN id, keeping the rest of its spec (policy, vSwitch).
+        VMs attached to it stay attached, their traffic is tagged with the new id from now on.
+        :param name: name of the existing port group
+        :param vlan_id: new VLAN id
+        :return:
+        :raises RuntimeError: Is thrown when the port group does not exist, when no host-system or network-system
+            was found on the ESXi host or when the update fails.
+        """
+        if Settings.ONLY_ON_GNS3:
+            return
+        # ----------------------------------------------------------------------------------------------------------
+        if Settings.IS_DRY_RUN:
+            Verbosity.volumatic_print(
+                Verbosity.NORMAL, f"Would set VLAN id {vlan_id} on portgroup {name}"
+            )
+            return
+        Verbosity.volumatic_print(
+            Verbosity.NORMAL, f"Sets VLAN id {vlan_id} on portgroup {name}"
+        )
+        # ----------------------------------------------------------------------------------------------------------
+
+        host_system = self._get_object_by_name(vim.HostSystem)
+        if host_system is None:
+            logger.error(msg := "No host system found on ESXi.")
+            raise RuntimeError(msg)
+        network_system = host_system.configManager.networkSystem
+        if network_system is None:
+            logger.error(msg := "No network system found on ESXi.")
+            raise RuntimeError(msg)
+
+        port_group = next(
+            (pg for pg in network_system.networkInfo.portgroup if pg.spec.name == name),
+            None,
+        )
+        if port_group is None:
+            logger.error(msg := f"Port group {name} not found on ESXi.")
+            raise RuntimeError(msg)
+
+        spec = port_group.spec
+        spec.vlanId = vlan_id
+        try:
+            network_system.UpdatePortGroup(pgName=name, portgrp=spec)
+        except Exception as exc:
+            logger.error(
+                msg
+                := f"Something went wrong while setting VLAN id {vlan_id} on port group {name}."
+            )
+            raise RuntimeError(msg) from exc
+
     def ensure_trunk_port_group_exists(self) -> None:
         """
         Ensures ``Settings.ESXI.TRUNK_PORT_GROUP`` exists (VLAN 4095 -
@@ -581,7 +660,7 @@ class ESXiConnection(GenericConnection):
         :return:
         :raises RuntimeError: Is thrown when no host-system or network-system was found on the ESXi host, or when creation fails.
         """
-        self._ensure_port_group(Settings.ESXI.TRUNK_PORT_GROUP, 4095)
+        self._ensure_port_group(Settings.ESXI.TRUNK_PORT_GROUP, 4095, strict=False)
         self.ensure_bridging_security_policy(Settings.ESXI.TRUNK_PORT_GROUP)
 
     def _get_port_groups(self) -> list[pyVmomi.vim.host.PortGroup]:
@@ -835,11 +914,10 @@ class ESXiConnection(GenericConnection):
     ) -> None:
         """
         Deploys the virtual machine on the ESXi host: resolves the node's
-        image to its exact OVA filename on the Template-API's NFS share,
-        then has the TopologyBuilderServices OVA-deploy API import it
-        directly from there to ESXi, with its network adapters wired to
-        the VLAN port groups initialize_virtual_switch already set up,
-        then powers it on.
+        image to the URL of its OVA, then has the ESXi host pull that OVA
+        itself (pull mode), with its network adapters wired to the VLAN
+        port groups initialize_virtual_switch already set up, then powers
+        it on.
         :param node: Node which represents the virtual machine to be deployed.
         :param datastore: Name of the datastore, to store the virtual machine on.
         :param incremental: if True, skips (re-)deploying a node whose VM
@@ -886,17 +964,12 @@ class ESXiConnection(GenericConnection):
                 raise ValueError(msg)
             network_mapping[interface.name] = interface.vlan.name
 
-        ova_filename = APIHandler.find_esxi_template_file(node.image)
+        from src.pull_importer import PullImporter
+
+        url = APIHandler.find_esxi_template_url(node.image)
         with _deploy_slots((self.ip, self.port)):
-            APIHandler.deploy_ova(
-                self.ip,
-                self.port,
-                node.name,
-                ova_filename,
-                datastore,
-                network_mapping,
-                self.username,
-                self.password,
+            PullImporter(self).import_ova(
+                url, node.name, datastore, list(network_mapping.values())
             )
 
         with _PYVMOMI_LOCK:

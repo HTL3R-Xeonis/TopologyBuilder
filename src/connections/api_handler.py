@@ -88,6 +88,32 @@ class APIHandler:
             raise
 
     @staticmethod
+    def put(
+        url: str, parsing_method: str = "json", timeout: int = 30, **kwargs
+    ) -> dict | None:
+        """
+        General method to make an API PUT request
+        :param url: url to the API endpoint
+        :param parsing_method: Method of parsing the response.
+        :param timeout: seconds to wait for a response before raising TimeoutError.
+        :param kwargs: Keyword arguments for the put request.
+        :return: The parsed response from the PUT request.
+        :raises HTTPError: Is thrown when something went wrong with the API call.
+        :raises TimeoutError: Is thrown when it takes too long to receive a response.
+        :raises RuntimeError: Is thrown when the response is not parseable to JSON.
+        """
+        try:
+            response = requests.put(url, timeout=timeout, **kwargs)
+            response.raise_for_status()
+            return APIHandler.parse_response(response, parsing_method)
+        except requests.Timeout:
+            logger.error(msg := f"PUT request timed out to: {url}")
+            raise TimeoutError(msg)
+        except requests.HTTPError as err:
+            logger.error(msg := f"PUT request failed: {url}. Exception: {err}")
+            raise
+
+    @staticmethod
     def delete(
         url: str, parsing_method: str = "json", timeout: int = 5, **kwargs
     ) -> dict | None:
@@ -153,123 +179,55 @@ class APIHandler:
         return {template["name"] for template in data["templates"]}
 
     @staticmethod
-    def find_esxi_template_file(image: str) -> str:
+    def _esxi_templates() -> list[dict]:
+        return APIHandler.get(f"{Settings.API.ESXI_TEMPLATE_SERVER_URL}/api/templates")[
+            "templates"
+        ]
+
+    @staticmethod
+    def _template_url(template: dict) -> str:
+        from src.pull_importer import ova_url
+
+        return ova_url(
+            Settings.API.OVA_BASE_URL,
+            template.get("_source_dir") or "",
+            template["file"],
+        )
+
+    @staticmethod
+    def find_esxi_template_url(image: str) -> str:
         """
-        Resolves a node's ``image`` to the exact OVA filename on the
-        ESXi Template-API's NFS share, for use with the OVA-deploy API's
-        ``ova_filename`` field (which does a plain filename lookup on its
-        own mounted template directory, not a fuzzy name match).
+        Resolves a node's ``image`` to the URL an ESXi host downloads its OVA from (``Settings.API.OVA_BASE_URL``,
+        the template's source directory and its exact file name).
         :param image: image name to search for, e.g. a node's image
-        :return: the matched template's exact OVA filename.
+        :return: the matched template's OVA URL.
         :raises ValueError: Is thrown when no template matches ``image``.
         :raises TimeoutError: Is thrown when it takes too long to receive a response.
         """
         from src.graph.environment import normalize_template_name
 
-        data = APIHandler.get(f"{Settings.API.ESXI_TEMPLATE_SERVER_URL}/api/templates")
         normalized = normalize_template_name(image)
-        for template in data["templates"]:
+        for template in APIHandler._esxi_templates():
             if normalize_template_name(template["name"]) == normalized:
-                return template["file"]
+                return APIHandler._template_url(template)
 
         logger.error(msg := f"No ESXi template found matching image '{image}'")
         raise ValueError(msg)
 
     @staticmethod
-    def check_ova_readable(ova_filename: str) -> None:
+    def find_esxi_template_url_by_file(file_name: str) -> str:
         """
-        Asks the OVA-deploy API whether an OVA can be read from its template share right now (GET /ova/check) - asked
-        before a deploy removes anything, because a file that can not be read only fails the deploy after the old
-        VMs are gone. An older service without that endpoint answers 404 for the route: that is not a problem with
-        the file and the check is skipped.
-        :param ova_filename: Exact OVA filename on the service's NFS mount.
-        :return:
-        :raises RuntimeError: Is thrown when the file does not exist or can not be read, or the service can not be reached.
-        """
-        try:
-            response = requests.get(
-                f"{Settings.API.OVA_DEPLOY_URL}/ova/check",
-                params={"ova_filename": ova_filename},
-                timeout=Settings.API.OVA_CHECK_TIMEOUT_SECONDS,
-            )
-        except requests.exceptions.RequestException as error:
-            logger.error(
-                msg
-                := f"OVA deploy service not reachable while checking '{ova_filename}': {error}"
-            )
-            raise RuntimeError(msg)
-        if response.status_code == 404:
-            logger.warning(
-                "OVA deploy service has no /ova/check endpoint, skipping the check"
-            )
-            return
-        if not response.ok:
-            try:
-                detail = response.json().get("detail", response.text)
-            except ValueError:
-                detail = response.text
-            logger.error(msg := f"OVA '{ova_filename}' failed the check: {detail}")
-            raise RuntimeError(msg)
-
-    @staticmethod
-    def deploy_ova(
-        ip: str,
-        port: int,
-        vm_name: str,
-        ova_filename: str,
-        datastore: str,
-        network: dict[str, str],
-        username: str | None = None,
-        password: str | None = None,
-    ) -> None:
-        """
-        Deploys an OVA straight from the TopologyBuilderServices API's own
-        NFS mount to ESXi, entirely server-side - no local download/upload
-        hop on this project's side.
-        :param ip: IP address of the ESXi host.
-        :param port: Port of the ESXi host.
-        :param vm_name: Name to give the imported VM.
-        :param ova_filename: Exact OVA filename on the service's NFS mount.
-        :param datastore: Name of the datastore to import onto.
-        :param network: Mapping of the OVA's interface names to ESXi port group names.
-        :param username: ESXi user name to log in with. Only sent together with a password.
-        :param password: ESXi password of the host this deploy belongs to (the active host profile's). When given, the
-            service logs in with it instead of looking one up by address, so a host added in the app works at once.
-            It is never logged: error texts that came back from the service have it masked.
-        :return:
-        :raises RuntimeError: Is thrown when the API call fails.
+        Resolves an exact OVA file name of the template catalog (its ``file`` field) to the URL of that OVA.
+        :param file_name: exact file name of a template.
+        :return: the OVA URL.
+        :raises ValueError: Is thrown when no template has that file name.
         :raises TimeoutError: Is thrown when it takes too long to receive a response.
         """
-        payload: dict[str, object] = {
-            "ip": ip,
-            "port": port,
-            "vm_name": vm_name,
-            "ova_filename": ova_filename,
-            "datastore": datastore,
-            "network": network,
-        }
-        if password:
-            payload["username"] = username or "root"
-            payload["password"] = password
-        try:
-            response = requests.post(
-                f"{Settings.API.OVA_DEPLOY_URL}/deploy/ova",
-                json=payload,
-                timeout=Settings.API.OVA_DEPLOY_TIMEOUT_SECONDS,
-            )
-            response.raise_for_status()
-        except requests.Timeout:
-            logger.error(msg := f"OVA deploy request timed out for VM '{vm_name}'")
-            raise TimeoutError(msg)
-        except requests.exceptions.RequestException as error:
-            detail = f"{error}. Response: {getattr(error.response, 'text', '')}"
-            if password:
-                # a validation error of the service can echo the request body back
-                detail = detail.replace(password, "***")
-            logger.error(
-                msg := f"OVA deploy request failed for VM '{vm_name}': {detail}"
-            )
-            raise RuntimeError(msg)
+        for template in APIHandler._esxi_templates():
+            if template["file"] == file_name:
+                return APIHandler._template_url(template)
+        logger.error(msg := f"No ESXi template with the file '{file_name}'")
+        raise ValueError(msg)
 
     @staticmethod
     def get_gns3_template_names() -> set[str]:

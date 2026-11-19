@@ -46,6 +46,17 @@ class VirtualLan:
         """
         return self._vlan_id
 
+    @id.setter
+    def id(self, value: int) -> None:
+        """
+        Replaces the id, used by ``Graph.adopt_vlan_ids`` to keep the id an existing port group already has.
+        :param value: new id, in the range 2 <= id <= 4093
+        :raises ValueError: Is thrown when the id is outside that range.
+        """
+        if not 2 <= value <= 4093:
+            raise ValueError(f"VLAN id {value} is outside the range 2 to 4093")
+        self._vlan_id = value
+
     @property
     def name(self) -> str:
         """

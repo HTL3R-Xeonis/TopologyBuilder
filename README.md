@@ -53,11 +53,12 @@ every invocation:
 no flag needed. CLI flags (`--esxi_password`/`--gns3_password`) always take
 precedence if both are given. The four service URLs can also be set here (or as plain
 environment variables): `ESXI_TEMPLATE_SERVER_URL`, `GNS3_TEMPLATE_SERVER_URL`,
-`TOPOLOGY_GENERATOR_URL`, `OVA_DEPLOY_URL` - order of precedence: the `settings.yml`
+`TOPOLOGY_GENERATOR_URL`, `OVA_BASE_URL` (the HTTP server the ESXi hosts download
+the template OVAs from, see below) - order of precedence: the `settings.yml`
 `api:` section, then these variables, then the built-in lab addresses (an empty value counts as
 unset, a trailing `/` is dropped). That is how a deployment that runs all services together points
 every host at one place without touching any settings file.
-`OVA_DEPLOY_PARALLEL` (or `api.ova_deploy_parallel`) sets how many OVA imports run at the same time onto one ESXi host:
+`OVA_DEPLOY_PARALLEL` (or `api.ova_deploy_parallel`) sets how many OVA pull imports run at the same time onto one ESXi host:
 default 3, at most 4, `1` imports one VM after the other.
 
 **`settings.yml`** - copy [`settings.example.yml`](settings.example.yml) to
@@ -106,6 +107,19 @@ anything this tool didn't create:
 
 Both cleanup steps (and the vSwitch reset itself) are skipped entirely in
 `--incremental` mode, which never removes anything.
+
+An incremental deploy keeps the VLAN id of every link that already exists:
+the ids are numbered by position in the topology file, so a link added in
+the middle would otherwise shift the ids of all later ones, while their port
+groups stay on ESXi. The deploy reads the ids of the existing port groups and
+reuses them; a new link gets the lowest id no port group on the vSwitch uses.
+If two port groups of the topology already share one id (left by a deploy
+from before this fix), the deploy stops before changing anything and names
+them; `verify` reports them too and `verify --fix` re-tags the conflicting
+port group. A new link on an ESXi VM that already has a Cloud node in GNS3
+adds a port for it to that node (existing ports and their links stay); if
+GNS3 refuses to change the node while it runs, the deploy stops with a
+message telling you to stop the Cloud node or do a full deploy.
 
 Both mechanisms above only ever run as part of a non-incremental `deploy`.
 For a live, one-node/one-link-at-a-time consumer of this library (like
@@ -190,11 +204,22 @@ needs no GNS3-side wiring at all - both VMs' vNICs are placed on the same
 VLAN-tagged port group.
 
 An ESXi-hosted node's vNICs are wired to its topology interfaces by name, one
-port group per edge touching it. The OVA is imported straight from the
-Template-API's NFS share to ESXi via the TopologyBuilderServices OVA-deploy
-API, which rebuilds the VM's NIC list entirely from this mapping - however
-many networks the OVA template itself declares, the resulting VM always ends
-up with exactly as many adapters as the topology defines.
+port group per edge touching it. The OVA is not uploaded through this
+machine: the ESXi host pulls it itself over HTTP (pull import, ESXi 6.7 or
+newer) from `<api.ova_base_url>/<source dir>/<file>`, where the source dir and
+the file name come from the ESXi Template-API. This project only reads the
+OVF descriptor out of the OVA (HTTP range requests), builds the import
+specification and replaces the VM's NIC list entirely from the topology -
+however many networks the OVA template itself declares, the resulting VM
+always ends up with exactly as many vmxnet3 adapters as the topology defines.
+The OVA server must serve the files with `Content-Length` and range support
+(`Accept-Ranges: bytes`) and the ESXi hosts must be able to reach it. Before
+the first pull on a host the `httpClient` firewall ruleset of that host is
+enabled through the host API with the login the tool already uses; if that
+fails the error names the manual command
+`esxcli network firewall ruleset set -r httpClient -e true`. A full deploy
+first checks that every needed OVA is readable at its URL, before anything is
+removed.
 
 ## Usage
 
@@ -211,7 +236,7 @@ whichever is available in your environment.
 | `topologybuilder deploy --address ... --esxi_username ... [--dry_run] [--incremental] [--only_on_gns3 \| --only_on_esxi]` | Validate, build, and deploy the topology to GNS3/ESXi. `--dry_run` prints what would happen without changing anything. `--incremental` reuses existing port groups/VMs/GNS3 project/nodes/links instead of recreating them - never removes anything dropped from the topology file. |
 | `topologybuilder generate-deploy "<prompt>" --address ... --esxi_username ... [--output PATH] [same deploy options as above]` | Generates a topology from a prompt exactly like `generate` (including its retry/validation behaviour), then immediately deploys it exactly like `deploy` - only if a valid topology was generated. |
 | `topologybuilder destroy --address ... --esxi_username ...` | Tear down a previously deployed topology: deletes its ESXi-hosted VMs/port groups and its GNS3 project entirely (not just its nodes). |
-| `topologybuilder verify --address ... --esxi_username ... [--fix]` | Structural health check against a deployed topology (GNS3 nodes started, ESXi VMs powered on, trunk NIC wiring, trunk port group security policy - promiscuous mode, MAC address changes and forged transmits must be accepted -, port groups present, and the "GNS3 VM VLAN subinterfaces" check: the `ip link` VLAN subinterfaces on the GNS3 VM vanish when that VM reboots, which silently cuts every link between a GNS3 node and an ESXi VM. Every `deploy` therefore also writes a managed boot-time service on the GNS3 VM (`/usr/local/sbin/topologybuilder-vlan-subinterfaces.sh` plus a systemd oneshot unit ordered before `gns3.service`), generated from the deployed topology and fully rewritten on each deploy, so it always matches the current VLANs and stale ones disappear; the "boot-time VLAN service" check compares it with the topology, and `--fix` (re)writes it, touching no running link; its SSH login uses `Settings.GNS3.USERNAME` / `GNS3_PASSWORD`). Not a ping test - this project never assigns IP addresses to nodes, so there's no address to ping; an ESXi VM's IP (if VMware Tools reports one) is shown for information only and never fails the check, since topology VLANs have no DHCP server. `--fix` applies a curated, low-risk set of automatic repairs first (power on a stopped ESXi VM, start a stopped GNS3 node, create a missing port group, set a deviating trunk port group's security policy to Accept) and re-checks afterward - never redeploys a genuinely missing VM/node, use `deploy --incremental` for that. **`--fix-vlan-subinterfaces`** additionally re-creates the missing VLAN subinterfaces on the GNS3 VM and restarts the Cloud nodes of the ESXi VMs so they bind to them again - **warning: on the project's lab this step twice took the ESXi host's network (and the GNS3 VM) down within seconds, the cause is not understood yet; only run it with someone ready to restart the blade**. |
+| `topologybuilder verify --address ... --esxi_username ... [--fix]` | Structural health check against a deployed topology (GNS3 nodes started, ESXi VMs powered on, trunk NIC wiring, trunk port group security policy - promiscuous mode, MAC address changes and forged transmits must be accepted -, port groups present, and the "GNS3 VM VLAN subinterfaces" check: the `ip link` VLAN subinterfaces on the GNS3 VM vanish when that VM reboots, which silently cuts every link between a GNS3 node and an ESXi VM. Every `deploy` therefore also writes a managed boot-time service on the GNS3 VM (`/usr/local/sbin/topologybuilder-vlan-subinterfaces.sh` plus a systemd oneshot unit ordered before `gns3.service`), generated from the deployed topology and fully rewritten on each deploy, so it always matches the current VLANs and stale ones disappear; the "boot-time VLAN service" check compares it with the topology, and `--fix` (re)writes it, touching no running link; its SSH login uses `Settings.GNS3.USERNAME` / `GNS3_PASSWORD`). Not a ping test - this project never assigns IP addresses to nodes, so there's no address to ping; an ESXi VM's IP (if VMware Tools reports one) is shown for information only and never fails the check, since topology VLANs have no DHCP server. `--fix` applies a curated, low-risk set of automatic repairs first (power on a stopped ESXi VM, start a stopped GNS3 node, create a missing port group, re-tag a port group whose VLAN id differs from the topology's (`verify` reports such a port group, and two port groups sharing one id), set a deviating trunk port group's security policy to Accept) and re-checks afterward - never redeploys a genuinely missing VM/node, use `deploy --incremental` for that. **`--fix-vlan-subinterfaces`** additionally re-creates the missing VLAN subinterfaces on the GNS3 VM and restarts the Cloud nodes of the ESXi VMs so they bind to them again - **warning: on the project's lab this step twice took the ESXi host's network (and the GNS3 VM) down within seconds, the cause is not understood yet; only run it with someone ready to restart the blade**. |
 | `topologybuilder orphans --address ... --esxi_username ... [--fix]` | Lists live GNS3 nodes and ESXi VMs that don't correspond to any node in the topology file - typically left behind when a live node/link delete (as used by TopologyOperator) partially fails, e.g. the GNS3 side deletes but the following ESXi VM delete times out, or vice versa, before the topology file itself is updated. `--fix` permanently deletes everything found instead of only listing it. Exits non-zero if any orphans remain, so it's safe to run unattended as a periodic health check. |
 | `topologybuilder doctor --address ... --esxi_username ...` | Read-only preflight check against real infrastructure: vSwitch/trunk port group existence (or whether a deploy would auto-create them), which datastore would be used, GNS3 VM reachability, and Template-API reachability. Never mutates anything. No topology file needed. |
 | `topologybuilder status --address ... --esxi_username ...` | Check connectivity to the ESXi host and GNS3 VM, and list GNS3 projects with each one's node/started counts. No topology file needed. |

@@ -24,6 +24,7 @@ from src.connections.gns3_connection import (
 )
 from src.connections.ssh_connection import SSHConnection
 from src.graph import Environment, Graph
+from src.pull_importer import check_ova_readable
 from src.settings import Settings
 from src.settings.settings import clamp_ova_deploy_parallel
 from src.vm_orchestrator.gns3_vm_interface_setup import GNS3VMInterfaceSetup
@@ -130,6 +131,16 @@ class VMOrchestrator:
         )
         if not incremental:
             self.check_templates_readable(graph)
+        else:
+            # The ids come from the position in the file, which an added link shifts: keep the ids of the port
+            # groups that exist, before anything (subinterfaces, port groups, Cloud ports) is built from them.
+            conflicts = self._adopt_esxi_vlan_ids(graph)
+            if conflicts:
+                raise RuntimeError(
+                    "Not deploying: "
+                    + self._describe_vlan_conflicts(conflicts)
+                    + " Run 'verify --fix' to re-tag them, or do a full deploy."
+                )
         self._configure_gns3_interfaces(graph, gns3_username, gns3_password)
         self.esxi_connection.ensure_virtual_switch_exists()
         if not incremental:
@@ -189,6 +200,36 @@ class VMOrchestrator:
             raise
 
         logger.info(f"Deployment complete: project '{Settings.GNS3.PROJECT_NAME}'")
+
+    def _adopt_esxi_vlan_ids(self, graph: Graph) -> list[tuple[str, int, int]]:
+        """
+        Gives the graph's VLANs the ids their port groups already have on the ESXi vSwitch (see
+        ``Graph.adopt_vlan_ids``), so a link added to an existing topology does not shift the ids of the others.
+        Nothing changes without a vSwitch or port groups yet (first deploy), with ``Settings.ONLY_ON_GNS3`` or
+        when ESXi cannot be read.
+        :param graph: graph whose VLAN ids are adjusted in place
+        :return: (port group name, id on ESXi, id assigned) of every port group that could not keep its id
+        """
+        if Settings.ONLY_ON_GNS3:
+            return []
+        try:
+            existing = {
+                pg["name"]: pg["vlan_id"]
+                for pg in self.esxi_connection.list_port_groups()
+            }
+        except ValueError:  # no vSwitch yet: nothing to keep stable
+            return []
+        if not existing:
+            return []
+        return graph.adopt_vlan_ids(existing)
+
+    @staticmethod
+    def _describe_vlan_conflicts(conflicts: list[tuple[str, int, int]]) -> str:
+        return "; ".join(
+            f"port group '{name}' has VLAN id {actual} on ESXi, which another port group of this topology "
+            f"already uses (it would need {wanted})"
+            for name, actual, wanted in conflicts
+        )
 
     def _deploy_esxi_nodes_in_parallel(
         self,
@@ -290,9 +331,9 @@ class VMOrchestrator:
             if node.env != Environment.ON_ESXI or node.image in checked:
                 continue
             checked.add(node.image)
-            ova_filename = APIHandler.find_esxi_template_file(node.image)
+            url = APIHandler.find_esxi_template_url(node.image)
             try:
-                APIHandler.check_ova_readable(ova_filename)
+                check_ova_readable(url)
             except RuntimeError as error:
                 msg = (
                     f"Not deploying: the template of '{node.name}' ({node.image}) "
@@ -597,9 +638,11 @@ class VMOrchestrator:
         :return: list of (passed, description) tuples, one per check
         """
         results: list[tuple[bool, str]] = []
+        self._adopt_esxi_vlan_ids(graph)
         port_groups = {
             pg["name"]: pg["vlan_id"] for pg in self.esxi_connection.list_port_groups()
         }
+        results.extend(self._verify_port_group_vlan_ids(graph, port_groups))
 
         gns3_nodes_by_name: dict[str, dict] = {}
         gns3_links: list[dict] = []
@@ -814,6 +857,45 @@ class VMOrchestrator:
         second = endpoint(neighbour_gns3, neighbour_if_name)
         return {first, second} if first and second else None
 
+    @staticmethod
+    def _verify_port_group_vlan_ids(
+        graph: Graph, port_groups: dict[str, int]
+    ) -> list[tuple[bool, str]]:
+        """
+        Compares the VLAN id of each existing port group of the graph with the id the graph expects, and looks for
+        two port groups of the graph that share one id (an unwanted Layer-2 connection). Only problems are reported
+        - a consistent topology adds no result line.
+        :param graph: the graph, its VLAN ids already adjusted to the ESXi ones (``_adopt_esxi_vlan_ids``)
+        :param port_groups: name -> VLAN id of the port groups on the vSwitch
+        :return: one failed (False, description) per problem
+        """
+        failures: list[tuple[bool, str]] = []
+        names_by_id: dict[int, list[str]] = {}
+        for vlan in graph.vlans():
+            actual = port_groups.get(vlan.name)
+            if actual is None:
+                continue
+            names_by_id.setdefault(actual, []).append(vlan.name)
+            if actual != vlan.id:
+                failures.append(
+                    (
+                        False,
+                        f"Port group '{vlan.name}': VLAN id {actual} on ESXi, but the topology expects {vlan.id} "
+                        f"- the link is on the wrong VLAN; verify --fix re-tags it",
+                    )
+                )
+        for actual, names in names_by_id.items():
+            if len(names) > 1:
+                quoted = ", ".join(f"'{name}'" for name in names)
+                failures.append(
+                    (
+                        False,
+                        f"Port groups {quoted} share VLAN id {actual} - an unwanted Layer-2 connection "
+                        f"between different links; verify --fix gives all but one a free id",
+                    )
+                )
+        return failures
+
     def find_orphans(self, graph: Graph, project_name: str) -> list[dict[str, str]]:
         """
         Detects live GNS3 nodes and ESXi VMs that don't correspond to any
@@ -942,6 +1024,7 @@ class VMOrchestrator:
         :return: human-readable description of each fix actually applied, in order
         """
         actions: list[str] = []
+        self._adopt_esxi_vlan_ids(graph)
 
         project = next(
             (
@@ -979,6 +1062,13 @@ class VMOrchestrator:
                     self.esxi_connection.power_on_vm(vm)
                     actions.append(f"Powered on ESXi VM '{name}'")
 
+        try:
+            port_group_ids = {
+                pg["name"]: pg["vlan_id"]
+                for pg in self.esxi_connection.list_port_groups()
+            }
+        except ValueError:  # no vSwitch yet: no port group to compare
+            port_group_ids = {}
         seen_vlan_ids: set[int] = set()
         for node in graph.nodes.values():
             for interface in node.interfaces.values():
@@ -990,6 +1080,12 @@ class VMOrchestrator:
                     self.esxi_connection._add_port_group(vlan)
                     actions.append(
                         f"Created missing port group '{vlan.name}' (VLAN {vlan.id})"
+                    )
+                elif port_group_ids.get(vlan.name, vlan.id) != vlan.id:
+                    self.esxi_connection._add_port_group(vlan, fix_vlan=True)
+                    actions.append(
+                        f"Re-tagged port group '{vlan.name}' from VLAN {port_group_ids[vlan.name]} to VLAN {vlan.id}"
+                        " (run a deploy --incremental to move the Cloud node's port and the GNS3 VM's subinterface along)"
                     )
 
         actions.extend(self._repair_trunk_security_policy())
@@ -1073,6 +1169,7 @@ class VMOrchestrator:
         """
         if Settings.ONLY_ON_ESXI:
             return True, "GNS3 VM VLAN subinterfaces: not needed (ESXi only)"
+        self._adopt_esxi_vlan_ids(graph)
         try:
             if not GNS3VMInterfaceSetup.expected_subinterfaces(graph):
                 return True, "GNS3 VM VLAN subinterfaces: none needed by this topology"
@@ -1102,6 +1199,7 @@ class VMOrchestrator:
         """
         if Settings.ONLY_ON_ESXI:
             return True, "GNS3 VM boot-time VLAN service: not needed (ESXi only)"
+        self._adopt_esxi_vlan_ids(graph)
         try:
             setup = self._open_gns3_interface_setup(gns3_username, gns3_password)
             problem = setup.persistent_config_problem(graph)
@@ -1130,6 +1228,7 @@ class VMOrchestrator:
         """
         if Settings.ONLY_ON_ESXI:
             return []
+        self._adopt_esxi_vlan_ids(graph)
         setup = self._open_gns3_interface_setup(gns3_username, gns3_password)
         if not setup.install_persistent_config(graph):
             return []
@@ -1150,6 +1249,7 @@ class VMOrchestrator:
         """
         if Settings.ONLY_ON_ESXI:
             return []
+        self._adopt_esxi_vlan_ids(graph)
         if not GNS3VMInterfaceSetup.expected_subinterfaces(graph):
             return []
         setup = self._open_gns3_interface_setup(gns3_username, gns3_password)

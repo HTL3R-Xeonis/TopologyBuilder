@@ -10,7 +10,6 @@ import allure
 import pytest
 
 from src.gns3_vm_deploy import deploy_fresh_gns3_vm
-from src.settings import Settings
 
 
 @allure.title("deploy_fresh_gns3_vm importiert direkt, wenn keine VM existiert")
@@ -430,11 +429,12 @@ def gns3_vm_deploy_010() -> None:
 
 
 @allure.title(
-    "deploy_fresh_gns3_vm importiert über den OVA-Deploy-Dienst, wenn ova_filename gesetzt ist"
+    "deploy_fresh_gns3_vm lässt den ESXi-Host die OVA ziehen, wenn ova_filename gesetzt ist"
 )
 @allure.description(
-    "Mit ova_filename wird die OVA nicht lokal gelesen, sondern vom Deploy-Dienst "
-    "serverseitig importiert; die Reihenfolge Management- dann Trunk-NIC bleibt erhalten"
+    "Mit ova_filename wird die OVA nicht lokal gelesen, sondern vom ESXi-Host per Pull "
+    "von der OVA-URL des Templates geholt; die Reihenfolge Management- dann Trunk-NIC "
+    "bleibt erhalten"
 )
 @allure.tag("positiv-test", "gns3_vm_deploy")
 @allure.feature("gns3_vm_deploy")
@@ -447,7 +447,11 @@ def gns3_vm_deploy_900() -> None:
 
     with (
         patch("src.gns3_vm_deploy.OVAImporter") as importer_cls,
-        patch("src.gns3_vm_deploy.APIHandler.deploy_ova") as deploy_ova,
+        patch(
+            "src.gns3_vm_deploy.APIHandler.find_esxi_template_url_by_file",
+            return_value="http://ova.example/gns3/GNS3_VM_26.04_ABC.ova",
+        ) as find_url,
+        patch("src.gns3_vm_deploy.PullImporter") as pull_cls,
     ):
         ip = deploy_fresh_gns3_vm(
             esxi_connection,
@@ -461,21 +465,22 @@ def gns3_vm_deploy_900() -> None:
 
     assert ip == "10.20.20.233"
     importer_cls.return_value.import_ova.assert_not_called()
-    args = deploy_ova.call_args.args
-    assert args[2:5] == ("GNS-VM-1", "GNS3_VM_26.04_ABC.ova", "datastore1")
-    assert list(args[5].items()) == [
-        ("management", "PG-MGMT"),
-        ("trunk", "PG_GNS3_TRUNK"),
-    ]
-    assert args[6:8] == (Settings.ESXI.USERNAME, Settings.ESXI.PASSWORD)
+    find_url.assert_called_once_with("GNS3_VM_26.04_ABC.ova")
+    pull_cls.assert_called_once_with(esxi_connection)
+    pull_cls.return_value.import_ova.assert_called_once_with(
+        "http://ova.example/gns3/GNS3_VM_26.04_ABC.ova",
+        "GNS-VM-1",
+        "datastore1",
+        ["PG-MGMT", "PG_GNS3_TRUNK"],
+    )
     esxi_connection.power_on_vm.assert_called_once_with(new_vm)
 
 
 @allure.title(
-    "deploy_fresh_gns3_vm meldet, wenn der Deploy-Dienst Erfolg meldet, die VM aber fehlt"
+    "deploy_fresh_gns3_vm meldet, wenn der Pull-Import Erfolg meldet, die VM aber fehlt"
 )
 @allure.description(
-    "Eine nach dem Dienstaufruf nicht auffindbare VM ist ein Fehler, kein stilles Weitermachen"
+    "Eine nach dem Import nicht auffindbare VM ist ein Fehler, kein stilles Weitermachen"
 )
 @allure.tag("negativ-test", "gns3_vm_deploy")
 @allure.feature("gns3_vm_deploy")
@@ -485,7 +490,11 @@ def gns3_vm_deploy_901() -> None:
     esxi_connection.get_vm.return_value = None
 
     with (
-        patch("src.gns3_vm_deploy.APIHandler.deploy_ova"),
+        patch(
+            "src.gns3_vm_deploy.APIHandler.find_esxi_template_url_by_file",
+            return_value="http://ova.example/x.ova",
+        ),
+        patch("src.gns3_vm_deploy.PullImporter"),
         pytest.raises(RuntimeError, match="no VM 'GNS-VM-1'"),
     ):
         deploy_fresh_gns3_vm(

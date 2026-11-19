@@ -128,6 +128,62 @@ class Graph:
 
                 interface.vlan = VirtualLan(node.name, if_name)
 
+    def vlans(self) -> list[VirtualLan]:
+        """
+        The distinct VirtualLan objects of the graph in the order ``_assign_vlans`` created them (a direct
+        ESXi-to-ESXi link shares one object between its two interfaces and is listed once).
+        :return: the VLANs of all ESXi interfaces
+        """
+        found: list[VirtualLan] = []
+        for node in self.nodes.values():
+            for interface in node.interfaces.values():
+                vlan = interface.vlan
+                if vlan is not None and all(vlan is not other for other in found):
+                    found.append(vlan)
+        return found
+
+    def adopt_vlan_ids(self, existing: dict[str, int]) -> list[tuple[str, int, int]]:
+        """
+        Makes the VLAN ids of an incremental deploy stable. ``_assign_vlans`` numbers the VLANs by their position
+        in the file, so a link added in the middle of the file would shift every later id, while the port groups
+        already on ESXi keep theirs (and a new one could end up sharing an id with an old one). This gives every
+        VLAN whose port group already exists that port group's id, and every new VLAN the lowest id that no port
+        group on the vSwitch uses. Without any existing port group nothing changes (the positional ids stay).
+        A port group whose id another VLAN of this graph already took keeps its place on ESXi but gets a new id
+        here; that is reported so the caller can refuse to deploy or repair it.
+        :param existing: name -> VLAN id of the port groups on the vSwitch (the trunk and others may be included)
+        :return: (port group name, id on ESXi, id assigned here) of every VLAN that could not keep its ESXi id
+        :raises ValueError: Is thrown when no free id is left.
+        """
+        if not existing:
+            return []
+        vlans = self.vlans()
+        graph_names = {vlan.name for vlan in vlans}
+        claimed: set[int] = set()
+        unresolved: list[VirtualLan] = []
+        conflicts: list[tuple[str, int, int]] = []
+        for vlan in vlans:
+            actual = existing.get(vlan.name)
+            if actual is None or actual in claimed or not 2 <= actual <= 4093:
+                unresolved.append(vlan)
+                continue
+            vlan.id = actual
+            claimed.add(actual)
+        foreign = {
+            vlan_id for name, vlan_id in existing.items() if name not in graph_names
+        }
+        next_id = 2
+        for vlan in unresolved:
+            while next_id in claimed or next_id in foreign:
+                next_id += 1
+            if next_id > 4093:
+                raise ValueError("VLANs on ESXi exceed the limit of 4093.")
+            if vlan.name in existing:
+                conflicts.append((vlan.name, existing[vlan.name], next_id))
+            vlan.id = next_id
+            claimed.add(next_id)
+        return conflicts
+
     def visualize(self) -> None:
         """
         Visualizes the graph in the terminal as a force-directed ASCII

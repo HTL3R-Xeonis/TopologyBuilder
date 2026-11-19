@@ -8,17 +8,23 @@ from unittest.mock import MagicMock, patch
 
 import allure
 import pytest
-import requests
 
 from src.connections.api_handler import APIHandler
 from src.settings import Settings
 
 
-@allure.title("find_esxi_template_file findet die OVA-Datei für ein passendes Template")
+def _tpl(name: str, file: str, source_dir: str | None = "ova") -> dict:
+    template = {"name": name, "file": file}
+    if source_dir is not None:
+        template["_source_dir"] = source_dir
+    return template
+
+
+@allure.title("find_esxi_template_url findet die OVA-URL für ein passendes Template")
 @allure.description(
-    "Überprüft, dass find_esxi_template_file das Template-Verzeichnis abruft, "
-    "per normalisiertem Namen matcht und das 'file'-Feld des passenden "
-    "Templates zurückgibt"
+    "Überprüft, dass find_esxi_template_url das Template-Verzeichnis abruft, "
+    "per normalisiertem Namen matcht und aus OVA_BASE_URL, _source_dir und "
+    "file die URL baut, die der ESXi-Host selbst herunterlädt"
 )
 @allure.tag("positiv-test", "api-handler")
 @allure.feature("api_handler")
@@ -26,114 +32,99 @@ from src.settings import Settings
 def api_handler_000() -> None:
     data = {
         "templates": [
-            {"name": "Ubuntu-Server", "file": "ubuntu-server.ova"},
-            {"name": "pfSense", "file": "pfsense.ova"},
+            _tpl("Ubuntu-Server", "ubuntu-server.ova", "linux/ubuntu"),
+            _tpl("pfSense", "pfsense.ova"),
         ]
     }
 
-    with patch.object(APIHandler, "get", return_value=data) as mock_get:
-        result = APIHandler.find_esxi_template_file("ubuntu-server")
+    with (
+        patch.object(Settings.API, "OVA_BASE_URL", "http://ova.example:80"),
+        patch.object(APIHandler, "get", return_value=data) as mock_get,
+    ):
+        result = APIHandler.find_esxi_template_url("ubuntu-server")
 
     mock_get.assert_called_once_with(
         f"{Settings.API.ESXI_TEMPLATE_SERVER_URL}/api/templates"
     )
-    assert result == "ubuntu-server.ova"
+    assert result == "http://ova.example:80/linux/ubuntu/ubuntu-server.ova"
 
 
-@allure.title("find_esxi_template_file wirft ValueError, wenn kein Template passt")
+@allure.title("find_esxi_template_url wirft ValueError, wenn kein Template passt")
 @allure.description(
-    "Überprüft, dass find_esxi_template_file einen ValueError wirft, wenn "
+    "Überprüft, dass find_esxi_template_url einen ValueError wirft, wenn "
     "kein Template-Name mit dem gesuchten Image übereinstimmt"
 )
 @allure.tag("negativ-test", "api-handler")
 @allure.feature("api_handler")
 @allure.severity(allure.severity_level.CRITICAL)
 def api_handler_001() -> None:
-    data = {"templates": [{"name": "pfSense", "file": "pfsense.ova"}]}
+    data = {"templates": [_tpl("pfSense", "pfsense.ova")]}
 
     with patch.object(APIHandler, "get", return_value=data), pytest.raises(ValueError):
-        APIHandler.find_esxi_template_file("Ubuntu-Server")
+        APIHandler.find_esxi_template_url("Ubuntu-Server")
 
 
-@allure.title("deploy_ova postet die Deploy-Daten an die OVA-Deploy-API")
+@allure.title("find_esxi_template_url kommt ohne _source_dir aus")
 @allure.description(
-    "Überprüft, dass deploy_ova einen POST an {OVA_DEPLOY_URL}/deploy/ova "
-    "mit ip, port, vm_name, ova_filename, datastore und network im "
-    "JSON-Body schickt"
+    "Fehlt _source_dir oder ist es leer, liegt die OVA direkt unter OVA_BASE_URL"
+)
+@allure.tag("positiv-test", "api-handler")
+@allure.feature("api_handler")
+@allure.severity(allure.severity_level.NORMAL)
+def api_handler_002() -> None:
+    for source_dir in (None, ""):
+        data = {"templates": [_tpl("pfSense", "pfsense.ova", source_dir)]}
+        with (
+            patch.object(Settings.API, "OVA_BASE_URL", "http://ova.example:80"),
+            patch.object(APIHandler, "get", return_value=data),
+        ):
+            assert (
+                APIHandler.find_esxi_template_url("pfsense")
+                == "http://ova.example:80/pfsense.ova"
+            )
+
+
+@allure.title("find_esxi_template_url kodiert Leerzeichen und Sonderzeichen")
+@allure.description(
+    "Dateiname und Verzeichnis werden pro Pfadteil prozentkodiert, die '/' des "
+    "Verzeichnisses bleiben Trenner"
+)
+@allure.tag("positiv-test", "api-handler")
+@allure.feature("api_handler")
+@allure.severity(allure.severity_level.NORMAL)
+def api_handler_003() -> None:
+    data = {"templates": [_tpl("Kali", "Kali Linux 2024.ova", "my dir/sub")]}
+    with (
+        patch.object(Settings.API, "OVA_BASE_URL", "http://ova.example:80"),
+        patch.object(APIHandler, "get", return_value=data),
+    ):
+        url = APIHandler.find_esxi_template_url("kali")
+
+    assert url == "http://ova.example:80/my%20dir/sub/Kali%20Linux%202024.ova"
+
+
+@allure.title("find_esxi_template_url_by_file löst den exakten Dateinamen auf")
+@allure.description(
+    "Überprüft, dass der exakte file-Wert eines Templates (nicht der Name) in die "
+    "OVA-URL aufgelöst wird"
 )
 @allure.tag("positiv-test", "api-handler")
 @allure.feature("api_handler")
 @allure.severity(allure.severity_level.CRITICAL)
-def api_handler_002() -> None:
-    response = MagicMock()
-    response.raise_for_status = MagicMock()
-
-    with patch(
-        "src.connections.api_handler.requests.post", return_value=response
-    ) as mock_post:
-        APIHandler.deploy_ova(
-            "10.20.20.202",
-            443,
-            "PC1",
-            "ubuntu-server.ova",
-            "datastore1",
-            {"gi0/0": "PG-VLAN-10"},
-        )
-
-    mock_post.assert_called_once_with(
-        f"{Settings.API.OVA_DEPLOY_URL}/deploy/ova",
-        json={
-            "ip": "10.20.20.202",
-            "port": 443,
-            "vm_name": "PC1",
-            "ova_filename": "ubuntu-server.ova",
-            "datastore": "datastore1",
-            "network": {"gi0/0": "PG-VLAN-10"},
-        },
-        timeout=Settings.API.OVA_DEPLOY_TIMEOUT_SECONDS,
-    )
-
-
-@allure.title("deploy_ova wirft TimeoutError bei einem Timeout")
-@allure.description(
-    "Überprüft, dass deploy_ova einen TimeoutError wirft, wenn der Request "
-    "in ein requests.Timeout läuft"
-)
-@allure.tag("negativ-test", "api-handler")
-@allure.feature("api_handler")
-@allure.severity(allure.severity_level.CRITICAL)
-def api_handler_003() -> None:
-    with (
-        patch(
-            "src.connections.api_handler.requests.post",
-            side_effect=requests.Timeout(),
-        ),
-        pytest.raises(TimeoutError),
-    ):
-        APIHandler.deploy_ova(
-            "10.20.20.202", 443, "PC1", "ubuntu-server.ova", "datastore1", {}
-        )
-
-
-@allure.title("deploy_ova wirft RuntimeError bei einem HTTP-Fehler")
-@allure.description(
-    "Überprüft, dass deploy_ova einen RuntimeError wirft, wenn der Request "
-    "mit einem anderen requests.RequestException fehlschlägt (z.B. ein "
-    "HTTPError durch raise_for_status)"
-)
-@allure.tag("negativ-test", "api-handler")
-@allure.feature("api_handler")
-@allure.severity(allure.severity_level.CRITICAL)
 def api_handler_004() -> None:
-    response = MagicMock()
-    response.raise_for_status.side_effect = requests.HTTPError("500 server error")
-
+    data = {
+        "templates": [
+            _tpl("GNS3 VM", "gns3vm.ova", "gns3"),
+            _tpl("pfSense", "pfsense.ova"),
+        ]
+    }
     with (
-        patch("src.connections.api_handler.requests.post", return_value=response),
-        pytest.raises(RuntimeError),
+        patch.object(Settings.API, "OVA_BASE_URL", "http://ova.example:80"),
+        patch.object(APIHandler, "get", return_value=data),
     ):
-        APIHandler.deploy_ova(
-            "10.20.20.202", 443, "PC1", "ubuntu-server.ova", "datastore1", {}
+        assert (
+            APIHandler.find_esxi_template_url_by_file("gns3vm.ova")
+            == "http://ova.example:80/gns3/gns3vm.ova"
         )
 
 
@@ -244,148 +235,39 @@ def api_handler_009() -> None:
     assert [call.kwargs["timeout"] for call in mock_get.call_args_list] == [5, 60]
 
 
-@allure.title(
-    "check_ova_readable fragt die OVA-Deploy-API und akzeptiert eine lesbare OVA"
-)
+@allure.title("find_esxi_template_url_by_file wirft ValueError bei unbekannter Datei")
 @allure.description(
-    "Überprüft, dass check_ova_readable einen GET an {OVA_DEPLOY_URL}/ova/check "
-    "mit dem Dateinamen schickt und bei 200 nichts wirft"
+    "Es wird nicht unscharf nach Namen gesucht: nur ein exakt gleiches file-Feld trifft"
 )
-@allure.tag("positiv-test", "api-handler")
+@allure.tag("negativ-test", "api-handler")
 @allure.feature("api_handler")
 @allure.severity(allure.severity_level.CRITICAL)
 def api_handler_010() -> None:
-    response = MagicMock(status_code=200, ok=True)
+    data = {"templates": [_tpl("pfSense", "pfsense.ova")]}
 
-    with patch(
-        "src.connections.api_handler.requests.get", return_value=response
-    ) as mock_get:
-        APIHandler.check_ova_readable("ubuntu-server.ova")
-
-    mock_get.assert_called_once_with(
-        f"{Settings.API.OVA_DEPLOY_URL}/ova/check",
-        params={"ova_filename": "ubuntu-server.ova"},
-        timeout=Settings.API.OVA_CHECK_TIMEOUT_SECONDS,
-    )
+    with patch.object(APIHandler, "get", return_value=data):
+        with pytest.raises(ValueError, match="pfsense"):
+            APIHandler.find_esxi_template_url_by_file("pfsense")
+        with pytest.raises(ValueError, match="other.ova"):
+            APIHandler.find_esxi_template_url_by_file("other.ova")
 
 
-@allure.title(
-    "check_ova_readable meldet eine nicht lesbare OVA mit dem Grund des Dienstes"
-)
+@allure.title("find_esxi_template_url reicht Fehler der Template-API durch")
 @allure.description(
-    "Überprüft, dass check_ova_readable bei einem 503 einen RuntimeError mit dem "
-    "'detail' der Antwort wirft"
+    "Ein Timeout der Template-API wird nicht verschluckt, damit der Deploy vor dem "
+    "Löschen abbricht"
 )
 @allure.tag("negativ-test", "api-handler")
 @allure.feature("api_handler")
-@allure.severity(allure.severity_level.CRITICAL)
+@allure.severity(allure.severity_level.NORMAL)
 def api_handler_011() -> None:
-    response = MagicMock(status_code=503, ok=False)
-    response.json.return_value = {"detail": "OVA 'x.ova' can not be read: ENXIO"}
-
     with (
-        patch("src.connections.api_handler.requests.get", return_value=response),
-        pytest.raises(RuntimeError, match="can not be read: ENXIO"),
+        patch.object(APIHandler, "get", side_effect=TimeoutError("slow")),
+        pytest.raises(TimeoutError),
     ):
-        APIHandler.check_ova_readable("x.ova")
-
-
-@allure.title(
-    "check_ova_readable überspringt den Check bei einem Dienst ohne /ova/check"
-)
-@allure.description(
-    "Überprüft, dass ein 404 (älterer Dienst ohne diese Route) keinen Fehler auslöst"
-)
-@allure.tag("positiv-test", "api-handler")
-@allure.feature("api_handler")
-@allure.severity(allure.severity_level.NORMAL)
-def api_handler_012() -> None:
-    response = MagicMock(status_code=404, ok=False)
-
-    with patch("src.connections.api_handler.requests.get", return_value=response):
-        APIHandler.check_ova_readable("x.ova")
-
-
-@allure.title(
-    "check_ova_readable wirft RuntimeError, wenn der Dienst nicht erreichbar ist"
-)
-@allure.description(
-    "Überprüft, dass ein Verbindungsfehler als RuntimeError gemeldet wird - vor dem "
-    "Deploy, solange noch nichts gelöscht wurde"
-)
-@allure.tag("negativ-test", "api-handler")
-@allure.feature("api_handler")
-@allure.severity(allure.severity_level.NORMAL)
-def api_handler_013() -> None:
+        APIHandler.find_esxi_template_url("x")
     with (
-        patch(
-            "src.connections.api_handler.requests.get",
-            side_effect=requests.exceptions.ConnectionError("down"),
-        ),
-        pytest.raises(RuntimeError, match="not reachable"),
+        patch.object(APIHandler, "get", side_effect=TimeoutError("slow")),
+        pytest.raises(TimeoutError),
     ):
-        APIHandler.check_ova_readable("x.ova")
-
-
-@allure.title(
-    "deploy_ova schickt die Zugangsdaten des Hosts mit, wenn ein Passwort da ist"
-)
-@allure.description(
-    "Überprüft, dass username und password im JSON-Body landen, damit der Dienst sich "
-    "mit dem Passwort des aktiven Host-Profils anmeldet"
-)
-@allure.tag("positiv-test", "api-handler")
-@allure.feature("api_handler")
-@allure.severity(allure.severity_level.CRITICAL)
-def api_handler_credentials_001() -> None:
-    response = MagicMock()
-    with patch(
-        "src.connections.api_handler.requests.post", return_value=response
-    ) as mock_post:
-        APIHandler.deploy_ova(
-            "10.20.20.205", 443, "PC1", "a.ova", "ds", {}, "admin", "s3cret"
-        )
-
-    body = mock_post.call_args.kwargs["json"]
-    assert body["username"] == "admin"
-    assert body["password"] == "s3cret"
-
-
-@allure.title("deploy_ova schickt ohne Passwort keine Zugangsdaten")
-@allure.tag("positiv-test", "api-handler")
-@allure.feature("api_handler")
-@allure.severity(allure.severity_level.NORMAL)
-def api_handler_credentials_002() -> None:
-    with patch(
-        "src.connections.api_handler.requests.post", return_value=MagicMock()
-    ) as mock_post:
-        APIHandler.deploy_ova("10.20.20.205", 443, "PC1", "a.ova", "ds", {})
-
-    body = mock_post.call_args.kwargs["json"]
-    assert "username" not in body and "password" not in body
-
-
-@allure.title("deploy_ova maskiert das Passwort in Fehlertexten des Dienstes")
-@allure.description(
-    "Ein Validierungsfehler des Dienstes kann den Request-Body zurückspiegeln; das Passwort "
-    "darf dann weder in der RuntimeError-Meldung noch im Log stehen"
-)
-@allure.tag("negativ-test", "api-handler")
-@allure.feature("api_handler")
-@allure.severity(allure.severity_level.CRITICAL)
-def api_handler_credentials_003() -> None:
-    error = requests.HTTPError("422 error")
-    error.response = MagicMock(text='{"detail":[{"input":{"password":"s3cret"}}]}')
-    response = MagicMock()
-    response.raise_for_status.side_effect = error
-
-    with (
-        patch("src.connections.api_handler.requests.post", return_value=response),
-        pytest.raises(RuntimeError) as raised,
-    ):
-        APIHandler.deploy_ova(
-            "10.20.20.205", 443, "PC1", "a.ova", "ds", {}, "root", "s3cret"
-        )
-
-    assert "s3cret" not in str(raised.value)
-    assert "***" in str(raised.value)
+        APIHandler.find_esxi_template_url_by_file("x.ova")

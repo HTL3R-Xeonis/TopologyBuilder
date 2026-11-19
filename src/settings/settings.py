@@ -139,8 +139,12 @@ class Settings:
             Settings.API.GNS3_TEMPLATE_SERVER_URL = api["gns3_template_server_url"]
         if "topology_generator_url" in api:
             Settings.API.TOPOLOGY_GENERATOR_URL = api["topology_generator_url"]
+        if "ova_base_url" in api:
+            Settings.API.OVA_BASE_URL = str(api["ova_base_url"]).rstrip("/")
         if "ova_deploy_url" in api:
-            Settings.API.OVA_DEPLOY_URL = api["ova_deploy_url"]
+            logger.warning(
+                "api.ova_deploy_url is no longer used: ESXi hosts pull OVAs from api.ova_base_url"
+            )
         if "ova_deploy_parallel" in api:
             Settings.API.OVA_DEPLOY_PARALLEL = clamp_ova_deploy_parallel(
                 api["ova_deploy_parallel"]
@@ -338,16 +342,12 @@ class Settings:
         """How long to wait for a response from the Topology Generator
         API. Generation can legitimately take a while on constrained
         hardware, across multiple Ollama servers/retries server-side."""
-        OVA_DEPLOY_URL = _env_url("OVA_DEPLOY_URL", "http://10.20.20.172:8003")
-        """URL to the TopologyBuilderServices OVA-deploy API, used by
-        ESXiConnection.deploy_virtual_machine to import an OVA straight
-        from its own NFS mount to ESXi, with network wiring driven
-        entirely by the request's own `network` mapping - no local
-        download/upload hop on this project's side at all."""
+        OVA_BASE_URL = _env_url("OVA_BASE_URL", "http://10.20.20.181:80")
+        """Base URL of the HTTP server that serves the template OVA files (with range support). A template is fetched from
+        ``<OVA_BASE_URL>/<_source_dir>/<file>`` (both fields come from the ESXi template API). The ESXi host
+        downloads the OVA from there itself (pull mode), so the host must be able to reach this server."""
         OVA_DEPLOY_TIMEOUT_SECONDS: int = 600
-        """How long to wait for a response from the OVA-deploy API. This
-        is a synchronous call that blocks for the entire server-side
-        transfer, with no progress polling exposed over HTTP."""
+        """How long one OVA pull of an ESXi host may take, from start to the finished import."""
         OVA_DEPLOY_PARALLEL: int = clamp_ova_deploy_parallel(
             os.getenv("OVA_DEPLOY_PARALLEL", str(OVA_DEPLOY_PARALLEL_DEFAULT))
         )

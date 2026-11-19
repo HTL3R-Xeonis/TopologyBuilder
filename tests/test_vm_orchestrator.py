@@ -1654,11 +1654,11 @@ def vm_orchestrator_048() -> None:
 
     with (
         patch(
-            "src.vm_orchestrator.vm_orchestrator.APIHandler.find_esxi_template_file",
-            return_value="ubuntu.ova",
+            "src.vm_orchestrator.vm_orchestrator.APIHandler.find_esxi_template_url",
+            return_value="http://ova.example/ubuntu.ova",
         ),
         patch(
-            "src.vm_orchestrator.vm_orchestrator.APIHandler.check_ova_readable",
+            "src.vm_orchestrator.vm_orchestrator.check_ova_readable",
             side_effect=RuntimeError("can not be read"),
         ),
         patch.object(orchestrator, "delete_unused_vms") as delete_unused_vms,
@@ -1698,17 +1698,15 @@ def vm_orchestrator_049() -> None:
 
     with (
         patch(
-            "src.vm_orchestrator.vm_orchestrator.APIHandler.find_esxi_template_file",
-            return_value="debian.ova",
-        ) as find_file,
-        patch(
-            "src.vm_orchestrator.vm_orchestrator.APIHandler.check_ova_readable"
-        ) as check,
+            "src.vm_orchestrator.vm_orchestrator.APIHandler.find_esxi_template_url",
+            return_value="http://ova.example/debian.ova",
+        ) as find_url,
+        patch("src.vm_orchestrator.vm_orchestrator.check_ova_readable") as check,
     ):
         VMOrchestrator.check_templates_readable(graph)
 
-    find_file.assert_called_once_with("debian")
-    check.assert_called_once_with("debian.ova")
+    find_url.assert_called_once_with("debian")
+    check.assert_called_once_with("http://ova.example/debian.ova")
 
 
 # --- parallele OVA-Importe (OVA_DEPLOY_PARALLEL) -----------------------------------------------------------------------
@@ -1926,3 +1924,220 @@ def vm_orchestrator_055() -> None:
         raise ValueError("sink is broken")
 
     _deploy(orchestrator, _graph_with(["A", "B"]), parallel=2, on_progress=broken)
+
+
+_STABLE_NODES = [
+    {"image": "Ubuntu-Server", "role": "VM", "names": ["PC1", "PC2", "PC3"]},
+    {"image": "VPCS", "role": "ROUTER", "names": ["R1"]},
+]
+# PC1:eth1 - R1:gi0/2 was added in the middle of the file after the first deploy
+_STABLE_EDGES = [
+    ["PC1", "eth0", "R1", "gi0/0"],
+    ["PC1", "eth1", "R1", "gi0/2"],
+    ["PC2", "eth0", "PC3", "eth0"],
+    ["PC3", "eth1", "R1", "gi0/1"],
+]
+
+
+def _port_groups(**ids: int) -> list[dict]:
+    return [
+        {"name": name, "vlan_id": vlan_id, "vswitch": "internal_network"}
+        for name, vlan_id in ids.items()
+    ]
+
+
+def _stable_graph() -> Graph:
+    Settings.API.LITERAL_API_VALUES = True
+    return Graph(_STABLE_NODES, _STABLE_EDGES)
+
+
+def _vlan_ids(graph: Graph) -> dict[str, int]:
+    return {vlan.name: vlan.id for vlan in graph.vlans()}
+
+
+@allure.title("incremental deploy_graph behält die VLAN-Ids bestehender Port-Groups")
+@allure.description(
+    "Design 10.3, H1: ein eingefügter Link verschob die positionsbasierten Ids. Die Ids werden vor allem "
+    "anderen (Subinterfaces, Port-Groups, Cloud-Ports) von den Port-Groups auf ESXi übernommen, der neue "
+    "Link bekommt eine freie Id."
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_056() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.list_port_groups.return_value = _port_groups(
+        PC1_eth0=2, PC2_eth0=3, PC3_eth1=4, PG_GNS3_TRUNK=4095
+    )
+    graph = _stable_graph()
+    seen: dict[str, int] = {}
+
+    Settings.API.OVA_DEPLOY_PARALLEL = 1
+    Settings.IS_DRY_RUN = False
+    Settings.ONLY_ON_GNS3 = False
+    Settings.ESXI.DATASTORE = "datastore1"
+    with (
+        patch("src.vm_orchestrator.vm_orchestrator.SSHConnection"),
+        patch("src.vm_orchestrator.vm_orchestrator.GNS3VMInterfaceSetup") as setup_cls,
+        patch("src.vm_orchestrator.vm_orchestrator.GNS3Connection"),
+    ):
+        setup_cls.return_value.initialize_commands.side_effect = lambda g: seen.update(
+            _vlan_ids(g)
+        )
+        orchestrator.deploy_graph(graph, "gns3", "gns3pw", incremental=True)
+
+    expected = {"PC1_eth0": 2, "PC2_eth0": 3, "PC3_eth1": 4, "PC1_eth1": 5}
+    assert seen == expected  # already when the GNS3 VM's subinterfaces are built
+    assert _vlan_ids(graph) == expected
+
+
+@allure.title("deploy_graph liest im Vollbetrieb keine bestehenden VLAN-Ids")
+@allure.description(
+    "Ein nicht-incremental Deploy räumt den vSwitch ab und nummeriert wie bisher nach Position; die "
+    "Port-Groups werden dafür nicht gelesen"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_057() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.list_port_groups.return_value = _port_groups(PC1_eth0=7)
+    graph = _stable_graph()
+    positional = _vlan_ids(graph)
+
+    Settings.API.OVA_DEPLOY_PARALLEL = 1
+    Settings.IS_DRY_RUN = False
+    Settings.ONLY_ON_GNS3 = False
+    Settings.ESXI.DATASTORE = "datastore1"
+    with (
+        patch("src.vm_orchestrator.vm_orchestrator.SSHConnection"),
+        patch("src.vm_orchestrator.vm_orchestrator.GNS3VMInterfaceSetup"),
+        patch("src.vm_orchestrator.vm_orchestrator.GNS3Connection"),
+        patch.object(VMOrchestrator, "check_templates_readable"),
+        patch.object(VMOrchestrator, "delete_unused_vms"),
+        patch.object(VMOrchestrator, "delete_stale_esxi_resources"),
+    ):
+        orchestrator.deploy_graph(graph, "gns3", "gns3pw")
+
+    esxi_connection.list_port_groups.assert_not_called()
+    assert _vlan_ids(graph) == positional
+    esxi_connection.reset_virtual_switch.assert_called_once()
+
+
+@allure.title(
+    "incremental deploy_graph bricht bei doppelter VLAN-Id vor jeder Änderung ab"
+)
+@allure.description(
+    "Zwei Port-Groups der Topologie teilen sich eine Id (Rest eines verschobenen Deploys): der Deploy "
+    "nennt beide und verweist auf verify --fix, bevor Subinterfaces oder Port-Groups angefasst werden"
+)
+@allure.tag("negativ-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_058() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.list_port_groups.return_value = _port_groups(
+        PC1_eth0=2, PC1_eth1=3, PC2_eth0=3, PC3_eth1=4
+    )
+    graph = _stable_graph()
+
+    with (
+        patch("src.vm_orchestrator.vm_orchestrator.SSHConnection"),
+        patch("src.vm_orchestrator.vm_orchestrator.GNS3VMInterfaceSetup") as setup_cls,
+        patch("src.vm_orchestrator.vm_orchestrator.GNS3Connection") as gns3_cls,
+        pytest.raises(RuntimeError, match=r"PC2_eth0.*VLAN id 3.*verify --fix"),
+    ):
+        orchestrator.deploy_graph(graph, "gns3", "gns3pw", incremental=True)
+
+    setup_cls.assert_not_called()
+    gns3_cls.assert_not_called()
+    esxi_connection.initialize_virtual_switch.assert_not_called()
+
+
+@allure.title("verify_graph meldet abweichende und doppelte VLAN-Ids von Port-Groups")
+@allure.description(
+    "PC1_eth1 und PC2_eth0 haben auf ESXi beide Id 3 (Design 10.3, H1): zwei Checks schlagen fehl, "
+    "einer für die Id, die der Graph anders erwartet, einer für die geteilte Id"
+)
+@allure.tag("negativ-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_059() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.get_vm.return_value = MagicMock()
+    esxi_connection.is_vm_powered_on.return_value = True
+    esxi_connection.get_vm_ip_address.return_value = "10.0.0.1"
+    esxi_connection.list_port_groups.return_value = _port_groups(
+        PC1_eth0=2, PC1_eth1=3, PC2_eth0=3, PC3_eth1=4
+    )
+    graph = _stable_graph()
+
+    with patch("src.vm_orchestrator.vm_orchestrator.GNS3Connection") as gns3_cls:
+        gns3_cls.list_all_projects.return_value = []
+        results = orchestrator.verify_graph(graph, "lab")
+
+    failures = [description for ok, description in results if not ok]
+    assert any(
+        "'PC2_eth0'" in text and "VLAN id 3" in text and "expects" in text
+        for text in failures
+    )
+    assert any("share VLAN id 3" in text for text in failures)
+
+
+@allure.title("verify_graph fügt bei stabilen VLAN-Ids keine Zeile hinzu")
+@allure.description(
+    "Ids der Port-Groups entsprechen dem Graphen (auch nach einem eingefügten Link): kein fehlgeschlagener "
+    "VLAN-Id-Check"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.NORMAL)
+def vm_orchestrator_060() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.get_vm.return_value = MagicMock()
+    esxi_connection.is_vm_powered_on.return_value = True
+    esxi_connection.get_vm_ip_address.return_value = "10.0.0.1"
+    esxi_connection.list_port_groups.return_value = _port_groups(
+        PC1_eth0=2, PC2_eth0=3, PC3_eth1=4, PC1_eth1=5
+    )
+    graph = _stable_graph()
+
+    with patch("src.vm_orchestrator.vm_orchestrator.GNS3Connection") as gns3_cls:
+        gns3_cls.list_all_projects.return_value = []
+        results = orchestrator.verify_graph(graph, "lab")
+
+    assert not [d for ok, d in results if "VLAN id" in d and not ok]
+    assert _vlan_ids(graph)["PC3_eth1"] == 4
+
+
+@allure.title("repair_graph setzt die erwartete VLAN-Id einer abweichenden Port-Group")
+@allure.description(
+    "Bei doppelter Id wird die Port-Group, die der Graph auf eine freie Id verschoben hat, mit "
+    "fix_vlan neu getaggt; die übrigen bleiben unberührt"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_061() -> None:
+    orchestrator, esxi_connection = _make_orchestrator()
+    esxi_connection.get_vm.return_value = MagicMock()
+    esxi_connection.is_vm_powered_on.return_value = True
+    esxi_connection.find_port_group.return_value = MagicMock()
+    esxi_connection.list_port_groups.return_value = _port_groups(
+        PC1_eth0=2, PC1_eth1=3, PC2_eth0=3, PC3_eth1=4
+    )
+    esxi_connection._ensure_trunk_policy = MagicMock()
+    graph = _stable_graph()
+
+    with patch("src.vm_orchestrator.vm_orchestrator.GNS3Connection") as gns3_cls:
+        gns3_cls.list_all_projects.return_value = []
+        actions = orchestrator.repair_graph(graph, "lab")
+
+    new_id = _vlan_ids(graph)["PC2_eth0"]
+    assert new_id not in (2, 3, 4)
+    esxi_connection._add_port_group.assert_called_once()
+    (vlan,), kwargs = esxi_connection._add_port_group.call_args
+    assert (vlan.name, vlan.id, kwargs) == ("PC2_eth0", new_id, {"fix_vlan": True})
+    assert any(
+        "Re-tagged port group 'PC2_eth0' from VLAN 3" in action for action in actions
+    )

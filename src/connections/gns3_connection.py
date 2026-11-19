@@ -618,6 +618,11 @@ class GNS3Connection(APIHandler):
                     Verbosity.NORMAL,
                     f"Node {node.name} already exists on GNS3, reusing it (incremental)",
                 )
+                if (
+                    node.env == Environment.ON_ESXI
+                    and existing.get("node_type") == "cloud"
+                ):
+                    existing = self._sync_cloud_ports(node, existing)
                 node.gns3_node_info = existing
                 return existing
 
@@ -663,6 +668,94 @@ class GNS3Connection(APIHandler):
 
         node.gns3_node_info = response
         return response
+
+    def _sync_cloud_ports(
+        self, node: GenericNode, existing: dict[str, Any]
+    ) -> dict[str, Any]:
+        """
+        Makes an already existing Cloud node of an ESXi VM have one port per link of the VM. A link added later
+        (incremental deploy) needs a port that the Cloud node was not created with; without it ``_get_adapter``
+        would use the wrong port (a Cloud with one port) or fail (two or more).
+        Existing ports keep their number, name and link, a port is only appended for each interface that has
+        none (matched by name, case-insensitive), and an existing port whose Linux interface (``vlan<id>``)
+        differs from the interface's current VLAN gets the new interface. Nothing is ever removed. The change is
+        one GNS3 node update (``PUT /v2/projects/<id>/nodes/<node_id>`` with the whole ``ports_mapping``); GNS3
+        then regenerates the node's ``ports``. Nothing is sent if the ports are already right.
+        :param node: the ESXi node the Cloud node represents
+        :param existing: the Cloud node as GNS3 returned it
+        :return: the Cloud node with its up to date ports
+        :raises RuntimeError: Is thrown when GNS3 refuses the update (it may refuse while the node runs: stop the
+            Cloud node, or do a full deploy) or the new ports do not show up afterwards.
+        """
+        wanted = self._create_ports_mapping(node)
+        current = [
+            dict(port)
+            for port in (existing.get("properties") or {}).get("ports_mapping") or []
+        ]
+        by_name = {str(port.get("name", "")).lower(): port for port in current}
+        next_number = (
+            max((int(port["port_number"]) for port in current), default=-1) + 1
+        )
+        added: list[str] = []
+        retargeted: list[str] = []
+        for want in wanted:
+            port = by_name.get(want["name"].lower())
+            if port is None:
+                port = {**want, "port_number": next_number}
+                next_number += 1
+                current.append(port)
+                by_name[want["name"].lower()] = port
+                added.append(want["name"])
+            elif port.get("interface") != want["interface"]:
+                port["interface"] = want["interface"]
+                retargeted.append(want["name"])
+        if not added and not retargeted:
+            return existing
+
+        changes = ", ".join(
+            [f"adds port {name}" for name in added]
+            + [f"re-binds port {name}" for name in retargeted]
+        )
+        if Settings.IS_DRY_RUN:
+            Verbosity.volumatic_print(
+                Verbosity.NORMAL, f"Would update Cloud node {node.name}: {changes}"
+            )
+            return existing
+        Verbosity.volumatic_print(
+            Verbosity.NORMAL, f"Updates Cloud node {node.name}: {changes}"
+        )
+
+        node_url = (
+            f"{self.url}/v2/projects/{self.project['project_id']}"
+            f"/nodes/{existing['node_id']}"
+        )
+        try:
+            updated = self.put(
+                node_url, json={"properties": {"ports_mapping": current}}
+            )
+            if not self._ports_present(updated, added):
+                updated = self.get(node_url)
+        except requests.exceptions.HTTPError as exc:
+            status = getattr(exc.response, "status_code", None)
+            raise RuntimeError(
+                f"GNS3 refused to update the ports of the Cloud node '{node.name}' ({changes}; HTTP {status}). "
+                "GNS3 may not allow changing a node's ports while it is running: stop the Cloud node "
+                f"'{node.name}' and deploy again, or do a full deploy."
+            ) from exc
+        if not self._ports_present(updated, added):
+            raise RuntimeError(
+                f"GNS3 accepted the port update of the Cloud node '{node.name}' but its port list does not contain "
+                f"{added} afterwards. Stop and start the node, or do a full deploy."
+            )
+        self._existing_nodes_by_name[node.name] = updated
+        return updated
+
+    @staticmethod
+    def _ports_present(node_info: dict[str, Any] | None, names: list[str]) -> bool:
+        """True if the GNS3 node's ``ports`` contain a port of each of the given names."""
+        ports = (node_info or {}).get("ports") or []
+        have = {str(port.get("name", "")).lower() for port in ports}
+        return all(name.lower() in have for name in names)
 
     def _create_builtin_nodes(
         self,
