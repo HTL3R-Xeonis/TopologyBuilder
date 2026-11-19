@@ -24,6 +24,7 @@ class Graph:
         self._nodes: dict[str, GenericNode] = {}
         self._build_nodes(nodes)
         self._build_edges(edges)
+        self._ensure_esxi_interfaces()
 
     @property
     def nodes(self) -> dict[str, GenericNode]:
@@ -73,6 +74,17 @@ class Graph:
 
             if_1.connect_to(node_2)
             if_2.connect_to(node_1)
+
+    def _ensure_esxi_interfaces(self) -> None:
+        """
+        Adds a default interface to ESXi nodes without graph connections.
+        :raises ValueError: If no VLAN ID is available for the default interface.
+        """
+        from src.graph import Environment
+
+        for node in self.nodes.values():
+            if node.env == Environment.ON_ESXI and not node.interfaces:
+                node.add_interface("Gi0/0")
 
     # @TODO THIS IS FAULTY
     def visualize(self) -> None:

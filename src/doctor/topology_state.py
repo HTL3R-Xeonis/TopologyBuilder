@@ -242,12 +242,19 @@ class TopologyChanges:
         Checks the types, templates and interfaces of graph-owned GNS3 nodes.
         :param graph: Desired topology.
         :param state: Current infrastructure.
+        :raises RuntimeError: If GNS3 template information cannot be retrieved.
+        :raises TimeoutError: If a GNS3 request times out.
         """
         connection = self.gns3_orchestrator.gns3_connection
         templates = {}
         for node in graph.nodes.values():
             current = state.gns3_nodes.get(node.name)
             if node.env == Environment.ON_ESXI:
+                try:
+                    connection._create_ports_mapping(node)
+                except (ValueError, RuntimeError) as error:
+                    self.conflicts.append(str(error))
+                    continue
                 if current is None:
                     self.to_add["gns3_node"].append(node)
                 elif current.get("node_type") != "cloud":
@@ -288,26 +295,20 @@ class TopologyChanges:
 
     def _compare_cloud_interfaces(self, node: GenericNode, current: dict[str, Any]) -> None:
         """
-        Checks the interface mapping of an ESXi-backed GNS3 Cloud node.
-        :param node: Desired cloud node.
-        :param current: Existing GNS3 node data.
+        Schedules additions of missing Cloud ports without altering existing ones.
+        :param node: ESXi-backed node to reconcile.
+        :param current: Existing GNS3 node information.
+        :raises RuntimeError: If existing Cloud ports cannot be preserved.
         """
-        properties = current.get("properties") or {}
-        original = list(properties.get("ports_mapping") or [])
-        mapping = [dict(port) for port in original]
-        by_name = {port["name"]: port for port in mapping}
-        if len(by_name) != len(mapping):
-            self.conflicts.append(f"{node.name}: duplicate Cloud ports")
+        connection = self.gns3_orchestrator.gns3_connection
+        expected = connection._create_ports_mapping(node, connected_only=True)
+        try:
+            mapping = connection._missing_cloud_ports_mapping(current, expected)
+        except RuntimeError as error:
+            self.conflicts.append(f"{node.name}: {error}")
             return
-        next_port = max((port["port_number"] for port in mapping), default=-1) + 1
-        for expected in self.gns3_orchestrator.gns3_connection._create_ports_mapping(node):
-            present = by_name.get(expected["name"])
-            if present is None:
-                mapping.append({**expected, "port_number": next_port})
-                next_port += 1
-            elif present["interface"] != expected["interface"]:
-                present["interface"] = expected["interface"]
-        if mapping != original:
+        if mapping is not None:
+            properties = current.get("properties") or {}
             self.to_change["gns3_node"].append((node, {"properties": {**properties, "ports_mapping": mapping}}))
 
     def _compare_node_interfaces(self, node: GenericNode, current: dict[str, Any]) -> None:
@@ -516,7 +517,7 @@ class TopologyChanges:
         :param replacing_ids: Existing node IDs scheduled for replacement.
         :return: Link IDs scheduled for deletion.
         """
-        scheduled = set()
+        scheduled: set[str] = set()
         for link in links:
             linked_ids = {end["node_id"] for end in link["nodes"]}
             if not linked_ids.intersection(replacing_ids):

@@ -5,7 +5,6 @@ __date__ = "28/07/2026"
 __license__ = "GNU GPLv3"
 __status__ = "In development"
 
-import requests
 from loguru import logger
 
 from src.connections import SSHConnection
@@ -64,24 +63,13 @@ class GraphOrchestrator:
 
         self.apply_topology_changes(changes)
 
-    def deploy_vm(self, graph: Graph) -> None:
-        """
-        Deploys graph devices to ESXi and GNS3.
-        :param graph: Graph to deploy.
-        """
-        for node in graph.nodes.values():
-            if node.env == Environment.ON_ESXI:
-                self.esxi_orchestrator.deploy_virtual_machine(node=node, datastore=Settings.ESXI.DATASTORE)
-                self.gns3_orchestrator.create_node(node)
-            if node.env == Environment.ON_GNS3:
-                self.gns3_orchestrator.create_node(node)
-            self.gns3_orchestrator.partially_link_gns3_nodes(node)
-
     def apply_topology_changes(self, changes: TopologyChanges) -> None:
         """
         Applies validated topology changes using existing provisioning methods.
         :param changes: Additions, modifications and deletions to apply.
-        :raises RuntimeError: If the plan contains conflicts.
+        :raises RuntimeError: If the plan contains conflicts or a GNS3 Cloud cannot be configured.
+        :raises ValueError: If an ESXi Cloud has an invalid interface configuration.
+        :raises requests.RequestException: If a GNS3 API request fails.
         """
         if changes.conflicts:
             raise RuntimeError("Cannot synchronize topology:\n- " + "\n- ".join(changes.conflicts))
@@ -94,7 +82,11 @@ class GraphOrchestrator:
         self.esxi_orchestrator.create_port_groups(dict(changes.to_change["port_group"]), update=True)
         for vm, nic, group in changes.to_change["gns3_vm_adapter"]:
             self.esxi_orchestrator._configure_network_adapter(vm, nic, group)
-        if changes.to_change["vlans"]:
+        # New Cloud nodes must see their VLAN interfaces before GNS3 creates their ports.
+        cloud_nodes = [node for node in changes.to_add["gns3_node"] if node.env == Environment.ON_ESXI]
+        if changes.to_change["vlans"] or cloud_nodes or changes.to_add["esxi_vm"]:
+            if changes.gns3_vlan_setup is None:
+                raise RuntimeError("GNS3 VLAN configuration was not initialized")
             changes.gns3_vlan_setup.apply_yaml()
 
         for node in changes.to_add["esxi_vm"]:
@@ -117,10 +109,12 @@ class GraphOrchestrator:
             result = self.gns3_orchestrator.create_node(node)
             if result is not None:
                 node.node_gns3_info = result
+                if node.env == Environment.ON_ESXI:
+                    required = connection._create_ports_mapping(node, connected_only=True)
+                    if len(required) > 1:
+                        connection.ensure_cloud_ports(node, required)
         for node, properties in changes.to_change["gns3_node"]:
-            url = f"{self.gns3_orchestrator.gns3_connection.get_project_url()}/nodes/{node.node_gns3_info['node_id']}"
-            response = requests.put(url, json=properties, timeout=30)
-            response.raise_for_status()
+            connection.update_node(node, properties)
         for first, second in changes.to_add["gns3_link"]:
             connection.connect_nodes(first, second)
 

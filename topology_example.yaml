@@ -62,6 +62,7 @@ nodes:
 edges:
   - [ PC1, Ethernet0, SW-C1, gi0/2 ]
   - [ PC2, Ethernet0, SW-C1, gi0/3 ]
+  - [ PC6, Ethernet0, SW-C1, gi1/0 ]
   - [ FW-C1-1, gi0/0, SW-C1, gi0/0 ]
   - [ FW-C1-2, gi0/1, SW-C1, gi0/1 ]
   - [ FW-C1-2, gi0/0, POP-ISP1-1, gi0/0 ]
