@@ -13,6 +13,7 @@ import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
 from loguru import logger
 
@@ -1291,13 +1292,24 @@ class VMOrchestrator:
                 self.gns3_vm_ip, Settings.GNS3.PORT, project["project_id"]
             )
         }
-        actions: list[str] = []
+        clouds: dict[str, dict[str, Any]] = {}
         for name, node in graph.nodes.items():
             if node.env != Environment.ON_ESXI:
                 continue
             cloud = nodes_by_name.get(name)
-            if cloud is None or cloud.get("node_type") != "cloud":
-                continue
+            if cloud is not None and cloud.get("node_type") == "cloud":
+                clouds[name] = cloud
+        running = [
+            name for name, cloud in clouds.items() if cloud.get("status") == "started"
+        ]
+        if running:
+            # A Cloud that kept running while its subinterface was gone cannot bind to the new one: stopping and starting
+            # it keeps its helper process (ubridge) and with it the dead binding. Closing the project ends the helpers.
+            return self._reopen_project_for_clouds(
+                project, list(nodes_by_name.values()), running
+            )
+        actions: list[str] = []
+        for name, cloud in clouds.items():
             try:
                 for method in (GNS3Connection.stop_node, GNS3Connection.start_node):
                     method(
@@ -1313,6 +1325,54 @@ class VMOrchestrator:
                 actions.append(f"Could not restart the Cloud node of '{name}': {exc}")
                 continue
             actions.append(f"Restarted the Cloud node of '{name}'")
+        return actions
+
+    def _reopen_project_for_clouds(
+        self,
+        project: dict[str, Any],
+        project_nodes: list[dict[str, Any]],
+        running_clouds: list[str],
+    ) -> list[str]:
+        """
+        Closes and opens the GNS3 project so that running Cloud nodes bind to the re-created subinterfaces, then starts
+        again every node that was running before. This also restarts the other running nodes of the project (a closed
+        project stops all of them), which the returned text says.
+        """
+        running = [n for n in project_nodes if n.get("status") == "started"]
+        names = ", ".join(f"'{name}'" for name in running_clouds)
+        try:
+            GNS3Connection.close_project(
+                self.gns3_vm_ip, Settings.GNS3.PORT, project["project_id"]
+            )
+            GNS3Connection.ensure_project_open(
+                self.gns3_vm_ip, Settings.GNS3.PORT, project["project_id"]
+            )
+        except Exception as exc:  # noqa: BLE001 - a check or a repair: the failure becomes a result, never a crash
+            logger.warning(f"Could not re-open the GNS3 project for the Clouds: {exc}")
+            return [
+                f"Could not re-open the GNS3 project to rebind the Cloud node(s) of {names}: {exc}"
+            ]
+        actions = [
+            f"Re-opened the GNS3 project to rebind the running Cloud node(s) of {names} "
+            f"(this stopped {len(running)} running node(s); they are started again)"
+        ]
+        # the Clouds first: the nodes behind them need their link, and the order of the others does not matter
+        cloud_ids = {n["node_id"] for n in running if n.get("node_type") == "cloud"}
+        for node in sorted(running, key=lambda n: n["node_id"] not in cloud_ids):
+            try:
+                GNS3Connection.start_node(
+                    self.gns3_vm_ip,
+                    Settings.GNS3.PORT,
+                    project["project_id"],
+                    node["node_id"],
+                )
+            except Exception as exc:  # noqa: BLE001 - one node that does not start must not stop the others
+                logger.warning(
+                    f"Could not start node '{node.get('name')}' again: {exc}"
+                )
+                actions.append(
+                    f"Could not start node '{node.get('name')}' again: {exc}"
+                )
         return actions
 
     def _resolve_gns3_parent_interface(self, gns3_ssh_connection: SSHConnection) -> str:

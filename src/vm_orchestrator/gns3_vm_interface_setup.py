@@ -5,6 +5,7 @@ __status__ = "In development"
 
 import base64
 import shlex
+from collections.abc import Collection
 
 from loguru import logger
 
@@ -59,13 +60,23 @@ class GNS3VMInterfaceSetup:
         lines = [line.strip() for line in lines]
         return lines
 
-    def _create_subinterface_deletion_commands(self) -> None:
+    def _create_subinterface_deletion_commands(
+        self, keep: Collection[str] = (), existing: Collection[str] | None = None
+    ) -> None:
         """
-        Creates the commands for the deletion of existing subinterfaces on the ``self.parent_interface`` interface.
+        Creates the commands for the deletion of the subinterfaces on the ``self.parent_interface`` interface that the
+        topology does not need (any more). A subinterface that is still needed is NEVER deleted: a Cloud node of GNS3
+        binds to its interface when it starts and cannot bind again while it runs, so deleting and re-creating a
+        subinterface under a running Cloud cuts that link for good.
+        :param keep: names of the subinterfaces that stay
+        :param existing: the subinterfaces found on the VM, read from it when not given
         :return:
         :raises RuntimeError: Is thrown when an error occurs while trying to get subinterface information.
         """
-        for subinterface in self._get_existing_subinterfaces():
+        found = self._get_existing_subinterfaces() if existing is None else existing
+        for subinterface in found:
+            if subinterface in keep:
+                continue
             # ----------------------------------------------------------------------------------------------------------
             if Settings.IS_DRY_RUN:
                 Verbosity.volumatic_print(
@@ -142,9 +153,14 @@ class GNS3VMInterfaceSetup:
         self.execute_script()
         return list(missing)
 
-    def _create_subinterface_creation_commands(self, graph: Graph) -> None:
+    def _create_subinterface_creation_commands(
+        self, graph: Graph, existing: Collection[str] = ()
+    ) -> None:
         """
-        Creates the commands for the creation of subinterfaces, on the ``self.parent_interface`` interface.
+        Creates the commands for the creation of subinterfaces, on the ``self.parent_interface`` interface. A
+        subinterface that exists already is not created again (and not touched, see
+        ``_create_subinterface_deletion_commands``); it is only made sure that it is up.
+        :param existing: names of the subinterfaces that exist on the VM already
         :return:
         """
         for name, vlan_id in self.expected_subinterfaces(graph).items():
@@ -152,8 +168,16 @@ class GNS3VMInterfaceSetup:
             if Settings.IS_DRY_RUN:
                 Verbosity.volumatic_print(
                     Verbosity.NORMAL,
-                    f"Would create subinterface {name} with vlan {vlan_id}",
+                    f"Would keep subinterface {name}"
+                    if name in existing
+                    else f"Would create subinterface {name} with vlan {vlan_id}",
                 )
+                continue
+            if name in existing:
+                Verbosity.volumatic_print(
+                    Verbosity.NORMAL, f"Keeps subinterface {name} (already there)"
+                )
+                self.script += f"ip link set {name} up\n"
                 continue
             Verbosity.volumatic_print(
                 Verbosity.NORMAL,
@@ -267,13 +291,17 @@ class GNS3VMInterfaceSetup:
 
     def initialize_commands(self, graph: Graph) -> None:
         """
-        Initializes the commands for the creation and deletion of subinterfaces, on the GNS3 VM.
+        Initializes the commands for the creation and deletion of subinterfaces, on the GNS3 VM: the ones the graph
+        needs and that exist stay untouched (a running Cloud is bound to them), missing ones are created, ones the graph
+        does not need any more are deleted.
         :param graph: Create the commands based on given graph
         :return:
         :raises RuntimeError: Is thrown when an error occurs while trying to get subinterface information.
         """
-        self._create_subinterface_deletion_commands()
-        self._create_subinterface_creation_commands(graph)
+        existing = self._get_existing_subinterfaces()
+        expected = self.expected_subinterfaces(graph)
+        self._create_subinterface_deletion_commands(keep=expected, existing=existing)
+        self._create_subinterface_creation_commands(graph, existing=existing)
         if not Settings.IS_DRY_RUN:
             Verbosity.volumatic_print(
                 Verbosity.NORMAL, "Writes the boot-time VLAN subinterface service"

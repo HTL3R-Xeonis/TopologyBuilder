@@ -1748,3 +1748,63 @@ def gns3_connection_062() -> None:
         _port(0, "eth0", 2),
         _port(1, "eth1", 5),
     ]
+
+
+@allure.title(
+    "close_project schickt einen POST an den Close-Endpoint und tut im Dry-Run nichts"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_connection_063() -> None:
+    _reset_settings()
+    with patch.object(GNS3Connection, "post") as mock_post:
+        GNS3Connection.close_project("10.20.20.231", 80, "proj-1")
+    mock_post.assert_called_once_with("http://10.20.20.231:80/v2/projects/proj-1/close")
+
+    with (
+        patch.object(
+            GNS3Connection, "post", side_effect=requests.exceptions.HTTPError()
+        ),
+        pytest.raises(RuntimeError),
+    ):
+        GNS3Connection.close_project("10.20.20.231", 80, "proj-1")
+
+    Settings.IS_DRY_RUN = True
+    try:
+        with patch.object(GNS3Connection, "post") as mock_post:
+            GNS3Connection.close_project("10.20.20.231", 80, "proj-1")
+        mock_post.assert_not_called()
+    finally:
+        Settings.IS_DRY_RUN = False
+
+
+@allure.title(
+    "delete_link wertet eine Fehlerantwort als gelöscht, wenn der Link weg ist"
+)
+@allure.description(
+    "Bei toter Cloud-Bindung antwortet GNS3 beim Löschen mit 409, obwohl der Link entfernt wurde (gemessen am "
+    "2026-11-20): delete_link prüft dann die Link-Liste und meldet nur dann einen Fehler, wenn der Link noch da ist"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_connection_064() -> None:
+    _reset_settings()
+    error = requests.exceptions.HTTPError()
+    with (
+        patch.object(GNS3Connection, "get", return_value={"status": "opened"}),
+        patch.object(GNS3Connection, "delete", side_effect=error),
+        patch.object(GNS3Connection, "list_project_links", return_value=[]),
+    ):
+        GNS3Connection.delete_link("10.20.20.231", 80, "proj-1", "link-1")
+
+    with (
+        patch.object(GNS3Connection, "get", return_value={"status": "opened"}),
+        patch.object(GNS3Connection, "delete", side_effect=error),
+        patch.object(
+            GNS3Connection, "list_project_links", return_value=[{"link_id": "link-1"}]
+        ),
+        pytest.raises(RuntimeError),
+    ):
+        GNS3Connection.delete_link("10.20.20.231", 80, "proj-1", "link-1")

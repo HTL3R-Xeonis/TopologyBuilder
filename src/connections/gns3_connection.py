@@ -281,6 +281,30 @@ class GNS3Connection(APIHandler):
             raise RuntimeError(msg) from exc
 
     @staticmethod
+    def close_project(ip: str, port: int, project_id: str) -> None:
+        """
+        Closes a project: GNS3 stops every node of it and ends its helper processes (ubridge), so that the nodes
+        that are started afterwards bind to their host interfaces afresh. ``ensure_project_open`` opens it again.
+        :param ip: GNS3 IP address
+        :param port: GNS3 API port
+        :param project_id: the project to close
+        :return:
+        :raises TimeoutError: Is thrown when it takes too long to receive a response.
+        :raises RuntimeError: Is thrown when closing the project fails.
+        """
+        if Settings.IS_DRY_RUN:
+            Verbosity.volumatic_print(
+                Verbosity.NORMAL, f"Would close GNS3 project {project_id}"
+            )
+            return
+        Verbosity.volumatic_print(Verbosity.NORMAL, f"Closes GNS3 project {project_id}")
+        try:
+            GNS3Connection.post(f"http://{ip}:{port}/v2/projects/{project_id}/close")
+        except requests.exceptions.HTTPError as exc:
+            logger.error(msg := f"Failed to close GNS3 project '{project_id}' on {ip}")
+            raise RuntimeError(msg) from exc
+
+    @staticmethod
     def delete_node(ip: str, port: int, project_id: str, node_id: str) -> None:
         """
         Deletes a single node from a project, leaving every other node

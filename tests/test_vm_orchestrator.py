@@ -2141,3 +2141,121 @@ def vm_orchestrator_061() -> None:
     assert any(
         "Re-tagged port group 'PC2_eth0' from VLAN 3" in action for action in actions
     )
+
+
+@allure.title(
+    "repair_vlan_subinterfaces öffnet das Projekt neu, wenn eine Cloud noch läuft"
+)
+@allure.description(
+    "Eine Cloud, die lief, während ihre Subinterface fehlte, behält ihren ubridge-Prozess und damit die tote Bindung: "
+    "Stop und Start hilft nicht (gemessen am 2026-11-20). Dann wird das Projekt geschlossen und geöffnet und jeder vorher "
+    "laufende Node wieder gestartet, die Clouds zuerst; der Text nennt, dass auch andere Nodes neu gestartet werden"
+)
+@allure.tag("positiv-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.CRITICAL)
+def vm_orchestrator_062() -> None:
+    Settings.ONLY_ON_ESXI = False
+    orchestrator, _ = _make_orchestrator()
+    graph, name = _graph_with_one_esxi_bridge()
+    setup = MagicMock()
+    setup.create_missing_subinterfaces.return_value = [name]
+    order: list[str] = []
+
+    with (
+        patch.object(orchestrator, "_open_gns3_interface_setup", return_value=setup),
+        patch.object(
+            GNS3Connection,
+            "list_all_projects",
+            return_value=[{"name": "proj", "project_id": "p1"}],
+        ),
+        patch.object(
+            GNS3Connection,
+            "list_project_nodes",
+            return_value=[
+                {
+                    "name": "SW",
+                    "node_id": "n2",
+                    "node_type": "qemu",
+                    "status": "started",
+                },
+                {
+                    "name": "PC_A",
+                    "node_id": "n1",
+                    "node_type": "cloud",
+                    "status": "started",
+                },
+                {
+                    "name": "OFF",
+                    "node_id": "n3",
+                    "node_type": "qemu",
+                    "status": "stopped",
+                },
+            ],
+        ),
+        patch.object(
+            GNS3Connection,
+            "close_project",
+            side_effect=lambda *a: order.append("close"),
+        ),
+        patch.object(
+            GNS3Connection,
+            "ensure_project_open",
+            side_effect=lambda *a: order.append("open"),
+        ),
+        patch.object(
+            GNS3Connection,
+            "start_node",
+            side_effect=lambda ip, port, project, node: order.append(f"start {node}"),
+        ),
+        patch.object(GNS3Connection, "stop_node") as stop,
+    ):
+        actions = orchestrator.repair_vlan_subinterfaces(graph, "proj", "u", "p")
+
+    assert order == ["close", "open", "start n1", "start n2"]
+    stop.assert_not_called()
+    assert actions[0] == f"Re-created VLAN subinterface {name} on the GNS3 VM"
+    assert "Re-opened the GNS3 project" in actions[1]
+    assert "stopped 2 running node(s)" in actions[1] and "'PC_A'" in actions[1]
+
+
+@allure.title("Schlägt das Neu-Öffnen fehl, wird es gemeldet statt abzustürzen")
+@allure.tag("negativ-test", "vm-orchestrator")
+@allure.feature("vm_orchestrator")
+@allure.severity(allure.severity_level.NORMAL)
+def vm_orchestrator_063() -> None:
+    Settings.ONLY_ON_ESXI = False
+    orchestrator, _ = _make_orchestrator()
+    graph, name = _graph_with_one_esxi_bridge()
+    setup = MagicMock()
+    setup.create_missing_subinterfaces.return_value = [name]
+
+    with (
+        patch.object(orchestrator, "_open_gns3_interface_setup", return_value=setup),
+        patch.object(
+            GNS3Connection,
+            "list_all_projects",
+            return_value=[{"name": "proj", "project_id": "p1"}],
+        ),
+        patch.object(
+            GNS3Connection,
+            "list_project_nodes",
+            return_value=[
+                {
+                    "name": "PC_A",
+                    "node_id": "n1",
+                    "node_type": "cloud",
+                    "status": "started",
+                }
+            ],
+        ),
+        patch.object(
+            GNS3Connection, "close_project", side_effect=RuntimeError("gns3 down")
+        ),
+        patch.object(GNS3Connection, "start_node") as start,
+    ):
+        actions = orchestrator.repair_vlan_subinterfaces(graph, "proj", "u", "p")
+
+    start.assert_not_called()
+    assert "Could not re-open the GNS3 project" in actions[1]
+    assert "gns3 down" in actions[1]

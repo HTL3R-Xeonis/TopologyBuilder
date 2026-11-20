@@ -452,3 +452,66 @@ def gns3_vm_interface_setup_011() -> None:
     setup = _setup_with_exec_command(exec_command)
     with pytest.raises(TimeoutError, match=r"did not answer within 5s"):
         setup.execute_script()
+
+
+def _initialize(existing: list[str], expected: dict[str, int]) -> GNS3VMInterfaceSetup:
+    """initialize_commands for a VM that has `existing` subinterfaces and a graph that needs `expected`."""
+    from unittest.mock import patch
+
+    _reset_settings()
+    setup = GNS3VMInterfaceSetup(MagicMock(), "eth1")
+    with (
+        patch.object(setup, "_get_existing_subinterfaces", return_value=existing),
+        patch.object(
+            GNS3VMInterfaceSetup, "expected_subinterfaces", return_value=expected
+        ),
+        patch.object(setup, "_persistent_install_script", return_value=""),
+    ):
+        setup.initialize_commands(MagicMock())
+    return setup
+
+
+@allure.title("Ein Deploy löscht keine Subinterface, die der Graph noch braucht")
+@allure.description(
+    "Eine laufende Cloud von GNS3 bindet sich beim Start an ihr Interface und kann sich nicht erneut binden: wird die "
+    "Subinterface darunter gelöscht und neu angelegt, bleibt die Verbindung dauerhaft tot. Der Deploy darf deshalb eine "
+    "vorhandene, noch benötigte Subinterface weder löschen noch neu anlegen (gemessen am 2026-11-20)"
+)
+@allure.tag("positiv-test", "gns3-vm-interface-setup")
+@allure.feature("gns3_vm_interface_setup")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_vm_interface_setup_012() -> None:
+    setup = _initialize(["vlan2", "vlan3"], {"vlan2": 2, "vlan3": 3})
+
+    assert "ip link delete" not in setup.script
+    assert "ip link add" not in setup.script
+    assert "ip link set vlan2 up" in setup.script
+    assert "ip link set vlan3 up" in setup.script
+
+
+@allure.title("Ein Deploy legt nur fehlende Subinterface an und löscht nur überzählige")
+@allure.description(
+    "vlan3 bleibt unberührt, vlan4 fehlt und wird angelegt, vlan9 wird vom Graph nicht mehr gebraucht und gelöscht"
+)
+@allure.tag("positiv-test", "gns3-vm-interface-setup")
+@allure.feature("gns3_vm_interface_setup")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_vm_interface_setup_013() -> None:
+    setup = _initialize(["vlan3", "vlan9"], {"vlan3": 3, "vlan4": 4})
+
+    assert "ip link delete vlan9\n" in setup.script
+    assert "ip link delete vlan3" not in setup.script
+    assert "ip link add link eth1 name vlan4 type vlan id 4\n" in setup.script
+    assert "ip link add link eth1 name vlan3" not in setup.script
+    assert setup.script.count("ip link add") == 1
+
+
+@allure.title("Ein Deploy auf einer VM ohne Subinterface legt alle an")
+@allure.tag("positiv-test", "gns3-vm-interface-setup")
+@allure.feature("gns3_vm_interface_setup")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_vm_interface_setup_014() -> None:
+    setup = _initialize([], {"vlan2": 2, "vlan3": 3})
+
+    assert "ip link delete" not in setup.script
+    assert setup.script.count("ip link add") == 2
