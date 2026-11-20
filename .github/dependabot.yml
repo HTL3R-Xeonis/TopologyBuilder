@@ -1,12 +1,27 @@
+# The project works on the branch Mjonyr (the default branch stays main), so version updates target it.
+# Note: Dependabot reads this file from the default branch, so it only takes effect once it is on main.
 version: 2
 updates:
+  # pip: one PR per week for all patch/minor updates; major updates get their own PR each.
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    target-branch: "Mjonyr"
+    groups:
+      pip-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+  # GitHub Actions: all updates in one weekly PR.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    target-branch: "Mjonyr"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
