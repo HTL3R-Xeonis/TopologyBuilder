@@ -293,6 +293,8 @@ class Settings:
                     Settings.API.GNS3_TEMPLATE_SERVER_URL = check_value_type(value, str)
                 case "esxi_template_server_url":
                     Settings.API.ESXI_TEMPLATE_SERVER_URL = check_value_type(value, str)
+                case "topology_generator_url":
+                    Settings.API.TOPOLOGY_GENERATOR_URL = check_value_type(value, str).rstrip("/")
                 case "literal_api_values":
                     if value is None:
                         value = os.getenv("LITERAL_API_VALUES", "false").lower() == "true"
@@ -301,8 +303,35 @@ class Settings:
                     Settings.API.LITERAL_ESXI_TEMPLATES = set(check_value_type(value, (list, set), set()))
                 case "literal_gns3_templates":
                     Settings.API.LITERAL_GNS3_TEMPLATES = set(check_value_type(value, (list, set), set()))
+                case "generator":
+                    Settings._initialise_generator_settings(check_value_type(value, dict))
                 case _:
                     logger.warning(f"Unrecognized setting: Settings.API.{key.upper()}")
+
+    @staticmethod
+    def _initialise_generator_settings(generator_settings: dict) -> None:
+        """
+        Loads topology generator retry settings.
+        :param generator_settings: Generator section of the settings file.
+        :raises TypeError: If the retry count has the wrong type.
+        :raises ValueError: If the retry count is negative.
+        """
+        from loguru import logger
+
+        for key, value in generator_settings.items():
+            match key.lower():
+                case "max_retries":
+                    retries = check_value_type(value, int)
+                    if retries is None or retries < 0:
+                        raise ValueError("api.generator.max_retries must be zero or greater.")
+                    Settings.API.GENERATOR.MAX_RETRIES = retries
+                case "topology_generator_timeout_secounds":
+                    timeout = check_value_type(value, int, 1800)
+                    if timeout is None or timeout <= 0:
+                        raise ValueError("api.generator.topology_generator_timeout_seconds must be greater than 0.")
+                    Settings.API.TOPOLOGY_GENERATOR_TIMEOUT_SECONDS = timeout
+                case _:
+                    logger.warning(f"Unrecognized setting: Settings.API.GENERATOR.{key.upper()}")
 
     # ------------------------ Setting Attributes ------------------------
     VERBOSITY_LEVEL: Verbosity = None
@@ -375,10 +404,13 @@ class Settings:
         """Literal ESXi template name values."""
         LITERAL_GNS3_TEMPLATES: set[str] = None
         """Literal GNS3 template name values."""
+        TOPOLOGY_GENERATOR_URL: str = None
+        """Address of the AI topology generator API."""
 
-    class LLM:
-        """Settings related to LLM."""
+        class GENERATOR:
+            """Settings related to the generator API."""
 
-        # @TODO NOT IMPLEMENTED
-        MAX_RETRIES: int = None
-        """Maximum of retries the LLM makes before giving up on failing to generate a valid topology file."""
+            MAX_RETRIES: int = None
+            """Maximum of retries the AI makes before giving up on failing to generate a valid topology file."""
+            TOPOLOGY_GENERATOR_TIMEOUT_SECONDS: int = None
+            """Timeout in seconds for topology generation requests."""

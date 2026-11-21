@@ -2,30 +2,39 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from src.graph import Graph
-
-import os
 import tempfile
 from pathlib import Path
 
 import typer
 
+from src.connections.topology_generator_connection import TopologyGeneratorConnection
 from src.settings import Settings
 
 
 def generator_url(override: str | None = None) -> str:
-    """Returns the configured Topology Generator API address."""
-    url = override or os.environ.get("TOPOLOGY_GENERATOR_URL", "")
-    if not url or not url.startswith(("http://", "https://")):
-        raise typer.BadParameter("Set --generator-url or TOPOLOGY_GENERATOR_URL to an http(s) API address.")
-    return url.rstrip("/")
+    """
+    Returns the configured generator API address.
+    :param override: Optional API address for this request.
+    :return: Normalized HTTP API URL.
+    :raises typer.BadParameter: If the API address is invalid.
+    """
+    url = override if override is not None else Settings.API.TOPOLOGY_GENERATOR_URL
+    if not isinstance(url, str) or not url.strip().startswith(("http://", "https://")):
+        raise typer.BadParameter("Set an http(s) generator API URL via --generator-url or the settings.")
+    return url.strip().rstrip("/")
 
 
-def load_graph(path: Path) -> Graph:
-    """Validates a topology file and returns its graph."""
+def load_graph(path: Path):
+    """
+    Validates a topology file and returns its graph.
+    :param path: Topology YAML path.
+    :return: Validated topology graph.
+    :raises FileNotFoundError: If the topology file is missing.
+    :raises ValueError: If the topology is invalid.
+    :raises KeyError: If required topology fields are missing.
+    :raises TypeError: If topology fields have invalid types.
+    :raises TimeoutError: If the template service cannot respond in time.
+    """
     from src.graph import Graph
     from src.topology_file_validation import TopologyFileValidation
 
@@ -34,58 +43,76 @@ def load_graph(path: Path) -> Graph:
     return Graph(validator.nodes, validator.edges)
 
 
-def generate_topology(prompt: str, output: Path, url: str | None = None) -> Graph:
-    """Generates a valid topology through the website API and saves its YAML."""
-    import requests
-
-    base_url = generator_url(url)
-    max_retries = Settings.LLM.MAX_RETRIES if isinstance(Settings.LLM.MAX_RETRIES, int) else 2
+def generate_topology(prompt: str, output: Path, url: str | None = None):
+    """
+    Generates, validates, and saves a topology configuration.
+    :param prompt: Natural-language topology description.
+    :param output: Destination YAML file.
+    :param url: Optional generator API URL.
+    :return: Graph for the saved topology.
+    :raises typer.BadParameter: If the input or destination is invalid.
+    :raises typer.Exit: If no valid topology can be generated.
+    :raises TimeoutError: If the generator request times out.
+    :raises RuntimeError: If the generator service fails.
+    :raises OSError: If the output cannot be written.
+    """
+    if not prompt.strip():
+        raise typer.BadParameter("The topology description must not be empty.")
     output = output.expanduser().resolve()
     if not output.parent.is_dir():
         raise typer.BadParameter(f"Output directory does not exist: {output.parent}")
     if output.suffix.lower() not in (".yml", ".yaml"):
         raise typer.BadParameter("Output must be a .yaml or .yml file.")
 
-    for attempt in range(1, max_retries + 2):
-        try:
-            response = requests.post(
-                f"{base_url}/api/generate-topology",
-                json={"prompt": prompt},
-                timeout=120,
-            )
-            response.raise_for_status()
-            result = response.json()
-        except (requests.RequestException, ValueError) as exc:
-            typer.secho(f"Generator API failed: {exc}", fg=typer.colors.RED, err=True)
-            raise typer.Exit(code=1) from exc
-
-        if not isinstance(result, dict):
-            typer.secho("Generator API returned an invalid response.", fg=typer.colors.RED, err=True)
-            raise typer.Exit(code=1)
-        for warning in result.get("warnings", []):
+    api_url = generator_url(url)
+    retries = Settings.API.GENERATOR.MAX_RETRIES
+    for attempt in range(1, retries + 2):
+        result = TopologyGeneratorConnection.generate_topology(prompt, url=api_url)
+        warnings = result.get("warnings") or []
+        if not isinstance(warnings, list):
+            warnings = [warnings]
+        for warning in warnings:
             typer.secho(f"Warning: {warning}", fg=typer.colors.YELLOW, err=True)
-        if result.get("valid") is not True or not isinstance(result.get("yaml"), str):
-            typer.secho(f"Generation attempt {attempt} returned no valid YAML.", fg=typer.colors.YELLOW, err=True)
+
+        generated_yaml = result.get("yaml")
+        if result.get("valid") is not True or not isinstance(generated_yaml, str) or not generated_yaml.strip():
+            typer.secho(
+                f"Attempt {attempt}/{retries + 1}: generator did not return valid YAML.",
+                fg=typer.colors.YELLOW,
+                err=True,
+            )
             continue
 
-        tmp_path = None
+        temporary_path = None
         try:
             with tempfile.NamedTemporaryFile(
-                "w", suffix=".yaml", prefix=".topology-", encoding="utf-8", dir=output.parent, delete=False
-            ) as tmp:
-                tmp.write(result["yaml"])
-                tmp_path = Path(tmp.name)
-            graph = load_graph(tmp_path)
-            tmp_path.replace(output)
+                mode="w",
+                encoding="utf-8",
+                suffix=".yaml",
+                prefix=".topology-",
+                dir=output.parent,
+                delete=False,
+            ) as temporary:
+                temporary.write(generated_yaml)
+                temporary_path = Path(temporary.name)
+            try:
+                graph = load_graph(temporary_path)
+            except Exception as exc:  # noqa: BLE001
+                typer.secho(
+                    f"Attempt {attempt}/{retries + 1}: topology validation failed: {exc}",
+                    fg=typer.colors.YELLOW,
+                    err=True,
+                )
+                continue
+            temporary_path.replace(output)
             typer.secho(f"Topology saved to {output}", fg=typer.colors.GREEN)
             return graph
-        except (ValueError, TypeError, KeyError, RuntimeError, FileNotFoundError) as exc:
-            typer.secho(f"Generation attempt {attempt} failed validation: {exc}", fg=typer.colors.YELLOW, err=True)
         finally:
-            if tmp_path is not None:
-                tmp_path.unlink(missing_ok=True)
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
+
     typer.secho(
-        f"No valid topology after {max_retries + 1} attempts; existing output was not changed.",
+        f"No valid topology after {retries + 1} attempts; existing output was not changed.",
         fg=typer.colors.RED,
         err=True,
     )

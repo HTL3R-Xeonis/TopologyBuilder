@@ -28,9 +28,15 @@ gns3:
 
 
 api:
-  gns3_template_server_url: "http://10.20.20.171:8001"
   esxi_template_server_url: "http://10.20.20.171:8000"
+  gns3_template_server_url: "http://10.20.20.171:8001"
+  topology_generator_url: "http://10.20.20.172:8002"
   literal_api_values:
+
+  generator:
+    max_retries: 3
+    topology_generator_timeout_seconds: 1800
+
   literal_esxi_templates:
     - "pfSense"
     - "mint21"
@@ -52,3 +58,4 @@ api:
     - "Cisco IOSvL2 15.2.1"
     - "Cloud"
     - "ATM switch"
+

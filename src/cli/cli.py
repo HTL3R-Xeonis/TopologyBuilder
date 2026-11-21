@@ -129,16 +129,59 @@ def visualize(
         graph.visualize()
 
 
+def _read_prompt(prompt: str | None, prompt_file: Path | None) -> str:
+    """
+    Returns a topology prompt from an argument or a text file.
+    :param prompt: Direct natural-language description.
+    :param prompt_file: File containing a natural-language description.
+    :return: The topology prompt.
+    :raises typer.BadParameter: If the prompt is missing or invalid.
+    """
+    if (prompt is None) == (prompt_file is None):
+        raise typer.BadParameter("Provide either a prompt or --prompt-file.")
+    if prompt_file is not None:
+        try:
+            prompt = prompt_file.expanduser().read_text(encoding="utf-8")
+        except OSError as exc:
+            raise typer.BadParameter(f"Cannot read prompt file: {prompt_file}") from exc
+    if not prompt or not prompt.strip():
+        raise typer.BadParameter("The topology description must not be empty.")
+    return prompt.strip()
+
+
+def _show_generated_topology_summary(graph) -> None:
+    """
+    Displays the device types and images used in a generated topology.
+    :param graph: Generated topology graph.
+    """
+    from collections import Counter
+
+    roles = Counter(node.role for node in graph.nodes.values())
+    images = Counter(node.image for node in graph.nodes.values())
+
+    typer.echo("\nTopology summary:")
+    typer.echo(f"  Devices ({len(graph.nodes)}):")
+    for role, count in sorted(roles.items(), key=lambda item: (-item[1], item[0])):
+        typer.echo(f"    {role}: {count}")
+
+    typer.echo(f"  Images ({len(images)}):")
+    for image, count in sorted(images.items(), key=lambda item: (-item[1], item[0])):
+        typer.echo(f"    {image}: {count} {'device' if count == 1 else 'devices'}")
+
+
 @app.command()
 @cli_errors
 def generate(
-    prompt: str = typer.Argument(..., help="Topology description."),
+    prompt: str | None = typer.Argument(None, help="Natural-language topology description."),
+    prompt_file: Path | None = typer.Option(None, "--prompt-file", help="Read the prompt from a text file."),
     output: Path | None = typer.Option(None, "--output", "-o", help="Generated YAML file path."),
-    generator_url: str | None = typer.Option(None, "--generator-url", help="Topology Generator website API URL."),
+    generator_url: str | None = typer.Option(None, "--generator-url", help="Generator API URL."),
 ) -> None:
-    """Generates and validates YAML through the generator website API."""
-    graph = generate_topology(prompt, output or Path(Settings.TOPOLOGY_FILE), generator_url)
+    """Generates, validates, and displays a topology from the generator AI."""
+    description = _read_prompt(prompt, prompt_file)
+    graph = generate_topology(description, output or Path(Settings.TOPOLOGY_FILE), generator_url)
     graph.visualize()
+    _show_generated_topology_summary(graph)
 
 
 @app.command()

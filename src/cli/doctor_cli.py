@@ -8,7 +8,6 @@ if TYPE_CHECKING:
     from src.connections import ESXiConnection
     from src.doctor.doctor import Doctor
 
-import os
 from pathlib import Path
 
 import typer
@@ -61,7 +60,7 @@ def preflight(
     from src.doctor.doctor import Doctor, check_generator_api, check_template_apis
 
     results = check_template_apis()
-    results.extend(check_generator_api(generator_url or os.getenv("TOPOLOGY_GENERATOR_URL")))
+    results.extend(check_generator_api(generator_url or Settings.API.TOPOLOGY_GENERATOR_URL))
     try:
         results.extend(Doctor(_connection()).check_setup())
     except (ConnectionError, TimeoutError, ValueError, RuntimeError, TypeError) as exc:
