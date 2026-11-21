@@ -18,11 +18,28 @@ app.add_typer(doctor_app, name="doctor", help="Read-only health checks.")
 app.command("deploy")(deploy)
 app.command("destroy")(destroy)
 
-# app.command("verify")(verify)
-# app.command("preflight")(preflight)
-# app.command("status")(status)
-# app.command("portgroups")(portgroups)
-# app.command("orphans")(orphans)
+
+def apply_esxi_options(
+    address: str | None = None,
+    esxi_username: str | None = None,
+    esxi_password: str | None = None,
+    gns3_vm_name: str | None = None,
+    datastore: str | None = None,
+    virtual_switch: str | None = None,
+    trunk_port_group: str | None = None,
+) -> None:
+    """Applies provided ESXi connection and deployment settings."""
+    for value, key in (
+        (address, "IP"),
+        (esxi_username, "USERNAME"),
+        (esxi_password, "PASSWORD"),
+        (gns3_vm_name, "GNS3_VM_NAME"),
+        (datastore, "DATASTORE"),
+        (virtual_switch, "VIRTUAL_SWITCH"),
+        (trunk_port_group, "TRUNK_PORT_GROUP"),
+    ):
+        if value is not None:
+            setattr(Settings.ESXI, key, value)
 
 
 @app.callback()
@@ -36,12 +53,24 @@ def main(
     literal_api_values: bool = typer.Option(
         False,
         "--literal-api-values",
-        "--literal_api_values",
         "-l",
         help="Use configured template names without API calls.",
     ),
+    address: str | None = typer.Option(None, "--address", "-a", help="ESXi host IP address."),
+    esxi_username: str | None = typer.Option(None, "--esxi-username", help="ESXi username."),
+    esxi_password: str | None = typer.Option(None, "--esxi-password", help="ESXi password.", hide_input=True),
+    gns3_vm_name: str | None = typer.Option(None, "--gns3-vm-name", help="GNS3 VM name."),
+    datastore: str | None = typer.Option(None, "--datastore", help="ESXi datastore."),
+    virtual_switch: str | None = typer.Option(None, "--virtual-switch", help="ESXi internal vSwitch."),
+    trunk_port_group: str | None = typer.Option(None, "--trunk-port-group", help="GNS3 VLAN trunk port group."),
+    gns3_username: str | None = typer.Option(None, "--gns3-username", "-u", help="GNS3 SSH username."),
+    gns3_password: str | None = typer.Option(None, "--gns3-password", "-p", help="GNS3 SSH password.", hide_input=True),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", "-d", help="Preview deploy or destroy without changing resources."
+    ),
 ) -> None:
-    """Loads project settings and command-line overrides."""
+    """
+    Loads project settings and applies shared command-line overrides."""
     import os
 
     # Reading settings must not request passwords when showing help or validating files.
@@ -53,12 +82,29 @@ def main(
     finally:
         for name in missing:
             os.environ.pop(name, None)
+
     if verbosity is not None:
         Settings.VERBOSITY_LEVEL = verbosity
     if topology is not None:
         Settings.TOPOLOGY_FILE = str(topology)
     if literal_api_values:
         Settings.API.LITERAL_API_VALUES = True
+
+    apply_esxi_options(
+        address=address,
+        esxi_username=esxi_username,
+        esxi_password=esxi_password,
+        gns3_vm_name=gns3_vm_name,
+        datastore=datastore,
+        virtual_switch=virtual_switch,
+        trunk_port_group=trunk_port_group,
+    )
+    if gns3_username is not None:
+        Settings.GNS3.USERNAME = gns3_username
+    if gns3_password is not None:
+        Settings.GNS3.PASSWORD = gns3_password
+    if dry_run:
+        Settings.IS_DRY_RUN = True
 
 
 @app.command()

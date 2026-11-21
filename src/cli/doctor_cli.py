@@ -16,7 +16,6 @@ import typer
 from src.doctor.status import Status, StatusList
 from src.settings import Settings
 
-from .connect_cli import ADDRESS, DATASTORE, ESXI_PASSWORD, ESXI_USER, GNS3_VM, TRUNK, VSWITCH, apply_esxi_options
 from .errors import cli_errors
 from .generator import load_graph
 
@@ -57,18 +56,10 @@ def preflight(
     generator_url: str | None = typer.Option(
         None, "--generator-url", help="Optional Topology Generator website API URL."
     ),
-    address: str | None = ADDRESS,
-    esxi_username: str | None = ESXI_USER,
-    esxi_password: str | None = ESXI_PASSWORD,
-    gns3_vm_name: str | None = GNS3_VM,
-    datastore: str | None = DATASTORE,
-    virtual_switch: str | None = VSWITCH,
-    trunk_port_group: str | None = TRUNK,
 ) -> None:
     """Checks deployment prerequisites without altering any resources."""
     from src.doctor.doctor import Doctor, check_generator_api, check_template_apis
 
-    apply_esxi_options(address, esxi_username, esxi_password, gns3_vm_name, datastore, virtual_switch, trunk_port_group)
     results = check_template_apis()
     results.extend(check_generator_api(generator_url or os.getenv("TOPOLOGY_GENERATOR_URL")))
     try:
@@ -83,17 +74,8 @@ def preflight(
 def verify(
     graph: bool = typer.Option(False, "--graph", "-g", help="Check deployed topology."),
     setup: bool = typer.Option(False, "--setup", "-s", help="Check ESXi and GNS3 setup."),
-    address: str | None = ADDRESS,
-    esxi_username: str | None = ESXI_USER,
-    esxi_password: str | None = ESXI_PASSWORD,
-    gns3_vm_name: str | None = GNS3_VM,
-    datastore: str | None = DATASTORE,
-    virtual_switch: str | None = VSWITCH,
-    trunk_port_group: str | None = TRUNK,
 ) -> None:
     """Verifies the setup, deployed topology, or both."""
-    apply_esxi_options(address, esxi_username, esxi_password, gns3_vm_name, datastore, virtual_switch, trunk_port_group)
-    # Without flags, verify both. Explicit flags limit the scope.
     check_setup = setup or not (setup or graph)
     check_graph = graph or not (setup or graph)
     topology = load_graph(Path(Settings.TOPOLOGY_FILE)) if check_graph else None
@@ -102,7 +84,6 @@ def verify(
     try:
         if check_setup:
             results.extend(doctor.check_setup())
-
         if check_graph:
             results.extend(doctor.is_graph_deployed(topology))
 
@@ -113,26 +94,15 @@ def verify(
 
 @doctor_app.command()
 @cli_errors
-def status(
-    address: str | None = ADDRESS,
-    esxi_username: str | None = ESXI_USER,
-    esxi_password: str | None = ESXI_PASSWORD,
-    gns3_vm_name: str | None = GNS3_VM,
-) -> None:
+def status() -> None:
     """Lists connected services and the state of GNS3 projects."""
-    apply_esxi_options(address, esxi_username, esxi_password, gns3_vm_name)
     _report(_get_doctor().status())
 
 
 @doctor_app.command()
 @cli_errors
-def portgroups(
-    address: str | None = ADDRESS,
-    esxi_username: str | None = ESXI_USER,
-    esxi_password: str | None = ESXI_PASSWORD,
-) -> None:
+def portgroups() -> None:
     """Lists the port groups on the ESXi host."""
-    apply_esxi_options(address, esxi_username, esxi_password)
     for name, vlan, switch in _get_doctor().esxi_doctor.list_port_groups():
         typer.echo(f"{name} (VLAN {vlan}) on {switch}")
 
@@ -145,19 +115,14 @@ def get(
     """Provides the legacy port-group listing command."""
     if not port_groups:
         raise typer.BadParameter("Specify --port-groups, or use 'doctor portgroups'.")
-    # The nested 'connect' callback already applies its ESXi settings.
+    # The main CLI callback already applies the shared ESXi settings.
     for name, vlan, switch in _get_doctor().esxi_doctor.list_port_groups():
         typer.echo(f"{name} (VLAN {vlan}) on {switch}")
 
 
 @doctor_app.command()
 @cli_errors
-def orphans(
-    address: str | None = ADDRESS,
-    esxi_username: str | None = ESXI_USER,
-    esxi_password: str | None = ESXI_PASSWORD,
-) -> None:
+def orphans() -> None:
     """Lists possible orphaned resources without deleting anything."""
-    apply_esxi_options(address, esxi_username, esxi_password)
     graph = load_graph(Path(Settings.TOPOLOGY_FILE))
     _report(_get_doctor().find_orphans(graph))

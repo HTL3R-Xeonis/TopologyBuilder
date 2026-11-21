@@ -6,55 +6,10 @@ import typer
 
 from src.settings import Settings
 
+from ..graph import Graph
 from .errors import cli_errors
 
 connection_app = typer.Typer(help="Deployment and connection commands.", add_completion=False)
-
-ADDRESS = typer.Option(None, "--address", "-a", help="ESXi host IP address.")
-ESXI_USER = typer.Option(None, "--esxi-username", "--esxi_username", help="ESXi username.")
-ESXI_PASSWORD = typer.Option(None, "--esxi-password", "--esxi_password", help="ESXi password.", hide_input=True)
-GNS3_VM = typer.Option(None, "--gns3-vm-name", "--gns3_vm_name", help="GNS3 VM name.")
-DATASTORE = typer.Option(None, "--datastore", help="ESXi datastore.")
-VSWITCH = typer.Option(None, "--virtual-switch", "--virtual_switch", help="ESXi internal vSwitch.")
-TRUNK = typer.Option(None, "--trunk-port-group", "--trunk_port_group", help="GNS3 VLAN trunk port group.")
-
-
-def apply_esxi_options(
-    address: str | None = None,
-    esxi_username: str | None = None,
-    esxi_password: str | None = None,
-    gns3_vm_name: str | None = None,
-    datastore: str | None = None,
-    virtual_switch: str | None = None,
-    trunk_port_group: str | None = None,
-) -> None:
-    """Applies provided ESXi connection and deployment settings."""
-    for value, key in (
-        (address, "IP"),
-        (esxi_username, "USERNAME"),
-        (esxi_password, "PASSWORD"),
-        (gns3_vm_name, "GNS3_VM_NAME"),
-        (datastore, "DATASTORE"),
-        (virtual_switch, "VIRTUAL_SWITCH"),
-        (trunk_port_group, "TRUNK_PORT_GROUP"),
-    ):
-        if value is not None:
-            setattr(Settings.ESXI, key, value)
-
-
-@connection_app.callback()
-@cli_errors
-def connection_main(
-    address: str | None = ADDRESS,
-    esxi_username: str | None = ESXI_USER,
-    esxi_password: str | None = ESXI_PASSWORD,
-    gns3_vm_name: str | None = GNS3_VM,
-    datastore: str | None = DATASTORE,
-    virtual_switch: str | None = VSWITCH,
-    trunk_port_group: str | None = TRUNK,
-) -> None:
-    """Configures the connection for nested commands."""
-    apply_esxi_options(address, esxi_username, esxi_password, gns3_vm_name, datastore, virtual_switch, trunk_port_group)
 
 
 def _get_orchestrator(existing_project_only: bool = False):
@@ -158,19 +113,14 @@ def _show_changes(changes, only_deletions: bool = False) -> None:
         raise typer.Exit(code=1)
 
 
-def deploy_graph(graph, dry_run: bool = False, incremental: bool = False) -> None:
+def deploy_graph(graph: Graph) -> None:
     """
     Deploys a graph or displays its infrastructure change plan.
     :param graph: Desired topology.
-    :param dry_run: Preview changes without modifying infrastructure.
-    :param incremental: Unavailable incremental deployment option.
-    :raises typer.Exit: If incremental deployment is requested or conflicts exist.
+    :raises typer.Exit: If the change plan contains conflicts.
     :raises RuntimeError: If infrastructure inspection or deployment fails.
     """
-    if incremental:
-        typer.secho("Incremental deployment is not implemented in this project version.", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=2)
-    preview = dry_run or Settings.IS_DRY_RUN
+    preview = bool(Settings.IS_DRY_RUN)
     orchestrator = _get_orchestrator(existing_project_only=preview)
     changes = orchestrator.plan_topology_deployment(graph)
     if preview:
@@ -192,55 +142,21 @@ def deploy_graph(graph, dry_run: bool = False, incremental: bool = False) -> Non
 @connection_app.command()
 @cli_errors
 def deploy(
-    address: str | None = ADDRESS,
-    esxi_username: str | None = ESXI_USER,
-    esxi_password: str | None = ESXI_PASSWORD,
-    gns3_vm_name: str | None = GNS3_VM,
-    datastore: str | None = DATASTORE,
-    virtual_switch: str | None = VSWITCH,
-    trunk_port_group: str | None = TRUNK,
-    gns3_username: str | None = typer.Option(None, "--gns3-username", "--gns3_username", "-u"),
-    gns3_password: str | None = typer.Option(None, "--gns3-password", "--gns3_password", "-p", hide_input=True),
-    dry_run: bool = typer.Option(
-        False, "--dry-run", "--dry_run", "-d", help="Preview deployment without modifying resources."
-    ),
-    incremental: bool = typer.Option(False, "--incremental", "-i", help="Unavailable in this project version."),
+    new: bool = typer.Option(False, "--new", "-n", help="Unavailable in this project version."),
 ) -> None:
     """Validates and deploys the configured topology or previews its changes."""
     from .generator import load_graph
 
-    apply_esxi_options(address, esxi_username, esxi_password, gns3_vm_name, datastore, virtual_switch, trunk_port_group)
-    if gns3_username is not None:
-        Settings.GNS3.USERNAME = gns3_username
-    if gns3_password is not None:
-        Settings.GNS3.PASSWORD = gns3_password
-    if incremental:
-        typer.secho("Incremental deployment is not implemented in this project version.", fg=typer.colors.RED, err=True)
+    if new:
+        typer.secho("'--new' deployment is not implemented in this project version.", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2)
     graph = load_graph(Path(Settings.TOPOLOGY_FILE))
-    deploy_graph(graph, dry_run=dry_run)
-
-
-@connection_app.command("generate-deploy")
-@cli_errors
-def generate_deploy(*args, **kwargs) -> None:
-    """Generates, validates, and deploys a topology."""
-    typer.secho("Unsupported Option. Instead use 'generate' and 'deploy'.")
+    deploy_graph(graph)
 
 
 @connection_app.command()
 @cli_errors
 def destroy(
-    address: str | None = ADDRESS,
-    esxi_username: str | None = ESXI_USER,
-    esxi_password: str | None = ESXI_PASSWORD,
-    gns3_vm_name: str | None = GNS3_VM,
-    datastore: str | None = DATASTORE,
-    virtual_switch: str | None = VSWITCH,
-    trunk_port_group: str | None = TRUNK,
-    gns3_username: str | None = typer.Option(None, "--gns3-username", "--gns3_username", "-u"),
-    gns3_password: str | None = typer.Option(None, "--gns3-password", "--gns3_password", "-p", hide_input=True),
-    dry_run: bool = typer.Option(False, "--dry-run", "--dry_run", "-d", help="Preview without deleting resources."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Confirm deletion without prompting."),
 ) -> None:
     """Removes resources belonging to the configured topology."""
@@ -248,11 +164,6 @@ def destroy(
 
     from .generator import load_graph
 
-    apply_esxi_options(address, esxi_username, esxi_password, gns3_vm_name, datastore, virtual_switch, trunk_port_group)
-    if gns3_username is not None:
-        Settings.GNS3.USERNAME = gns3_username
-    if gns3_password is not None:
-        Settings.GNS3.PASSWORD = gns3_password
     graph = load_graph(Path(Settings.TOPOLOGY_FILE))
     orchestrator = _get_orchestrator(existing_project_only=True)
     changes = orchestrator.plan_topology_destruction(graph)
@@ -261,7 +172,7 @@ def destroy(
     if not changes.has_changes:
         typer.echo("No graph-owned resources found; nothing to delete.")
         return
-    if dry_run or Settings.IS_DRY_RUN:
+    if Settings.IS_DRY_RUN:
         typer.echo("DRY RUN: No ESXi or GNS3 resources changed.")
         return
     if not yes and not typer.confirm("Permanently delete these topology resources?", default=False):
