@@ -87,6 +87,7 @@ jobs:
       - name: Check out the tagged commit
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
+          fetch-depth: 0  # the tags and the history, for the release notes
           persist-credentials: false
 
       - name: Build the source tarball and its SHA-256
@@ -101,6 +102,31 @@ jobs:
           (cd dist && sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256" && sha256sum --check "${name}.tar.gz.sha256")
           ls -l dist
 
+      - name: Write the release notes from the commits since the previous release
+        env:
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # the commits between the previous release tag and this one (direct pushes included, not only merged pull requests)
+          previous="$(git describe --tags --abbrev=0 --match 'v*' "${TAG}^" 2>/dev/null || true)"
+          {
+            if [[ -n "$previous" ]]; then
+              echo "Changes since ${previous}:"
+              range="${previous}..${TAG}"
+            else
+              echo "First release, all changes so far:"
+              range="${TAG}"
+            fi
+            echo
+            git log --no-merges --pretty='- %s (%h)' "$range"
+            if [[ -n "$previous" ]]; then
+              echo
+              echo "Full comparison: https://github.com/${REPO}/compare/${previous}...${TAG}"
+            fi
+          } > dist/RELEASE_NOTES.md
+          cat dist/RELEASE_NOTES.md
+
       - name: Create the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -110,7 +136,7 @@ jobs:
           set -euo pipefail
           version="${TAG#v}"
           name="${COMPONENT}-${version}"
-          flags=(--verify-tag --generate-notes --title "$TAG")
+          flags=(--verify-tag --notes-file dist/RELEASE_NOTES.md --title "$TAG")
           if [[ "$version" == *-* ]]; then
             flags+=(--prerelease)
           fi
