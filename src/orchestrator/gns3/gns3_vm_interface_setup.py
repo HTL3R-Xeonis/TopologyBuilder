@@ -179,32 +179,51 @@ class GNS3VMInterfaceSetup:
 
     def remove_managed_vlans(self, vlan_names: set[str]) -> None:
         """
-        Removes only the selected project-managed VLAN interfaces.
-        :param vlan_names: Managed VLAN interface names to remove.
-        :raises RuntimeError: If the managed configuration is invalid or cannot be updated.
+        Removes selected topology-owned VLANs from Netplan and the running system.
+        :param vlan_names: VLAN interfaces approved for deletion.
+        :raises RuntimeError: If a VLAN cannot be safely removed or removal fails.
         """
         if not vlan_names or Settings.IS_DRY_RUN:
             return
         if any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,14}", name) for name in vlan_names):
             raise RuntimeError("Invalid managed VLAN interface name")
-        if not vlan_names.issubset(self.get_managed_vlan_names()):
-            raise RuntimeError("A requested VLAN is no longer managed by TopologyBuilder")
-        previous = self._run_command(f"sudo sh -c 'if [ -f {self.NETPLAN_FILE} ]; then cat {self.NETPLAN_FILE}; fi'")
-        document = yaml.safe_load(previous)
-        vlans = document["network"]["vlans"]
-        for name in vlan_names:
-            del vlans[name]
-        if vlans:
-            content = self.NETPLAN_MARKER + yaml.safe_dump(document, sort_keys=False)
-            self._run_command(f"sudo tee {self.NETPLAN_FILE} > /dev/null", content)
-            self._run_command(f"sudo chmod 600 {self.NETPLAN_FILE}")
-        else:
-            self._run_command(f"sudo rm -f {self.NETPLAN_FILE}")
-        self._run_command("sudo netplan generate")
-        current = self._get_existing_subinterfaces()
-        for name in sorted(vlan_names & current.keys()):
+
+        managed = self.get_managed_vlan_names()
+        running = self._get_existing_subinterfaces()
+        unmanaged_running = (vlan_names & running.keys()) - managed
+        for name in sorted(unmanaged_running):
+            if self.vlans.get(name) != running[name][0]:
+                raise RuntimeError(f"Refusing to remove untracked VLAN interface {name}: VLAN ID differs")
+
+        managed_targets = vlan_names & managed
+        if managed_targets:
+            previous = self._run_command(
+                f"sudo sh -c 'if [ -f {self.NETPLAN_FILE} ]; then cat {self.NETPLAN_FILE}; fi'"
+            )
+            document = yaml.safe_load(previous)
+            vlans = document["network"]["vlans"]
+            for name in managed_targets:
+                del vlans[name]
+            if vlans:
+                content = self.NETPLAN_MARKER + yaml.safe_dump(document, sort_keys=False)
+                self._run_command(f"sudo tee {self.NETPLAN_FILE} > /dev/null", content)
+                self._run_command(f"sudo chmod 600 {self.NETPLAN_FILE}")
+            else:
+                self._run_command(f"sudo rm -f {self.NETPLAN_FILE}")
+            self._run_command("sudo netplan generate")
+
+        for name in sorted(vlan_names & running.keys()):
             self._run_command(f"sudo ip link delete dev {name}")
-        self._run_command("sudo netplan apply")
+        if managed_targets:
+            self._run_command("sudo netplan apply")
+
+        remaining_managed = self.get_managed_vlan_names() & vlan_names
+        remaining_running = self._get_existing_subinterfaces().keys() & vlan_names
+        if remaining_managed or remaining_running:
+            raise RuntimeError(
+                "VLAN interfaces could not be removed: " + ", ".join(sorted(remaining_managed | remaining_running))
+            )
+        logger.info(f"Removed GNS3 VLAN interfaces: {', '.join(sorted(vlan_names))}")
 
     def apply_yaml(self) -> tuple[int, str, str]:
         """
