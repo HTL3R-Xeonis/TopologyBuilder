@@ -21,7 +21,13 @@ def check_value_type[T](value: Any, value_type: type[T] | tuple[type[T], ...]) -
     from loguru import logger
 
     if not isinstance(value, value_type):
-        logger.error(msg := f"Setting value {value} is of wrong type {type(value)}. Should be of type {value_type}.")
+        import sys
+
+        caller_locals = sys._getframe(1).f_locals
+        setting_name = caller_locals.get("key", "unknown")
+        logger.error(
+            msg := f"Setting value {setting_name} is of wrong type {type(value)}. Should be of type {value_type}."
+        )
         raise TypeError(msg)
     return value
 
@@ -268,6 +274,18 @@ class Settings:
                     Settings.GNS3.PORT = check_value_type(value, (int, type(None)))
                 case "parent_interface":
                     Settings.GNS3.PARENT_INTERFACE = check_value_type(value, str)
+                case "ignore_nodes":
+                    value = check_value_type(value, (list, set, type(None)))
+                    if value is None:
+                        Settings.GNS3.IGNORE_NODES = set()
+                    else:
+                        Settings.GNS3.IGNORE_NODES = set(value)
+                case "ignore_projects":
+                    value = check_value_type(value, (list, set, type(None)))
+                    if value is None:
+                        Settings.GNS3.IGNORE_PROJECTS = set()
+                    else:
+                        Settings.GNS3.IGNORE_PROJECTS = set(value)
                 case _:
                     logger.warning(f"Unrecognized setting: Settings.GNS3.{key.upper()}")
 
@@ -351,6 +369,10 @@ class Settings:
         """Port of the GNS3 client, where the API requests are expected."""
         PARENT_INTERFACE: str = None
         """Name of the interface of the GNS3 VM to create and delete the subinterfaces."""
+        IGNORE_NODES: set[str] = None
+        """GNS3 nodes excluded from orphan cleanup."""
+        IGNORE_PROJECTS: set[str] = None
+        """GNS3 projects excluded from cleanup by name."""
 
     class API:
         """Settings related to API requests."""

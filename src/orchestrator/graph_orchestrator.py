@@ -80,6 +80,51 @@ class GraphOrchestrator:
         changes.init_topology_changes(graph, state)
         return changes
 
+    def plan_topology_cleanup(self, graph: Graph, all_resources: bool = False) -> TopologyChanges:
+        """
+        Builds a read-only cleanup plan for unused and orphan resources.
+        :param graph: Topology whose resources must be preserved.
+        :param all_resources: Include resources absent from the graph.
+        :return: Planned cleanup operations and conflicts.
+        :raises RuntimeError: If infrastructure inventory cannot be read.
+        """
+        state = TopologyState()
+        state.get_topology_state(graph, self.esxi_orchestrator.esxi_connection, self.gns3_orchestrator.gns3_connection)
+        state.get_gns3_projects_state(self.gns3_orchestrator.gns3_connection)
+        changes = TopologyChanges(self.esxi_orchestrator, self.gns3_orchestrator)
+        changes.init_topology_cleanup(graph, state, all_resources=all_resources)
+        return changes
+
+    def apply_topology_cleanup(self, changes: TopologyChanges) -> None:
+        """
+        Deletes resources from a validated cleanup plan.
+        :param changes: Planned deletions and conflicts.
+        :raises RuntimeError: If cleanup is unsafe or a resource cannot be deleted.
+        :raises vim.fault.VimFault: If an ESXi VM task fails.
+        :raises requests.RequestException: If a GNS3 operation fails.
+        """
+        if changes.conflicts:
+            raise RuntimeError("Cannot clean infrastructure:\n- " + "\n- ".join(changes.conflicts))
+        if not changes.has_changes:
+            return
+        self._remove_graph_instances(changes)
+        if changes.to_delete["port_group"]:
+            self.esxi_orchestrator.remove_port_groups(set(changes.to_delete["port_group"]), managed_only=False)
+        for switch_name in changes.to_delete["virtual_switch"]:
+            self.esxi_orchestrator.esxi_connection.remove_virtual_switch(switch_name)
+        if changes.to_delete["vlans"]:
+            remaining = set(self.esxi_orchestrator.esxi_connection.get_all_port_groups())
+            kept = set(changes.to_delete["vlans"]) & remaining
+            if kept:
+                from loguru import logger
+
+                logger.warning(f"Keeping VLANs still used by ESXi port groups: {sorted(kept)}")
+            removable = set(changes.to_delete["vlans"]) - remaining
+            if removable:
+                changes.gns3_vlan_setup.remove_managed_vlans(removable)
+        for project in changes.to_delete["gns3_project"]:
+            self.gns3_orchestrator.gns3_connection._remove_project(project["project_id"])
+
     def plan_topology_destruction(self, graph: Graph) -> TopologyChanges:
         """
         Builds a read-only destruction plan for the graph.
@@ -130,7 +175,8 @@ class GraphOrchestrator:
             for link_id in changes.to_delete["gns3_link"]:
                 connection.delete(f"{base}/links/{link_id}")
             for node in changes.to_delete["gns3_node"]:
-                connection.delete(f"{base}/nodes/{node.node_gns3_info['node_id']}")
+                node_id = node["node_id"] if isinstance(node, dict) else node.node_gns3_info["node_id"]
+                connection.delete(f"{base}/nodes/{node_id}")
         if changes.to_delete["esxi_vm"]:
             self.esxi_orchestrator.destroy_virtual_machines(changes.to_delete["esxi_vm"])
 

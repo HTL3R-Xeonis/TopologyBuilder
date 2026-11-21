@@ -276,6 +276,46 @@ class ESXiConnection(GenericConnection):
             logger.error(msg := f"Something went wrong while removing port group {port_group_name} on host: {self.ip}")
             raise RuntimeError(msg) from exc
 
+    @staticmethod
+    def virtual_switch_has_uplinks(virtual_switch: vim.host.VirtualSwitch) -> bool:
+        """
+        Checks whether a switch has physical host adapters assigned.
+        :param virtual_switch: ESXi standard virtual switch.
+        :return: True if physical uplinks are configured.
+        """
+        if getattr(virtual_switch, "pnic", None):
+            return True
+        bridge = getattr(getattr(virtual_switch, "spec", None), "bridge", None)
+        return bool(getattr(bridge, "nicDevice", None) or getattr(bridge, "device", None))
+
+    def remove_virtual_switch(self, virtual_switch_name: str) -> None:
+        """
+        Removes an unused, unprotected standard ESXi virtual switch.
+        :param virtual_switch_name: Switch approved for cleanup.
+        :raises RuntimeError: If the switch is protected, used or cannot be removed.
+        """
+        protected = set(Settings.ESXI.IGNORE_VIRTUAL_SWITCHES or ())
+        protected.add(Settings.ESXI.VIRTUAL_SWITCH)
+        if virtual_switch_name in protected:
+            raise RuntimeError(f"Refusing to remove protected virtual switch {virtual_switch_name}")
+        host = self.get_esxi_object(vim.HostSystem)
+        if host is None or getattr(host.config, "network", None) is None:
+            raise RuntimeError("Cannot inspect ESXi network inventory")
+        current = self.get_virtual_switch(virtual_switch_name)
+        if current is None:
+            return
+        if self.virtual_switch_has_uplinks(current):
+            raise RuntimeError(f"Refusing to remove virtual switch {virtual_switch_name}: physical uplinks exist")
+        if any(group.spec.vswitchName == virtual_switch_name for group in host.config.network.portgroup or []):
+            raise RuntimeError(f"Refusing to remove virtual switch {virtual_switch_name}: port groups remain")
+        network_system = host.configManager.networkSystem
+        if network_system is None:
+            raise RuntimeError("Cannot access ESXi network system")
+        try:
+            network_system.RemoveVirtualSwitch(vswitchName=virtual_switch_name)
+        except Exception as exc:
+            raise RuntimeError(f"Could not remove virtual switch {virtual_switch_name}: {exc}") from exc
+
     def get_virtual_machine(self, vm_name: str) -> vim.VirtualMachine | None:
         """
         Searches for a VM with given name.

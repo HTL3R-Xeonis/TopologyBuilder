@@ -6,7 +6,7 @@ import typer
 
 from src.settings import Settings, Verbosity
 
-from .connect_cli import deploy, destroy
+from .connect_cli import cleanup, deploy, destroy
 from .doctor_cli import doctor_app
 from .errors import cli_errors
 from .generator import generate_topology, load_graph
@@ -17,6 +17,7 @@ app.add_typer(doctor_app, name="doctor", help="Read-only health checks.")
 # Flat commands matching the dev branch; nested commands remain available.
 app.command("deploy")(deploy)
 app.command("destroy")(destroy)
+app.command("cleanup")(cleanup)
 
 
 def apply_esxi_options(
@@ -66,11 +67,10 @@ def main(
     gns3_username: str | None = typer.Option(None, "--gns3-username", "-u", help="GNS3 SSH username."),
     gns3_password: str | None = typer.Option(None, "--gns3-password", "-p", help="GNS3 SSH password.", hide_input=True),
     dry_run: bool = typer.Option(
-        False, "--dry-run", "-d", help="Preview deploy or destroy without changing resources."
+        False, "--dry-run", "-d", help="Preview deploy, destroy or cleanup without changing resources."
     ),
 ) -> None:
-    """
-    Loads project settings and applies shared command-line overrides."""
+    """Loads project settings and applies shared CLI overrides."""
     import os
 
     # Reading settings must not request passwords when showing help or validating files.

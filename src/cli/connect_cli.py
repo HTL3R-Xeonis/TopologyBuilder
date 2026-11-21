@@ -43,6 +43,8 @@ def _describe_change(kind: str, item, changes) -> str:
     """
     if kind == "port_group" and isinstance(item, tuple):
         return f"{item[0]} (VLAN {item[1]})"
+    if kind == "gns3_project":
+        return f"{item['name']} ({item['project_id']})"
     if kind == "gns3_link" and isinstance(item, tuple):
         first, second = item
         first_interface = first.get_interface(second)
@@ -51,6 +53,8 @@ def _describe_change(kind: str, item, changes) -> str:
         right = second_interface.name if second_interface is not None else "?"
         return f"{first.name}[{left}] <-> {second.name}[{right}]"
     if kind == "gns3_node":
+        if isinstance(item, dict):
+            return f"{item['name']} ({item['node_id']})"
         if isinstance(item, tuple):
             node, properties = item
             return f"{node.name}: {properties}"
@@ -88,6 +92,7 @@ def _show_changes(changes, only_deletions: bool = False) -> None:
         "gns3_vm_adapter": "GNS3 host VM adapter(s)",
         "gns3_node": "GNS3 node(s)",
         "gns3_link": "GNS3 link(s)",
+        "gns3_project": "GNS3 project(s)",
         "vlans": "GNS3 VLAN interface(s)",
     }
     pools = (
@@ -113,6 +118,33 @@ def _show_changes(changes, only_deletions: bool = False) -> None:
         raise typer.Exit(code=1)
 
 
+def _show_dry_run_summary(changes, project_action: str | None = None) -> None:
+    """
+    Summarizes planned operations without applying infrastructure changes.
+    :param changes: Topology change plan.
+    :param project_action: Optional GNS3 project addition or update.
+    """
+    counts = {
+        "Add": sum(len(items) for items in changes.to_add.values()),
+        "Update": sum(len(items) for items in changes.to_change.values()),
+        "Delete": sum(len(items) for items in changes.to_delete.values()),
+    }
+    if project_action == "Add":
+        counts["Add"] += 1
+    elif project_action == "Update":
+        counts["Update"] += 1
+
+    total = sum(counts.values())
+    if not total:
+        typer.echo("DRY RUN: No changes required.")
+        return
+
+    actions = ", ".join(f"{action.lower()}: {count}" for action, count in counts.items() if count)
+    operation = "operation" if total == 1 else "operations"
+    typer.echo(f"DRY RUN: {total} planned {operation} ({actions}).")
+    typer.echo("No changes were applied.")
+
+
 def deploy_graph(graph: Graph) -> None:
     """
     Deploys a topology or previews its planned changes.
@@ -127,14 +159,15 @@ def deploy_graph(graph: Graph) -> None:
         mode = "Fresh deployment" if Settings.NEW else "Deployment"
         typer.echo(f"DRY RUN: {mode} plan for {Settings.GNS3.PROJECT_NAME}:")
         project = orchestrator.gns3_orchestrator.gns3_connection.project_gns3_info
+        project_action = None
         if project is None:
             typer.echo(f"  Add GNS3 project: {Settings.GNS3.PROJECT_NAME}")
+            project_action = "Add"
         elif project.get("status") == "closed":
             typer.echo(f"  Open GNS3 project: {Settings.GNS3.PROJECT_NAME}")
+            project_action = "Update"
         _show_changes(changes)
-        if not changes.has_changes and project is not None and project.get("status") != "closed":
-            typer.echo("  No changes required.")
-        typer.echo("No ESXi or GNS3 resources changed.")
+        _show_dry_run_summary(changes, project_action=project_action)
         return
     if Settings.NEW:
         typer.secho(
@@ -175,14 +208,46 @@ def destroy(
     changes = orchestrator.plan_topology_destruction(graph)
     typer.echo("Topology destruction plan:")
     _show_changes(changes, only_deletions=True)
+    if Settings.IS_DRY_RUN:
+        _show_dry_run_summary(changes)
+        return
     if not changes.has_changes:
         typer.echo("No graph-owned resources found; nothing to delete.")
-        return
-    if Settings.IS_DRY_RUN:
-        typer.echo("DRY RUN: No ESXi or GNS3 resources changed.")
         return
     if not yes and not typer.confirm("Permanently delete these topology resources?", default=False):
         logger.info("Topology destruction cancelled")
         raise typer.Abort()
     orchestrator.apply_topology_destruction(changes)
     typer.secho("Topology resources removed.", fg=typer.colors.GREEN)
+
+
+def cleanup(
+    all_resources: bool = typer.Option(
+        False, "--all", help="Also remove orphan VMs, GNS3 resources and empty, non-excluded projects."
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Confirm deletion without prompting."),
+) -> None:
+    """Removes unused ESXi networks and optional orphan resources and empty projects."""
+    from .generator import load_graph
+
+    graph = load_graph(Path(Settings.TOPOLOGY_FILE))
+    orchestrator = _get_orchestrator(existing_project_only=True)
+    changes = orchestrator.plan_topology_cleanup(graph, all_resources=all_resources)
+    typer.echo(
+        "Cleanup plan (including empty GNS3 projects):" if all_resources else "Unused ESXi network cleanup plan:"
+    )
+    _show_changes(changes, only_deletions=True)
+    if Settings.IS_DRY_RUN:
+        _show_dry_run_summary(changes)
+        return
+    if not changes.has_changes:
+        typer.echo("No cleanup required.")
+        return
+    if all_resources:
+        typer.secho(
+            "WARNING: Orphan VMs, GNS3 nodes and empty projects may be permanently deleted!", fg=typer.colors.YELLOW
+        )
+    if not yes and not typer.confirm("Delete the listed resources?", default=False):
+        raise typer.Abort()
+    orchestrator.apply_topology_cleanup(changes)
+    typer.secho("Cleanup complete.", fg=typer.colors.GREEN)

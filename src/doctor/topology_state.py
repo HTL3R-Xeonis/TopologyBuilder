@@ -25,6 +25,8 @@ class TopologyState:
         self.gns3_nodes: dict[str, dict[str, Any]] = {}
         self.gns3_all_nodes: list[dict[str, Any]] = []
         self.gns3_links: list[dict[str, Any]] = []
+        self.gns3_projects: list[dict[str, Any]] = []
+        self.gns3_project_nodes: dict[str, list[dict[str, Any]]] = {}
         self.conflicts: list[str] = []
 
     def get_topology_state(self, graph: Graph, esxi_conn: ESXiConnection, gns3_conn: GNS3Connection | None) -> None:
@@ -50,15 +52,16 @@ class TopologyState:
         :param gns3_conn: Read-only GNS3 project connection.
         :raises RuntimeError: If the GNS3 inventory cannot be retrieved.
         :raises TimeoutError: If the GNS3 API does not respond.
+        :raises requests.exceptions.HTTPError: If a GNS3 inventory request fails.
         """
         self.gns3_nodes = {}
         self.gns3_all_nodes = []
         self.gns3_links = []
         self.conflicts = [item for item in self.conflicts if not item.startswith("Duplicate GNS3 node: ")]
         if gns3_conn.project_gns3_info is not None:
-            base = gns3_conn.get_project_url()
-            self.gns3_all_nodes = gns3_conn.get(f"{base}/nodes")
-            self.gns3_links = gns3_conn.get(f"{base}/links")
+            project_id = gns3_conn.project_gns3_info["project_id"]
+            self.gns3_all_nodes = gns3_conn.get_project_nodes(project_id)
+            self.gns3_links = gns3_conn.get_project_links(project_id)
             for item in self.gns3_all_nodes:
                 if item["name"] not in graph.nodes:
                     continue
@@ -68,6 +71,26 @@ class TopologyState:
                     self.gns3_nodes[item["name"]] = item
         for node in graph.nodes.values():
             node.node_gns3_info = self.gns3_nodes.get(node.name)
+
+    def get_gns3_projects_state(self, gns3_conn: GNS3Connection) -> None:
+        """
+        Reads nodes from every GNS3 project for safe cleanup planning.
+        :param gns3_conn: Read-only GNS3 connection.
+        :raises RuntimeError: If a project cannot be inspected.
+        :raises TimeoutError: If GNS3 does not respond in time.
+        :raises requests.exceptions.HTTPError: If an inventory request fails.
+        """
+        self.gns3_projects = gns3_conn.get_projects()
+        self.gns3_project_nodes = {}
+        current = gns3_conn.project_gns3_info or {}
+        for project in self.gns3_projects:
+            project_id = project.get("project_id")
+            if not isinstance(project_id, str) or not isinstance(project.get("name"), str):
+                raise TypeError(f"Invalid GNS3 project information: {project!r}")
+            if project_id == current.get("project_id"):
+                self.gns3_project_nodes[project_id] = self.gns3_all_nodes
+            else:
+                self.gns3_project_nodes[project_id] = gns3_conn.get_project_nodes(project_id)
 
 
 class TopologyChanges:
@@ -88,7 +111,8 @@ class TopologyChanges:
             name: [] for name in ("virtual_switch", "port_group", "gns3_vm_adapter", "esxi_nic", "gns3_node", "vlans")
         }
         self.to_delete: dict[str, list[Any]] = {
-            name: [] for name in ("port_group", "gns3_node", "gns3_link", "esxi_vm", "vlans")
+            name: []
+            for name in ("virtual_switch", "port_group", "gns3_node", "gns3_link", "gns3_project", "esxi_vm", "vlans")
         }
         self.to_ok: dict[str, list[Any]] = {
             name: [] for name in ("virtual_switch", "port_group", "esxi_vm", "gns3_node", "gns3_link", "vlans")
@@ -317,16 +341,201 @@ class TopologyChanges:
         setup.vlans = requested
         self.gns3_vlan_setup = setup
 
-    @staticmethod
-    def _get_cloud_interfaces(state: TopologyState) -> set[str]:
+    def init_topology_cleanup(self, graph: Graph, state: TopologyState, all_resources: bool = False) -> None:
         """
-        Returns VLAN interfaces referenced by existing GNS3 Cloud nodes.
+        Plans cleanup of unused networks and optionally orphaned infrastructure.
+        :param graph: Topology whose resources must be preserved.
+        :param state: Current ESXi and GNS3 inventory.
+        :param all_resources: Also remove resources absent from the topology.
+        :raises RuntimeError: If infrastructure inventory cannot be inspected.
+        """
+        self.conflicts = list(state.conflicts)
+        esxi = self.esxi_orchestrator.esxi_connection
+        host = esxi.get_esxi_object(vim.HostSystem)
+        if host is None or getattr(host.config, "network", None) is None:
+            raise RuntimeError("ESXi network inventory is unavailable; cleanup cancelled")
+        virtual_machines = esxi.get_esxi_object(vim.VirtualMachine, get_all=True) or []
+        if all_resources:
+            self._plan_cleanup_orphans(graph, state, virtual_machines)
+        self._plan_cleanup_networks(graph, state, host, virtual_machines)
+        if all_resources:
+            self._plan_cleanup_vlans(graph, state)
+            self._plan_cleanup_projects(state)
+
+    def _plan_cleanup_projects(self, state: TopologyState) -> None:
+        """
+        Plans removal of already empty, open and non-excluded projects.
+        :param state: GNS3 project and node inventory.
+        :raises RuntimeError: If a candidate project's links cannot be inspected.
+        :raises TimeoutError: If GNS3 does not respond in time.
+        :raises requests.exceptions.HTTPError: If a GNS3 inventory request fails.
+        """
+        connection = self.gns3_orchestrator.gns3_connection
+        excluded = Settings.GNS3.IGNORE_PROJECTS or ()
+        for project in state.gns3_projects:
+            project_id = project["project_id"]
+            if project["name"] in excluded or project.get("status") != "opened" or state.gns3_project_nodes[project_id]:
+                continue
+            if connection.get_project_links(project_id):
+                continue
+            self.to_delete["gns3_project"].append(project)
+
+    def _plan_cleanup_orphans(self, graph: Graph, state: TopologyState, virtual_machines: list) -> None:
+        """
+        Plans removal of ESXi VMs and GNS3 objects absent from the topology.
+        :param graph: Expected topology.
+        :param state: Current GNS3 inventory.
+        :param virtual_machines: ESXi VM inventory.
+        """
+        from loguru import logger
+
+        protected_vms = set(Settings.ESXI.IGNORE_VIRTUAL_MACHINES or ())
+        protected_vms.add(Settings.ESXI.GNS3_VM_NAME)
+        protected_vms.update(
+            node["name"]
+            for nodes in state.gns3_project_nodes.values()
+            for node in nodes
+            if isinstance(node.get("name"), str)
+        )
+        graph_vms = {node.name for node in graph.nodes.values() if node.env == Environment.ON_ESXI}
+        for vm in virtual_machines:
+            if not ESXiConnection.compare_regular_to_esxi_name(protected_vms | graph_vms, vm.name):
+                self.to_delete["esxi_vm"].append(vm)
+
+        if Settings.GNS3.PROJECT_NAME in (Settings.GNS3.IGNORE_PROJECTS or ()):
+            return
+        excluded_nodes = set(Settings.GNS3.IGNORE_NODES or ())
+        excluded_nodes.add(Settings.ESXI.GNS3_VM_NAME)
+        excluded_ids = {node["node_id"] for node in state.gns3_all_nodes if node["name"] in excluded_nodes}
+        adjacent_to_excluded = {
+            end["node_id"]
+            for link in state.gns3_links
+            if any(end["node_id"] in excluded_ids for end in link["nodes"])
+            for end in link["nodes"]
+        }
+        for node in state.gns3_all_nodes:
+            if node["name"] in graph.nodes or node["name"] in excluded_nodes:
+                continue
+            if node["node_id"] in adjacent_to_excluded:
+                logger.warning(f"Keeping GNS3 node {node['name']}: linked to an excluded node")
+                continue
+            self.to_delete["gns3_node"].append(node)
+        self._plan_cleanup_links(graph, state, excluded_ids)
+
+    def _plan_cleanup_networks(
+        self, graph: Graph, state: TopologyState, host: vim.HostSystem, virtual_machines: list
+    ) -> None:
+        """
+        Plans removal of unused port groups and standard virtual switches.
+        :param graph: Expected topology.
+        :param state: Current ESXi and GNS3 inventory.
+        :param host: ESXi host containing the network inventory.
+        :param virtual_machines: ESXi VM inventory.
+        :raises RuntimeError: If a required network resource cannot be inspected.
+        """
+        esxi = self.esxi_orchestrator.esxi_connection
+        network = host.config.network
+        deleted_vms = {id(vm) for vm in self.to_delete["esxi_vm"]}
+        used_groups = {
+            name
+            for vm in virtual_machines
+            if id(vm) not in deleted_vms
+            for nic in esxi.get_virtual_machine_nics(vm)
+            if (name := esxi.get_nic_port_group(nic)) is not None
+        }
+        vmkernel_groups = {nic.portgroup for nic in (network.vnic or [])}
+        required_groups = set(self._get_required_port_groups(graph))
+        excluded_groups = set(Settings.ESXI.IGNORE_PORT_GROUPS or ())
+        excluded_groups.update((Settings.ESXI.MANAGEMENT_PORT_GROUP, Settings.ESXI.TRUNK_PORT_GROUP))
+        excluded_switches = set(Settings.ESXI.IGNORE_VIRTUAL_SWITCHES or ())
+        uplink_switches = {switch.name for switch in network.vswitch or [] if esxi.virtual_switch_has_uplinks(switch)}
+        protected_switches = excluded_switches | uplink_switches | {Settings.ESXI.VIRTUAL_SWITCH}
+        deleted_node_ids = {node["node_id"] for node in self.to_delete["gns3_node"]}
+        cloud_interfaces = self._get_cloud_interfaces(state, excluded_node_ids=deleted_node_ids)
+
+        for name, group in sorted(state.port_groups.items()):
+            if name in required_groups | excluded_groups | used_groups | vmkernel_groups | cloud_interfaces:
+                continue
+            if group.spec.vswitchName in excluded_switches | uplink_switches:
+                continue
+            self.to_delete["port_group"].append(name)
+
+        removed_groups = set(self.to_delete["port_group"])
+        for switch in network.vswitch or []:
+            if switch.name in protected_switches:
+                continue
+            if any(
+                group.spec.vswitchName == switch.name and name not in removed_groups
+                for name, group in state.port_groups.items()
+            ):
+                continue
+            self.to_delete["virtual_switch"].append(switch.name)
+
+    def _plan_cleanup_vlans(self, graph: Graph, state: TopologyState) -> None:
+        """
+        Plans removal of unused VLAN interfaces managed by TopologyBuilder.
+        :param graph: Expected topology.
+        :param state: Current ESXi and GNS3 inventory.
+        :raises RuntimeError: If managed VLAN interfaces cannot be inspected.
+        """
+        setup = GNS3VMInterfaceSetup(self.gns3_orchestrator.gns3_ssh_connection, Settings.GNS3.PARENT_INTERFACE)
+        remaining_groups = set(state.port_groups) - set(self.to_delete["port_group"])
+        required_groups = set(self._get_required_port_groups(graph))
+        excluded_groups = set(Settings.ESXI.IGNORE_PORT_GROUPS or ())
+        deleted_node_ids = {node["node_id"] for node in self.to_delete["gns3_node"]}
+        cloud_interfaces = self._get_cloud_interfaces(state, excluded_node_ids=deleted_node_ids)
+        protected_names = remaining_groups | required_groups | excluded_groups | cloud_interfaces
+        self.to_delete["vlans"] = sorted(setup.get_managed_vlan_names() - protected_names)
+        self.gns3_vlan_setup = setup
+
+    def _plan_cleanup_links(self, graph: Graph, state: TopologyState, excluded_ids: set[str]) -> None:
+        """
+        Plans removal of GNS3 links not represented by the topology.
+        :param graph: Topology defining the expected links.
+        :param state: Current GNS3 inventory.
+        :param excluded_ids: Node IDs excluded from cleanup.
+        """
+        expected: set[frozenset[tuple[str, int, int]]] = set()
+        gns3 = self.gns3_orchestrator.gns3_connection
+        for first, first_if, second, second_if in self._get_expected_connections(graph):
+            if first.node_gns3_info is None or second.node_gns3_info is None:
+                continue
+            endpoints: set[tuple[str, int, int]] = set()
+            for node, interface in ((first, first_if), (second, second_if)):
+                try:
+                    adapter = gns3._get_adapter(node.node_gns3_info, interface)
+                    endpoints.add((node.node_gns3_info["node_id"], adapter["adapter_number"], adapter["port_number"]))
+                except (KeyError, ValueError) as exc:
+                    self.conflicts.append(f"Cannot verify GNS3 link {first.name} - {second.name}: {exc}")
+            if len(endpoints) == 2:
+                expected.add(frozenset(endpoints))
+
+        removed_ids = {node["node_id"] for node in self.to_delete["gns3_node"]}
+        for link in state.gns3_links:
+            nodes = {end["node_id"] for end in link["nodes"]}
+            if nodes & excluded_ids:
+                continue
+            if nodes & removed_ids:
+                self.to_delete["gns3_link"].append(link["link_id"])
+                continue
+            actual = frozenset((end["node_id"], end["adapter_number"], end["port_number"]) for end in link["nodes"])
+            if actual not in expected:
+                self.to_delete["gns3_link"].append(link["link_id"])
+
+    @staticmethod
+    def _get_cloud_interfaces(state: TopologyState, excluded_node_ids: set[str] | None = None) -> set[str]:
+        """
+        Returns VLAN interfaces referenced by remaining GNS3 Cloud nodes across projects.
         :param state: Current GNS3 project inventory.
+        :param excluded_node_ids: Nodes scheduled for removal.
         :return: Referenced interface names.
         """
+        inventories = state.gns3_project_nodes.values() if state.gns3_project_nodes else (state.gns3_all_nodes,)
         return {
             port["interface"]
-            for node in state.gns3_all_nodes
+            for nodes in inventories
+            for node in nodes
+            if node.get("node_type") == "cloud" and node.get("node_id") not in (excluded_node_ids or ())
             for port in ((node.get("properties") or {}).get("ports_mapping") or [])
             if isinstance(port, dict) and isinstance(port.get("interface"), str)
         }

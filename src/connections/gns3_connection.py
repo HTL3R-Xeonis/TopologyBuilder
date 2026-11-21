@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 import requests
 
-from src.settings import Verbosity
+from src.settings import Settings, Verbosity
 
 if TYPE_CHECKING:
     from src.graph.blocks import GenericNode, Interface
@@ -47,8 +47,8 @@ class GNS3Connection(APIHandler):
         """
 
         try:
-            projects = self.get(f"{self.url}/v2/projects")
-        except requests.exceptions.HTTPError as exc:
+            projects = self.get_projects()
+        except (requests.exceptions.RequestException, TimeoutError) as exc:
             logger.error(msg := "Failed to collect GNS3 project information.")
             raise RuntimeError(msg) from exc
 
@@ -64,21 +64,65 @@ class GNS3Connection(APIHandler):
                 raise RuntimeError(f"Failed to open GNS3 project {name}.") from exc
         return project
 
+    def get_projects(self) -> list[dict[str, Any]]:
+        """
+        Lists all GNS3 projects.
+        :return: Project inventory.
+        :raises RuntimeError: If the project inventory is invalid.
+        :raises TimeoutError: If GNS3 does not respond in time.
+        :raises requests.exceptions.HTTPError: If the API request fails.
+        """
+        projects = self.get(f"{self.url}/v2/projects")
+        if not isinstance(projects, list):
+            raise TypeError("GNS3 project inventory is unavailable")
+        return projects
+
+    def get_project_nodes(self, project_id: str) -> list[dict[str, Any]]:
+        """
+        Lists nodes belonging to a GNS3 project.
+        :param project_id: Project identifier.
+        :return: Nodes in the project.
+        :raises RuntimeError: If the node inventory is invalid.
+        :raises TimeoutError: If GNS3 does not respond in time.
+        :raises requests.exceptions.HTTPError: If the API request fails.
+        """
+        nodes = self.get(f"{self.url}/v2/projects/{project_id}/nodes")
+        if not isinstance(nodes, list):
+            raise TypeError(f"GNS3 node inventory is unavailable for project {project_id}")
+        return nodes
+
+    def get_project_links(self, project_id: str) -> list[dict[str, Any]]:
+        """
+        Lists connections belonging to a GNS3 project.
+        :param project_id: Project identifier.
+        :return: Links in the project.
+        :raises RuntimeError: If the link inventory is invalid.
+        :raises TimeoutError: If GNS3 does not respond in time.
+        :raises requests.exceptions.HTTPError: If the API request fails.
+        """
+        links = self.get(f"{self.url}/v2/projects/{project_id}/links")
+        if not isinstance(links, list):
+            raise TypeError(f"GNS3 link inventory is unavailable for project {project_id}")
+        return links
+
     def _remove_project(self, project_id: str) -> None:
         """
-        Removes the gns3 project from the GNS3 instance.
-        :param project_id: Name of the GNS3 project.
-        :return:
-        :raises TimeoutError: Is thrown when it takes too long to receive a response.
-        :raises RuntimeError: Is thrown when the project does not exist on the GNS3 instance.
+        Removes an empty, non-excluded GNS3 project.
+        :param project_id: Project identifier.
+        :raises RuntimeError: If the project is missing, protected or no longer empty.
+        :raises TimeoutError: If GNS3 does not respond in time.
+        :raises requests.exceptions.HTTPError: If deleting the project fails.
         """
-        try:
-            self.delete(f"{self.url}/v2/projects/{project_id}")
-        except requests.exceptions.HTTPError as exc:
-            if getattr(exc.response, "status_code", None) == 404:
-                logger.error(msg := f"GNS3 project {project_id} does not exist on {self.ip}")
-                raise RuntimeError(msg) from exc
-            raise RuntimeError(f"Something went wrong with the deletion of a GNS3 project on {self.ip}") from exc
+        project = next((p for p in self.get_projects() if p.get("project_id") == project_id), None)
+        if project is None:
+            raise RuntimeError(f"GNS3 project {project_id} no longer exists")
+        if project.get("name") in (Settings.GNS3.IGNORE_PROJECTS or ()):
+            raise RuntimeError(f"GNS3 project {project['name']} is excluded from cleanup")
+        if project.get("status") != "opened":
+            raise RuntimeError(f"GNS3 project {project['name']} is not open; refusing to delete it")
+        if self.get_project_nodes(project_id) or self.get_project_links(project_id):
+            raise RuntimeError(f"GNS3 project {project['name']} is not empty; refusing to delete it")
+        self.delete(f"{self.url}/v2/projects/{project_id}")
 
     def _create_new_project(self, name) -> dict[str, Any]:
         """

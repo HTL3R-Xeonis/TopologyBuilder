@@ -71,15 +71,16 @@ class ESXiOrchestrator:
 
             network_system.UpdateVirtualSwitch(vswitchName=virtual_switch.name, spec=update_spec)
 
-    def remove_port_groups(self, port_groups: set[str] | dict[str, Any]) -> None:
+    def remove_port_groups(self, port_groups: set[str] | dict[str, Any], managed_only: bool = True) -> None:
         """
         Deletes unused, unprotected port groups from the configured switch.
         :param port_groups: Port-group names approved for deletion.
+        :param managed_only: Restrict removal to the configured virtual switch.
         :raises RuntimeError: If the ESXi port-group inventory or removal fails.
         """
         protected = set(Settings.ESXI.IGNORE_PORT_GROUPS or ())
         protected.update((Settings.ESXI.MANAGEMENT_PORT_GROUP, Settings.ESXI.TRUNK_PORT_GROUP))
-        if Settings.ESXI.VIRTUAL_SWITCH in (Settings.ESXI.IGNORE_VIRTUAL_SWITCHES or ()):
+        if managed_only and Settings.ESXI.VIRTUAL_SWITCH in (Settings.ESXI.IGNORE_VIRTUAL_SWITCHES or ()):
             return
 
         existing = self.esxi_connection.get_all_port_groups()
@@ -88,9 +89,18 @@ class ESXiOrchestrator:
         if host is None:
             raise RuntimeError("Cannot inspect ESXi VMkernel adapters before deleting port groups")
         vmkernel_groups = {adapter.portgroup for adapter in (host.config.network.vnic or [])}
+        switches = {switch.name: switch for switch in host.config.network.vswitch or []}
         for name in sorted(port_groups):
             current = existing.get(name)
-            if name in protected or current is None or current.spec.vswitchName != Settings.ESXI.VIRTUAL_SWITCH:
+            if name in protected or current is None:
+                continue
+            if current.spec.vswitchName in (Settings.ESXI.IGNORE_VIRTUAL_SWITCHES or ()):
+                continue
+            if managed_only and current.spec.vswitchName != Settings.ESXI.VIRTUAL_SWITCH:
+                continue
+            switch = switches.get(current.spec.vswitchName)
+            if not managed_only and (switch is None or self.esxi_connection.virtual_switch_has_uplinks(switch)):
+                logger.warning(f"Keeping port group {name}: switch is unknown or has physical uplinks")
                 continue
             if name in vmkernel_groups:
                 logger.warning(f"Keeping port group {name}: used by an ESXi VMkernel adapter")
