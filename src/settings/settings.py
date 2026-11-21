@@ -10,25 +10,23 @@ from .verbosity import Verbosity
 load_dotenv()
 
 
-def check_value_type[T](value: Any, value_type: type[T] | tuple[type[T], ...]) -> T:
+def check_value_type[T](value: Any, value_type: type[T] | tuple[type[T], ...], default: T = None) -> T:
     """
     Checks given value type and returns the value.
     :param value: Value to check.
     :param value_type: Value type which value can have.
-    :return: Returns the value.
+    :return: Returns the value or the default value if passed value is None.
+    :param default: Return value which gets returned if passed value is None.
     :raises ValueError: Is thrown when the value is not of the corresponding type.
     """
-    from loguru import logger
-
+    if value is None:
+        return default
     if not isinstance(value, value_type):
         import sys
 
         caller_locals = sys._getframe(1).f_locals
         setting_name = caller_locals.get("key", "unknown")
-        logger.error(
-            msg := f"Setting value {setting_name} is of wrong type {type(value)}. Should be of type {value_type}."
-        )
-        raise TypeError(msg)
+        raise TypeError(f"Setting value {setting_name} is of wrong type {type(value)}. Should be of type {value_type}.")
     return value
 
 
@@ -225,13 +223,11 @@ class Settings:
                 case "management_port_group":
                     Settings.ESXI.MANAGEMENT_PORT_GROUP = check_value_type(value, str)
                 case "ignore_virtual_switches":
-                    Settings.ESXI.IGNORE_VIRTUAL_SWITCHES = set(check_value_type(value, (set, list)))
+                    Settings.ESXI.IGNORE_VIRTUAL_SWITCHES = set(check_value_type(value, (set, list), set()))
                 case "ignore_port_groups":
-                    Settings.ESXI.IGNORE_PORT_GROUPS = set(check_value_type(value, (set, list)))
+                    Settings.ESXI.IGNORE_PORT_GROUPS = set(check_value_type(value, (set, list), set()))
                 case "ignore_virtual_machines":
-                    Settings.ESXI.IGNORE_VIRTUAL_MACHINES = set(check_value_type(value, (set, list)))
-                case "ignore_port_groups":
-                    Settings.ESXI.IGNORE_PORT_GROUPS = set(check_value_type(value, (list, set)))
+                    Settings.ESXI.IGNORE_VIRTUAL_MACHINES = set(check_value_type(value, (set, list), set()))
                 case "datastore":
                     Settings.ESXI.DATASTORE = check_value_type(value, str)
                 case "gns3_vm_name":
@@ -260,9 +256,9 @@ class Settings:
                         value = input("Enter GNS3 password: ")
                     if value == "":
                         value = None
-                    Settings.GNS3.PASSWORD = check_value_type(value, (str, type(None)))
+                    Settings.GNS3.PASSWORD = check_value_type(value, str, None)
                 case "project_name":
-                    value = check_value_type(value, (str, type(None)))
+                    value = check_value_type(value, str, None)
                     if isinstance(value, str):
                         Settings.GNS3.PROJECT_NAME = value
                     if value is None:
@@ -271,21 +267,13 @@ class Settings:
                         else:
                             Settings.GNS3.PROJECT_NAME = Settings._DEFAULT_SETTING_FILE_PATH.stem
                 case "port":
-                    Settings.GNS3.PORT = check_value_type(value, (int, type(None)))
+                    Settings.GNS3.PORT = check_value_type(value, int, None)
                 case "parent_interface":
                     Settings.GNS3.PARENT_INTERFACE = check_value_type(value, str)
                 case "ignore_nodes":
-                    value = check_value_type(value, (list, set, type(None)))
-                    if value is None:
-                        Settings.GNS3.IGNORE_NODES = set()
-                    else:
-                        Settings.GNS3.IGNORE_NODES = set(value)
+                    Settings.GNS3.IGNORE_NODES = set(check_value_type(value, (list, set), set()))
                 case "ignore_projects":
-                    value = check_value_type(value, (list, set, type(None)))
-                    if value is None:
-                        Settings.GNS3.IGNORE_PROJECTS = set()
-                    else:
-                        Settings.GNS3.IGNORE_PROJECTS = set(value)
+                    Settings.GNS3.IGNORE_PROJECTS = set(check_value_type(value, (list, set), set()))
                 case _:
                     logger.warning(f"Unrecognized setting: Settings.GNS3.{key.upper()}")
 
@@ -310,9 +298,9 @@ class Settings:
                         value = os.getenv("LITERAL_API_VALUES", "false").lower() == "true"
                     Settings.API.LITERAL_API_VALUES = check_value_type(value, bool)
                 case "literal_esxi_templates":
-                    Settings.API.LITERAL_ESXI_TEMPLATES = set(check_value_type(value, (list, set)))
+                    Settings.API.LITERAL_ESXI_TEMPLATES = set(check_value_type(value, (list, set), set()))
                 case "literal_gns3_templates":
-                    Settings.API.LITERAL_GNS3_TEMPLATES = set(check_value_type(value, (list, set)))
+                    Settings.API.LITERAL_GNS3_TEMPLATES = set(check_value_type(value, (list, set), set()))
                 case _:
                     logger.warning(f"Unrecognized setting: Settings.API.{key.upper()}")
 
