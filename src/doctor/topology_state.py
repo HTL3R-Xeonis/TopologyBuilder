@@ -27,33 +27,47 @@ class TopologyState:
         self.gns3_links: list[dict[str, Any]] = []
         self.conflicts: list[str] = []
 
-    def get_topology_state(self, graph: Graph, esxi_conn: ESXiConnection, gns3_conn: GNS3Connection) -> None:
+    def get_topology_state(self, graph: Graph, esxi_conn: ESXiConnection, gns3_conn: GNS3Connection | None) -> None:
         """
-        Reads infrastructure resources relevant to the graph.
-        :param graph: Graph identifying the relevant resources.
-        :param esxi_conn: ESXi API connection.
-        :param gns3_conn: GNS3 API connection.
+        Reads ESXi and optional GNS3 resources relevant to a graph.
+        :param graph: Topology defining the required resources.
+        :param esxi_conn: Existing ESXi connection.
+        :param gns3_conn: Optional read-only GNS3 project connection.
         :raises RuntimeError: If an infrastructure inventory cannot be retrieved.
         """
+        if gns3_conn is not None:
+            self.get_gns3_state(graph, gns3_conn)
+        self.virtual_switch = esxi_conn.get_virtual_switch(Settings.ESXI.VIRTUAL_SWITCH)
+        self.port_groups = esxi_conn.get_all_port_groups()
+        esxi_vm_names = {node.name for node in graph.nodes.values() if node.env == Environment.ON_ESXI}
+        esxi_vm_names.add(Settings.ESXI.GNS3_VM_NAME)
+        self.virtual_machines = {name: esxi_conn.get_virtual_machine(name) for name in esxi_vm_names}
+
+    def get_gns3_state(self, graph: Graph, gns3_conn: GNS3Connection) -> None:
+        """
+        Reads the configured GNS3 project's nodes and links.
+        :param graph: Topology identifying the expected nodes.
+        :param gns3_conn: Read-only GNS3 project connection.
+        :raises RuntimeError: If the GNS3 inventory cannot be retrieved.
+        :raises TimeoutError: If the GNS3 API does not respond.
+        """
+        self.gns3_nodes = {}
+        self.gns3_all_nodes = []
+        self.gns3_links = []
+        self.conflicts = [item for item in self.conflicts if not item.startswith("Duplicate GNS3 node: ")]
         if gns3_conn.project_gns3_info is not None:
             base = gns3_conn.get_project_url()
             self.gns3_all_nodes = gns3_conn.get(f"{base}/nodes")
+            self.gns3_links = gns3_conn.get(f"{base}/links")
             for item in self.gns3_all_nodes:
                 if item["name"] not in graph.nodes:
                     continue
                 if item["name"] in self.gns3_nodes:
                     self.conflicts.append(f"Duplicate GNS3 node: {item['name']}")
-                    continue
-                self.gns3_nodes[item["name"]] = item
-            self.gns3_links = gns3_conn.get(f"{base}/links")
+                else:
+                    self.gns3_nodes[item["name"]] = item
         for node in graph.nodes.values():
             node.node_gns3_info = self.gns3_nodes.get(node.name)
-        self.virtual_switch = esxi_conn.get_virtual_switch(Settings.ESXI.VIRTUAL_SWITCH)
-        self.port_groups = esxi_conn.get_all_port_groups()
-
-        esxi_vm_names = {node.name for node in graph.nodes.values() if node.env == Environment.ON_ESXI}
-        esxi_vm_names.add(Settings.ESXI.GNS3_VM_NAME)
-        self.virtual_machines = {name: esxi_conn.get_virtual_machine(name) for name in esxi_vm_names}
 
 
 class TopologyChanges:

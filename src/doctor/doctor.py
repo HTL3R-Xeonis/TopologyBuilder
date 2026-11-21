@@ -2,9 +2,12 @@ import requests
 
 from src.settings import Settings
 
+from ..connections import GNS3Connection
+from ..graph import Graph
 from .esxi_doctor import ESXiDoctor
 from .gns3_doctor import GNS3Doctor
 from .status import Status, StatusList
+from .topology_state import TopologyState
 
 
 class Doctor:
@@ -16,11 +19,14 @@ class Doctor:
         self.connection = esxi_connection
 
     def _gns3_doctor(self) -> tuple[GNS3Doctor | None, StatusList]:
-        """Finds the running GNS3 server using its ESXi VM."""
+        """
+        Locates the GNS3 API server through its ESXi VM.
+        :return: GNS3 doctor and lookup results, or None if unavailable.
+        """
         results = StatusList()
         try:
             ip = self.connection.get_vm_ip_address(Settings.ESXI.GNS3_VM_NAME)
-        except (AttributeError, TypeError, ValueError) as exc:
+        except (AttributeError, ConnectionError, TimeoutError, TypeError, ValueError, RuntimeError) as exc:
             results.add(Status.error("GNS3", f"GNS3 VM address unavailable: {exc}"))
             return None, results
         if not ip:
@@ -28,6 +34,28 @@ class Doctor:
             return None, results
         results.add(Status.info("GNS3", f"GNS3 VM address: {ip}."))
         return GNS3Doctor(ip, Settings.GNS3.PORT), results
+
+    def _inspect_topology(self, graph: Graph) -> tuple[TopologyState, GNS3Doctor | None, dict | None, StatusList]:
+        """
+        Creates a shared read-only ESXi and GNS3 topology snapshot.
+        :param graph: Expected topology.
+        :return: Infrastructure snapshot, GNS3 doctor, project and inspection results.
+        :raises RuntimeError: If the ESXi inventory cannot be inspected.
+        """
+        state = TopologyState()
+        state.get_topology_state(graph, self.connection, None)
+        gns3, results = self._gns3_doctor()
+        project = None
+        if gns3 is not None:
+            try:
+                connection = GNS3Connection(gns3.ip, gns3.port, Settings.GNS3.PROJECT_NAME, existing_only=True)
+                project = connection.project_gns3_info
+                state.get_gns3_state(graph, connection)
+            except (requests.RequestException, TimeoutError, RuntimeError, ValueError, TypeError, KeyError) as exc:
+                results.add(Status.error("GNS3", f"Could not inspect deployed topology: {exc}"))
+                gns3 = None
+                project = None
+        return state, gns3, project, results
 
     def check_setup(self) -> StatusList:
         """Checks ESXi and GNS3 deployment prerequisites."""
@@ -38,13 +66,17 @@ class Doctor:
             results.extend(gns3.check_setup())
         return results
 
-    def is_graph_deployed(self, graph) -> StatusList:
-        """Checks that ESXi and GNS3 contain the expected topology."""
-        results = self.esxi_doctor.is_graph_esxi_sided_deployed(graph)
-        gns3, lookup = self._gns3_doctor()
-        results.extend(lookup)
-        if gns3:
-            results.extend(gns3.verify_graph(graph))
+    def is_graph_deployed(self, graph: Graph) -> StatusList:
+        """
+        Checks that ESXi and GNS3 contain the expected topology.
+        :param graph: Expected topology.
+        :return: Topology health-check results.
+        :raises RuntimeError: If the ESXi inventory cannot be inspected.
+        """
+        state, gns3, project, results = self._inspect_topology(graph)
+        results.extend(self.esxi_doctor.is_graph_esxi_sided_deployed(graph, state))
+        if gns3 is not None:
+            results.extend(gns3.verify_graph(graph, state, project))
         return results
 
     def status(self) -> StatusList:
@@ -58,13 +90,17 @@ class Doctor:
             results.extend(project_results)
         return results
 
-    def find_orphans(self, graph) -> StatusList:
-        """Reports possible ESXi and GNS3 resources not in the topology."""
-        results = self.esxi_doctor.find_orphans(graph)
-        gns3, lookup = self._gns3_doctor()
-        results.extend(lookup)
-        if gns3:
-            results.extend(gns3.find_orphans(graph))
+    def find_orphans(self, graph: Graph) -> StatusList:
+        """
+        Reports ESXi and GNS3 resources absent from the expected topology.
+        :param graph: Expected topology.
+        :return: Possible orphan health-check results.
+        :raises RuntimeError: If the ESXi inventory cannot be inspected.
+        """
+        state, gns3, project, results = self._inspect_topology(graph)
+        results.extend(self.esxi_doctor.find_orphans(graph, state))
+        if gns3 is not None:
+            results.extend(gns3.find_orphans(graph, state, project))
         if not results.has_failures:
             results.add(Status.ok("Orphans", "No unexpected lab resources found."))
         return results

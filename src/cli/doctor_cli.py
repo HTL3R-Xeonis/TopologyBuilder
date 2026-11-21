@@ -76,8 +76,8 @@ def verify(
     setup: bool = typer.Option(False, "--setup", "-s", help="Check ESXi and GNS3 setup."),
 ) -> None:
     """Verifies the setup, deployed topology, or both."""
-    check_setup = setup or not (setup or graph)
-    check_graph = graph or not (setup or graph)
+    check_setup = setup or not graph
+    check_graph = graph or not setup
     topology = load_graph(Path(Settings.TOPOLOGY_FILE)) if check_graph else None
     doctor = _get_doctor()
     results = StatusList()
@@ -103,19 +103,6 @@ def status() -> None:
 @cli_errors
 def portgroups() -> None:
     """Lists the port groups on the ESXi host."""
-    for name, vlan, switch in _get_doctor().esxi_doctor.list_port_groups():
-        typer.echo(f"{name} (VLAN {vlan}) on {switch}")
-
-
-@doctor_app.command()
-@cli_errors
-def get(
-    port_groups: bool = typer.Option(False, "--port-groups", "-p", help="List ESXi port groups."),
-) -> None:
-    """Provides the legacy port-group listing command."""
-    if not port_groups:
-        raise typer.BadParameter("Specify --port-groups, or use 'doctor portgroups'.")
-    # The main CLI callback already applies the shared ESXi settings.
     for name, vlan, switch in _get_doctor().esxi_doctor.list_port_groups():
         typer.echo(f"{name} (VLAN {vlan}) on {switch}")
 
