@@ -115,7 +115,7 @@ def _show_changes(changes, only_deletions: bool = False) -> None:
 
 def deploy_graph(graph: Graph) -> None:
     """
-    Deploys a graph or displays its infrastructure change plan.
+    Deploys a topology or previews its planned changes.
     :param graph: Desired topology.
     :raises typer.Exit: If the change plan contains conflicts.
     :raises RuntimeError: If infrastructure inspection or deployment fails.
@@ -124,7 +124,8 @@ def deploy_graph(graph: Graph) -> None:
     orchestrator = _get_orchestrator(existing_project_only=preview)
     changes = orchestrator.plan_topology_deployment(graph)
     if preview:
-        typer.echo(f"DRY RUN: Deployment plan for {Settings.GNS3.PROJECT_NAME}:")
+        mode = "Fresh deployment" if Settings.NEW else "Deployment"
+        typer.echo(f"DRY RUN: {mode} plan for {Settings.GNS3.PROJECT_NAME}:")
         project = orchestrator.gns3_orchestrator.gns3_connection.project_gns3_info
         if project is None:
             typer.echo(f"  Add GNS3 project: {Settings.GNS3.PROJECT_NAME}")
@@ -135,6 +136,10 @@ def deploy_graph(graph: Graph) -> None:
             typer.echo("  No changes required.")
         typer.echo("No ESXi or GNS3 resources changed.")
         return
+    if Settings.NEW:
+        typer.secho(
+            "Recreating graph-owned VMs and GNS3 nodes; their existing data will be lost.", fg=typer.colors.YELLOW
+        )
     orchestrator.apply_topology_changes(changes)
     typer.secho("Deployment complete.", fg=typer.colors.GREEN)
 
@@ -142,14 +147,15 @@ def deploy_graph(graph: Graph) -> None:
 @connection_app.command()
 @cli_errors
 def deploy(
-    new: bool = typer.Option(False, "--new", "-n", help="Unavailable in this project version."),
+    new: bool = typer.Option(
+        False, "--new", "-n", help="VMs, GNS3 nodes and links which already exist will get replaced by a new one."
+    ),
 ) -> None:
     """Validates and deploys the configured topology or previews its changes."""
     from .generator import load_graph
 
     if new:
-        typer.secho("'--new' deployment is not implemented in this project version.", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=2)
+        Settings.NEW = True
     graph = load_graph(Path(Settings.TOPOLOGY_FILE))
     deploy_graph(graph)
 

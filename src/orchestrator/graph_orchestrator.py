@@ -61,7 +61,7 @@ class GraphOrchestrator:
 
     def execute_graph_deployment(self, graph: Graph) -> None:
         """
-        Synchronizes an existing infrastructure with the desired graph.
+        Synchronizes or recreates graph-owned infrastructure.
         :param graph: Desired topology.
         :raises RuntimeError: If the topology contains conflicts or cannot be synchronized.
         """
@@ -69,9 +69,9 @@ class GraphOrchestrator:
 
     def plan_topology_deployment(self, graph: Graph) -> TopologyChanges:
         """
-        Returns the infrastructure changes required for a graph.
+        Plans a topology synchronization or fresh deployment.
         :param graph: Desired topology.
-        :return: Planned additions, updates, deletions, and conflicts.
+        :return: Planned additions, updates, deletions and conflicts.
         :raises RuntimeError: If ESXi or GNS3 inspection fails.
         """
         state = TopologyState()
@@ -95,9 +95,9 @@ class GraphOrchestrator:
 
     def apply_topology_destruction(self, changes: TopologyChanges) -> None:
         """
-        Deletes the graph-owned resources selected by a destruction plan.
+        Deletes graph-owned resources selected by a destruction plan.
         :param changes: Validated topology destruction plan.
-        :raises RuntimeError: If the plan is unsafe or infrastructure deletion fails.
+        :raises RuntimeError: If the plan is unsafe or resource deletion fails.
         :raises requests.RequestException: If GNS3 deletion fails.
         :raises vim.fault.VimFault: If an ESXi deletion task fails.
         """
@@ -105,6 +105,20 @@ class GraphOrchestrator:
             raise RuntimeError("Cannot destroy topology:\n- " + "\n- ".join(changes.conflicts))
         if not changes.has_changes:
             return
+        self._remove_graph_instances(changes)
+        if changes.to_delete["port_group"]:
+            self.esxi_orchestrator.remove_port_groups(set(changes.to_delete["port_group"]))
+        if changes.to_delete["vlans"]:
+            changes.gns3_vlan_setup.remove_managed_vlans(set(changes.to_delete["vlans"]))
+
+    def _remove_graph_instances(self, changes: TopologyChanges) -> None:
+        """
+        Deletes selected GNS3 links and nodes and ESXi virtual machines.
+        :param changes: Validated resource deletion plan.
+        :raises RuntimeError: If the GNS3 project is missing or a VM is protected.
+        :raises requests.RequestException: If a GNS3 request fails.
+        :raises vim.fault.VimFault: If an ESXi deletion task fails.
+        """
         connection = self.gns3_orchestrator.gns3_connection
         if changes.to_delete["gns3_link"] or changes.to_delete["gns3_node"]:
             project = connection.project_gns3_info
@@ -117,19 +131,17 @@ class GraphOrchestrator:
                 connection.delete(f"{base}/links/{link_id}")
             for node in changes.to_delete["gns3_node"]:
                 connection.delete(f"{base}/nodes/{node.node_gns3_info['node_id']}")
-        self.esxi_orchestrator.destroy_virtual_machines(changes.to_delete["esxi_vm"])
-        if changes.to_delete["port_group"]:
-            self.esxi_orchestrator.remove_port_groups(set(changes.to_delete["port_group"]))
-        if changes.to_delete["vlans"]:
-            changes.gns3_vlan_setup.remove_managed_vlans(set(changes.to_delete["vlans"]))
+        if changes.to_delete["esxi_vm"]:
+            self.esxi_orchestrator.destroy_virtual_machines(changes.to_delete["esxi_vm"])
 
     def apply_topology_changes(self, changes: TopologyChanges) -> None:
         """
-        Applies validated topology changes using existing provisioning methods.
+        Applies validated topology changes in dependency order.
         :param changes: Additions, modifications and deletions to apply.
-        :raises RuntimeError: If the plan contains conflicts or a GNS3 Cloud cannot be configured.
+        :raises RuntimeError: If the plan is unsafe or an infrastructure operation fails.
         :raises ValueError: If an ESXi Cloud has an invalid interface configuration.
         :raises requests.RequestException: If a GNS3 API request fails.
+        :raises vim.fault.VimFault: If an ESXi task fails.
         """
         if changes.conflicts:
             raise RuntimeError("Cannot synchronize topology:\n- " + "\n- ".join(changes.conflicts))
@@ -149,6 +161,8 @@ class GraphOrchestrator:
                 raise RuntimeError("GNS3 VLAN configuration was not initialized")
             changes.gns3_vlan_setup.apply_yaml()
 
+        # Replacement requires removal before redeploying VMs with the same names.
+        self._remove_graph_instances(changes)
         for node in changes.to_add["esxi_vm"]:
             self.esxi_orchestrator.deploy_virtual_machine(node, Settings.ESXI.DATASTORE)
         for vm, nic, group in changes.to_change["esxi_nic"]:
@@ -157,12 +171,6 @@ class GraphOrchestrator:
             self.esxi_orchestrator._add_virtual_machine_adapters(vm, port_groups)
 
         connection = self.gns3_orchestrator.gns3_connection
-        base = connection.get_project_url()
-        # Remove links before their nodes to avoid stale link IDs.
-        for link_id in changes.to_delete["gns3_link"]:
-            connection.delete(f"{base}/links/{link_id}")
-        for node in changes.to_delete["gns3_node"]:
-            connection.delete(f"{base}/nodes/{node.node_gns3_info['node_id']}")
         for node in changes.to_add["gns3_node"]:
             result = self.gns3_orchestrator.create_node(node)
             if result is not None:

@@ -175,6 +175,8 @@ class Settings:
                     Settings.TOPOLOGY_FILE = check_value_type(value, str)
                 case "is_dry_run":
                     Settings.IS_DRY_RUN = check_value_type(value, bool)
+                case "new":
+                    Settings.NEW = check_value_type(value, bool)
                 case "esxi":
                     Settings._initialise_esxi_settings(check_value_type(value, dict))
                 case "gns3":
@@ -303,9 +305,8 @@ class Settings:
     """Path to the YAML file which represents the topology."""
     IS_DRY_RUN: bool = None
     """If True, only prints what would happen. May still execute API requests."""
-    # @TODO NOT IMPLEMENTED
-    IS_INCREMENTAL: bool = None
-    """If True, does reuse resources such as ESXi VMs and GNS3 nodes."""
+    NEW: bool = False
+    """If True, replaces graph-owned VMs and GNS3 nodes during deployment."""
     LOG_FILE_PATH: Path = "./logs/app.log"
     """Path to the logs file."""
 

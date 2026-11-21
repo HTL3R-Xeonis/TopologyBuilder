@@ -103,16 +103,17 @@ class TopologyChanges:
 
     def init_topology_changes(self, graph: Graph, state: TopologyState) -> None:
         """
-        Collects the required topology changes without applying them.
+        Collects topology changes for synchronization or recreation.
         :param graph: Desired topology.
         :param state: Current infrastructure.
-        :raises RuntimeError: If the ESXi or GNS3 inventory cannot be inspected.
+        :raises RuntimeError: If ESXi or GNS3 inventory cannot be inspected.
         """
         self.conflicts = list(state.conflicts)
+        recreate = Settings.NEW
         self._compare_gns3_vm(state)
-        self._compare_virtual_machines(graph, state)
-        self._compare_port_groups(graph, state)
-        self._compare_nodes(graph, state)
+        self._compare_virtual_machines(graph, state, recreate=recreate)
+        self._compare_port_groups(graph, state, preserve_unused=recreate)
+        self._compare_nodes(graph, state, recreate=recreate)
         self._compare_vlan_interfaces(graph)
         self._compare_connections(graph, state)
         self._collect_unchanged(graph, state)
@@ -330,11 +331,12 @@ class TopologyChanges:
             if isinstance(port, dict) and isinstance(port.get("interface"), str)
         }
 
-    def _compare_port_groups(self, graph: Graph, state: TopologyState) -> None:
+    def _compare_port_groups(self, graph: Graph, state: TopologyState, preserve_unused: bool = False) -> None:
         """
-        Plans required port groups and removal of unused, unprotected groups.
+        Plans required ESXi port groups and optional cleanup.
         :param graph: Desired topology.
         :param state: Current infrastructure.
+        :param preserve_unused: Keep unused port groups during recreation.
         :raises RuntimeError: If the ESXi inventory cannot be retrieved.
         """
         from loguru import logger
@@ -371,6 +373,9 @@ class TopologyChanges:
                     )
             elif current.spec.vswitchName != switch_name or int(current.spec.vlanId) != vlan_id:
                 self.to_change["port_group"].append((name, vlan_id))
+
+        if preserve_unused:
+            return
 
         candidates = {
             name
@@ -435,20 +440,43 @@ class TopologyChanges:
             ):
                 self.to_change["gns3_vm_adapter"].append((vm, nic, group))
 
-    def _compare_virtual_machines(self, graph: Graph, state: TopologyState) -> None:
+    def _compare_virtual_machines(self, graph: Graph, state: TopologyState, recreate: bool = False) -> None:
         """
-        Checks graph-owned ESXi virtual machines and their network adapters.
+        Plans ESXi VM synchronization or replacement.
         :param graph: Desired topology.
         :param state: Current infrastructure.
+        :param recreate: Replace existing graph-owned VMs.
+        :raises RuntimeError: If the ESXi VM inventory cannot be retrieved.
         """
+        protected = set(Settings.ESXI.IGNORE_VIRTUAL_MACHINES or ())
+        protected.add(Settings.ESXI.GNS3_VM_NAME)
+        existing_vms = (
+            self.esxi_orchestrator.esxi_connection.get_esxi_object(vim.VirtualMachine, get_all=True) or []
+            if recreate
+            else []
+        )
         for node in graph.nodes.values():
             if node.env != Environment.ON_ESXI:
                 continue
+            if recreate:
+                matches = [vm for vm in existing_vms if ESXiConnection.compare_regular_to_esxi_name(node.name, vm.name)]
+                if len(matches) > 1:
+                    self.conflicts.append(f"Cannot recreate {node.name}: multiple matching ESXi VMs exist")
+                    continue
             vm = state.virtual_machines.get(node.name)
+            if recreate and matches and vm is None:
+                self.conflicts.append(f"Cannot recreate {node.name}: inconsistent ESXi VM inventory")
+                continue
             if vm is None:
                 self.to_add["esxi_vm"].append(node)
             elif not ESXiConnection.compare_regular_to_esxi_name(node.name, vm.name):
                 self.conflicts.append(f"Ambiguous ESXi VM name {node.name}: found {vm.name}")
+            elif recreate:
+                if ESXiConnection.compare_regular_to_esxi_name(protected, vm.name):
+                    self.conflicts.append(f"Cannot recreate protected ESXi VM {vm.name}")
+                    continue
+                self.to_delete["esxi_vm"].append(vm)
+                self.to_add["esxi_vm"].append(node)
             else:
                 self._compare_virtual_machine_adapters(node, vm)
 
@@ -485,16 +513,19 @@ class TopologyChanges:
         if missing:
             self.to_add["esxi_nic"].append((vm, missing))
 
-    def _compare_nodes(self, graph: Graph, state: TopologyState) -> None:
+    def _compare_nodes(self, graph: Graph, state: TopologyState, recreate: bool = False) -> None:
         """
-        Checks the types, templates and interfaces of graph-owned GNS3 nodes.
+        Plans GNS3 node synchronization or replacement.
         :param graph: Desired topology.
         :param state: Current infrastructure.
+        :param recreate: Replace existing graph-owned nodes.
         :raises RuntimeError: If GNS3 template information cannot be retrieved.
         :raises TimeoutError: If a GNS3 request times out.
         """
         connection = self.gns3_orchestrator.gns3_connection
         templates = {}
+        protected = set(Settings.ESXI.IGNORE_VIRTUAL_MACHINES or ())
+        protected.add(Settings.ESXI.GNS3_VM_NAME)
         for node in graph.nodes.values():
             current = state.gns3_nodes.get(node.name)
             if node.env == Environment.ON_ESXI:
@@ -505,6 +536,11 @@ class TopologyChanges:
                     continue
                 if current is None:
                     self.to_add["gns3_node"].append(node)
+                elif recreate:
+                    if ESXiConnection.compare_regular_to_esxi_name(protected, node.name):
+                        self.conflicts.append(f"Cannot recreate GNS3 Cloud for protected ESXi VM {node.name}")
+                    else:
+                        self._replace_node(node)
                 elif current.get("node_type") != "cloud":
                     self._replace_node(node)
                 else:
@@ -522,6 +558,9 @@ class TopologyChanges:
                     continue
             if current is None:
                 self.to_add["gns3_node"].append(node)
+                continue
+            if recreate:
+                self._replace_node(node)
                 continue
             template = templates[node.image]
             if not template["builtin"] and current.get("template_id") is None:
