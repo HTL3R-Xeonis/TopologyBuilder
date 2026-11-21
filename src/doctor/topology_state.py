@@ -23,33 +23,31 @@ class TopologyState:
         self.port_groups: dict[str, Any] = {}
         self.virtual_machines: dict[str, vim.VirtualMachine | None] = {}
         self.gns3_nodes: dict[str, dict[str, Any]] = {}
+        self.gns3_all_nodes: list[dict[str, Any]] = []
         self.gns3_links: list[dict[str, Any]] = []
         self.conflicts: list[str] = []
 
     def get_topology_state(self, graph: Graph, esxi_conn: ESXiConnection, gns3_conn: GNS3Connection) -> None:
         """
-        Reads ESXi and GNS3 resources relevant to the graph.
+        Reads infrastructure resources relevant to the graph.
+        :param graph: Graph identifying the relevant resources.
         :param esxi_conn: ESXi API connection.
         :param gns3_conn: GNS3 API connection.
-        :param graph: Graph identifying the relevant resources.
-
+        :raises RuntimeError: If an infrastructure inventory cannot be retrieved.
         """
-        base = gns3_conn.get_project_url()
-
-        for item in gns3_conn.get(f"{base}/nodes"):
-            if item["name"] not in graph.nodes:
-                continue
-            if item["name"] in self.gns3_nodes:
-                self.conflicts.append(f"Duplicate GNS3 node: {item['name']}")
-                continue
-            self.gns3_nodes[item["name"]] = item
+        if gns3_conn.project_gns3_info is not None:
+            base = gns3_conn.get_project_url()
+            self.gns3_all_nodes = gns3_conn.get(f"{base}/nodes")
+            for item in self.gns3_all_nodes:
+                if item["name"] not in graph.nodes:
+                    continue
+                if item["name"] in self.gns3_nodes:
+                    self.conflicts.append(f"Duplicate GNS3 node: {item['name']}")
+                    continue
+                self.gns3_nodes[item["name"]] = item
+            self.gns3_links = gns3_conn.get(f"{base}/links")
         for node in graph.nodes.values():
-            node_gns3_info = self.gns3_nodes.get(node.name)
-            if node_gns3_info is None:
-                continue
-            node.node_gns3_info = node_gns3_info
-
-        self.gns3_links = gns3_conn.get(f"{base}/links")
+            node.node_gns3_info = self.gns3_nodes.get(node.name)
         self.virtual_switch = esxi_conn.get_virtual_switch(Settings.ESXI.VIRTUAL_SWITCH)
         self.port_groups = esxi_conn.get_all_port_groups()
 
@@ -75,7 +73,12 @@ class TopologyChanges:
         self.to_change: dict[str, list[Any]] = {
             name: [] for name in ("virtual_switch", "port_group", "gns3_vm_adapter", "esxi_nic", "gns3_node", "vlans")
         }
-        self.to_delete: dict[str, list[Any]] = {name: [] for name in ("port_group", "gns3_node", "gns3_link")}
+        self.to_delete: dict[str, list[Any]] = {
+            name: [] for name in ("port_group", "gns3_node", "gns3_link", "esxi_vm", "vlans")
+        }
+        self.to_ok: dict[str, list[Any]] = {
+            name: [] for name in ("virtual_switch", "port_group", "esxi_vm", "gns3_node", "gns3_link", "vlans")
+        }
         self.conflicts: list[str] = []
         self.gns3_vlan_setup: GNS3VMInterfaceSetup | None = None
 
@@ -89,22 +92,182 @@ class TopologyChanges:
         Collects the required topology changes without applying them.
         :param graph: Desired topology.
         :param state: Current infrastructure.
-
+        :raises RuntimeError: If the ESXi or GNS3 inventory cannot be inspected.
         """
         self.conflicts = list(state.conflicts)
         self._compare_gns3_vm(state)
         self._compare_virtual_machines(graph, state)
         self._compare_port_groups(graph, state)
         self._compare_nodes(graph, state)
-        self._compare_vlan_interfaces(graph)
+        self._compare_vlan_interfaces(graph, state)
         self._compare_connections(graph, state)
+        self._collect_unchanged(graph, state)
+
+    def _collect_unchanged(self, graph: Graph, state: TopologyState) -> None:
+        """
+        Records graph components that already match their requested state.
+        :param graph: Desired topology.
+        :param state: Inspected infrastructure.
+        """
+        if state.virtual_switch is not None and not self.to_change["virtual_switch"]:
+            self.to_ok["virtual_switch"].append(Settings.ESXI.VIRTUAL_SWITCH)
+        changing_groups = {name for name, _ in self.to_change["port_group"]}
+        adding_groups = {name for name, _ in self.to_add["port_group"]}
+        for name in self._get_required_port_groups(graph):
+            if name in state.port_groups and name not in changing_groups | adding_groups:
+                self.to_ok["port_group"].append(name)
+
+        adding_vms = {node.name for node in self.to_add["esxi_vm"]}
+        changing_vms = {vm.name for vm, *_ in self.to_change["esxi_nic"]}
+        changing_vms.update(vm.name for vm, _ in self.to_add["esxi_nic"])
+        for node in graph.nodes.values():
+            if node.env == Environment.ON_ESXI:
+                vm = state.virtual_machines.get(node.name)
+                if (
+                    vm is not None
+                    and node.name not in adding_vms | changing_vms
+                    and ESXiConnection.compare_regular_to_esxi_name(node.name, vm.name)
+                ):
+                    self.to_ok["esxi_vm"].append(node.name)
+
+        adding_nodes = {node.name for node in self.to_add["gns3_node"]}
+        changing_nodes = {node.name for node, _ in self.to_change["gns3_node"]}
+        for name in graph.nodes:
+            if name in state.gns3_nodes and name not in adding_nodes | changing_nodes:
+                self.to_ok["gns3_node"].append(name)
+
+        deleting_links = set(self.to_delete["gns3_link"])
+        graph_ids = {node["node_id"] for node in state.gns3_nodes.values()}
+        for link in state.gns3_links:
+            linked_ids = {end["node_id"] for end in link["nodes"]}
+            if linked_ids.issubset(graph_ids) and link["link_id"] not in deleting_links:
+                self.to_ok["gns3_link"].append(link["link_id"])
+        if self.gns3_vlan_setup is not None:
+            for name in self.gns3_vlan_setup._requested_vlan_names:
+                if name not in self.to_change["vlans"] and "netplan" not in self.to_change["vlans"]:
+                    self.to_ok["vlans"].append(name)
+
+    def init_topology_destruction(self, graph: Graph, state: TopologyState) -> None:
+        """
+        Plans deletion of existing graph resources without affecting other nodes.
+        :param graph: Topology to remove.
+        :param state: Current ESXi and GNS3 resources.
+        :raises RuntimeError: If ESXi, GNS3 or VLAN inventory cannot be read.
+        """
+        from loguru import logger
+
+        self.conflicts = list(state.conflicts)
+        esxi = self.esxi_orchestrator.esxi_connection
+        protected_vms = set(Settings.ESXI.IGNORE_VIRTUAL_MACHINES or ())
+        protected_vms.add(Settings.ESXI.GNS3_VM_NAME)
+        for node in graph.nodes.values():
+            if node.name == Settings.ESXI.GNS3_VM_NAME:
+                logger.warning(f"Skipping protected GNS3 host node: {node.name}")
+                continue
+            if node.name in state.gns3_nodes:
+                self.to_delete["gns3_node"].append(node)
+            if node.env != Environment.ON_ESXI:
+                continue
+            vm = state.virtual_machines.get(node.name)
+            if vm is None:
+                continue
+            if not ESXiConnection.compare_regular_to_esxi_name(
+                node.name, vm.name
+            ) or ESXiConnection.compare_regular_to_esxi_name(protected_vms, vm.name):
+                logger.warning(f"Skipping protected or ambiguous ESXi VM: {vm.name}")
+                continue
+            self.to_delete["esxi_vm"].append(vm)
+
+        graph_node_ids = {node.node_gns3_info["node_id"] for node in self.to_delete["gns3_node"]}
+        self.to_delete["gns3_link"] = [
+            link["link_id"]
+            for link in state.gns3_links
+            if any(end["node_id"] in graph_node_ids for end in link["nodes"])
+        ]
+
+        protected_groups = set(Settings.ESXI.IGNORE_PORT_GROUPS or ())
+        protected_groups.update((Settings.ESXI.MANAGEMENT_PORT_GROUP, Settings.ESXI.TRUNK_PORT_GROUP))
+        if Settings.ESXI.VIRTUAL_SWITCH not in (Settings.ESXI.IGNORE_VIRTUAL_SWITCHES or ()):
+            for name in self._get_required_port_groups(graph):
+                current = state.port_groups.get(name)
+                if (
+                    name not in protected_groups
+                    and current is not None
+                    and current.spec.vswitchName == Settings.ESXI.VIRTUAL_SWITCH
+                ):
+                    self.to_delete["port_group"].append(name)
+
+        host = esxi.get_esxi_object(vim.HostSystem)
+        if host is None and self.to_delete["port_group"]:
+            raise RuntimeError("Cannot inspect ESXi VMkernel adapters before deleting port groups")
+        vmkernel_groups = {nic.portgroup for nic in (host.config.network.vnic or [])} if host else set()
+        for group in list(self.to_delete["port_group"]):
+            if group in vmkernel_groups:
+                logger.warning(f"Keeping port group {group}: used by an ESXi VMkernel adapter")
+                self.to_delete["port_group"].remove(group)
+
+        deleted_vm_names = {vm.name for vm in self.to_delete["esxi_vm"]}
+        for vm in esxi.get_esxi_object(vim.VirtualMachine, get_all=True) or []:
+            if vm.name in deleted_vm_names:
+                continue
+            used = {esxi.get_nic_port_group(nic) for nic in esxi.get_virtual_machine_nics(vm)}
+            for group in sorted(set(self.to_delete["port_group"]) & used):
+                logger.warning(f"Keeping port group {group}: still used by VM {vm.name}")
+                self.to_delete["port_group"].remove(group)
+
+        setup = GNS3VMInterfaceSetup(self.gns3_orchestrator.gns3_ssh_connection, Settings.GNS3.PARENT_INTERFACE)
+        requested = {
+            interface.vlan.name: interface.vlan.id
+            for node in graph.nodes.values()
+            for interface in node.interfaces.values()
+            if interface.vlan is not None
+        }
+        if not requested:
+            return
+        managed = setup.get_managed_vlan_names()
+        running = setup._get_existing_subinterfaces()
+        external_vlans = {
+            port.get("interface")
+            for node in state.gns3_all_nodes
+            if node.get("node_id") not in graph_node_ids
+            for port in (node.get("properties") or {}).get("ports_mapping", [])
+        }
+        for name, vlan_id in sorted(requested.items()):
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,14}", name):
+                self.conflicts.append(f"Invalid managed VLAN interface name: {name!r}")
+                continue
+            if name in external_vlans:
+                logger.warning(f"Keeping VLAN interface {name}: used by a GNS3 node outside the topology")
+            elif name in managed or (name in running and running[name][0] == vlan_id):
+                self.to_delete["vlans"].append(name)
+            elif name in running:
+                logger.warning(f"Keeping VLAN interface {name}: existing VLAN ID does not match the topology")
+        setup.vlans = requested
+        self.gns3_vlan_setup = setup
+
+    @staticmethod
+    def _get_cloud_interfaces(state: TopologyState) -> set[str]:
+        """
+        Returns VLAN interfaces referenced by existing GNS3 Cloud nodes.
+        :param state: Current GNS3 project inventory.
+        :return: Referenced interface names.
+        """
+        return {
+            port["interface"]
+            for node in state.gns3_all_nodes
+            for port in ((node.get("properties") or {}).get("ports_mapping") or [])
+            if isinstance(port, dict) and isinstance(port.get("interface"), str)
+        }
 
     def _compare_port_groups(self, graph: Graph, state: TopologyState) -> None:
         """
-        Compares the managed ESXi switch and its port groups.
+        Plans required port groups and removal of unused, unprotected groups.
         :param graph: Desired topology.
         :param state: Current infrastructure.
+        :raises RuntimeError: If the ESXi inventory cannot be retrieved.
         """
+        from loguru import logger
+
         switch_name = Settings.ESXI.VIRTUAL_SWITCH
         if switch_name in (Settings.ESXI.IGNORE_VIRTUAL_SWITCHES or ()):
             self.conflicts.append(f"Virtual switch {switch_name} is protected")
@@ -121,15 +284,16 @@ class TopologyChanges:
                 self.to_change["virtual_switch"].append(switch_name)
 
         required = self._resolve_vlan_ids(graph, state.port_groups)
-        ignored = Settings.ESXI.IGNORE_PORT_GROUPS or ()
+        protected = set(Settings.ESXI.IGNORE_PORT_GROUPS or ())
+        protected.update((Settings.ESXI.MANAGEMENT_PORT_GROUP, Settings.ESXI.TRUNK_PORT_GROUP))
         for name, vlan_id in required.items():
             current = state.port_groups.get(name)
             if current is None:
-                if name in ignored:
+                if name in protected:
                     self.conflicts.append(f"Protected port group {name} is missing")
                 else:
                     self.to_add["port_group"].append((name, vlan_id))
-            elif name in ignored:
+            elif name in protected:
                 if int(current.spec.vlanId) != vlan_id:
                     self.conflicts.append(
                         f"Protected port group {name} has VLAN ID {current.spec.vlanId}, expected {vlan_id}"
@@ -137,25 +301,38 @@ class TopologyChanges:
             elif current.spec.vswitchName != switch_name or int(current.spec.vlanId) != vlan_id:
                 self.to_change["port_group"].append((name, vlan_id))
 
-        for name, group in state.port_groups.items():
-            if group.spec.vswitchName == switch_name and name not in required and name not in ignored:
-                self.to_delete["port_group"].append(name)
-
-        if not self.to_delete["port_group"]:
-            return
-        planned_adapters = {
-            (vm.name, nic.key) for pool in ("gns3_vm_adapter", "esxi_nic") for vm, nic, _ in self.to_change[pool]
+        candidates = {
+            name
+            for name, group in state.port_groups.items()
+            if group.spec.vswitchName == switch_name and name not in required and name not in protected
         }
+        if not candidates:
+            return
+
         esxi = self.esxi_orchestrator.esxi_connection
-        deleting = set(self.to_delete["port_group"])
+        host = esxi.get_esxi_object(vim.HostSystem)
+        if host is None:
+            logger.warning("Keeping unused port groups: ESXi VMkernel adapters could not be inspected")
+            return
+        vmkernel_groups = {nic.portgroup for nic in (host.config.network.vnic or [])}
+        vm_users: dict[str, set[str]] = {}
         for vm in esxi.get_esxi_object(vim.VirtualMachine, get_all=True) or []:
-            still_used = {
-                esxi.get_nic_port_group(nic)
-                for nic in esxi.get_virtual_machine_nics(vm)
-                if (vm.name, nic.key) not in planned_adapters
-            }
-            for group in sorted(deleting & still_used):
-                self.conflicts.append(f"Cannot delete port group {group}: used by VM {vm.name}")
+            for nic in esxi.get_virtual_machine_nics(vm):
+                group_name = esxi.get_nic_port_group(nic)
+                if group_name is not None:
+                    vm_users.setdefault(group_name, set()).add(vm.name)
+        cloud_interfaces = self._get_cloud_interfaces(state)
+
+        for name in sorted(candidates):
+            if name in vmkernel_groups:
+                logger.info(f"Keeping port group {name}: used by an ESXi VMkernel adapter")
+            elif name in vm_users:
+                logger.info(f"Keeping port group {name}: used by VM(s) {', '.join(sorted(vm_users[name]))}")
+            elif name in cloud_interfaces:
+                logger.info(f"Keeping port group {name}: referenced by a GNS3 Cloud node")
+            else:
+                self.to_delete["port_group"].append(name)
+                logger.info(f"Scheduling removal of unused port group {name}")
 
     def _compare_gns3_vm(self, state: TopologyState) -> None:
         """
@@ -334,14 +511,20 @@ class TopologyChanges:
         count = max(int(properties.get("adapters") or len(ports)), max(int(match.group(2)) for match in wanted) + 1)
         self.to_change["gns3_node"].append((node, {"properties": {**properties, "adapters": count}}))
 
-    def _compare_vlan_interfaces(self, graph: Graph) -> None:
+    def _compare_vlan_interfaces(self, graph: Graph, state: TopologyState) -> None:
         """
-        Checks required VLAN subinterfaces on the GNS3 VM.
+        Checks required VLANs and plans removal of unused managed interfaces.
         :param graph: Desired topology.
+        :param state: Current ESXi and GNS3 infrastructure.
+        :raises RuntimeError: If the running VLAN inventory cannot be read.
+        :raises ValueError: If GNS3 returns invalid interface data.
         """
+        from loguru import logger
+
         setup = GNS3VMInterfaceSetup(self.gns3_orchestrator.gns3_ssh_connection, Settings.GNS3.PARENT_INTERFACE)
         try:
             setup.initialize_yaml(graph)
+            managed = setup.get_managed_vlan_names()
         except (RuntimeError, ValueError) as error:
             self.conflicts.append(f"GNS3 VLAN configuration: {error}")
             return
@@ -356,6 +539,19 @@ class TopologyChanges:
         previous = setup._run_command(f"sudo sh -c 'if [ -f {setup.NETPLAN_FILE} ]; then cat {setup.NETPLAN_FILE}; fi'")
         if previous != setup.netplan_yaml and not self.to_change["vlans"]:
             self.to_change["vlans"].append("netplan")
+
+        protected = set(Settings.ESXI.IGNORE_PORT_GROUPS or ())
+        protected.update((Settings.ESXI.MANAGEMENT_PORT_GROUP, Settings.ESXI.TRUNK_PORT_GROUP))
+        cloud_interfaces = self._get_cloud_interfaces(state)
+        deleting_groups = set(self.to_delete["port_group"])
+        for name in sorted(managed - setup._requested_vlan_names - protected):
+            if name in cloud_interfaces:
+                logger.info(f"Keeping VLAN interface {name}: referenced by a GNS3 Cloud node")
+            elif name in state.port_groups and name not in deleting_groups:
+                logger.info(f"Keeping VLAN interface {name}: ESXi port group is still in use or protected")
+            else:
+                self.to_delete["vlans"].append(name)
+                logger.info(f"Scheduling removal of unused managed VLAN interface {name}")
 
     def _compare_connections(self, graph: Graph, state: TopologyState) -> None:
         """

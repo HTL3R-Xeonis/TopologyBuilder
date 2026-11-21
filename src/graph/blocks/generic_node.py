@@ -81,14 +81,14 @@ class GenericNode:
         return self._node_gns3_info
 
     @node_gns3_info.setter
-    def node_gns3_info(self, node_gns3_info: dict[str, Any]) -> None:
+    def node_gns3_info(self, node_gns3_info: dict[str, Any] | None) -> None:
         """
         Sets the gns3 node info for this node.
         :param node_gns3_info: the gns3 node info which is acquired through the GNS3 API
         :return:
         :raise TypeError: Is thrown when the parameters are of the wrong types.
         """
-        if not isinstance(node_gns3_info, dict):
+        if node_gns3_info is not None and not isinstance(node_gns3_info, dict):
             raise TypeError(f"Expected a dict, got {type(node_gns3_info)}")
         self._node_gns3_info = node_gns3_info
 

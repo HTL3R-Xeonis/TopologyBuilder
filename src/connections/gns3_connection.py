@@ -20,28 +20,30 @@ class GNS3Connection(APIHandler):
     Object which provides methods regarding the GNS3 API
     """
 
-    def __init__(self, ip: str, port: int, project_name: str) -> None:
+    def __init__(self, ip: str, port: int, project_name: str, existing_only: bool = False) -> None:
         """
-        :param ip: GNS3 IP address
-        :param port: GNS3 API port
-        :param project_name: Name of the GNS3 project to work on
-        :raises ValueError: Is thrown when the IPv4 address is not a public, private or loopback address.
-        :raises TypeError: Is thrown when the parameters are of the wrong types.
+        Initializes the connection to a GNS3 project.
+        :param ip: GNS3 IP address.
+        :param port: GNS3 API port.
+        :param project_name: Project to manage.
+        :param existing_only: Avoid creating or opening a project during inspection.
+        :raises ValueError: If the IP address is invalid.
+        :raises TypeError: If connection parameters have invalid types.
+        :raises RuntimeError: If the GNS3 project inventory cannot be read.
         """
-
         super().__init__(ip, port)
         self.url = f"http://{ip}:{port}"
-
         self.project_name = project_name
-        self.project_gns3_info = self._init_project(project_name)
+        self.project_gns3_info = self._init_project(project_name, existing_only)
 
-    def _init_project(self, name: str) -> dict[str, Any]:
+    def _init_project(self, name: str, existing_only: bool = False) -> dict[str, Any] | None:
         """
-        Returns the existing GNS3 project or creates it if missing.
-        :param name: Name of the GNS3 project.
-        :return: Returns the newly generated GNS3 project information.
-        :raises TimeoutError: Is thrown when it takes too long to receive a response.
-        :raises RuntimeError: Is thrown when the creation or deletion of an existing project fails. May also be thrown if it fails to collect project information.
+        Finds or initializes the configured GNS3 project.
+        :param name: Project name.
+        :param existing_only: Return absent and closed projects without changing them.
+        :return: Project information, or None if absent in inspection mode.
+        :raises RuntimeError: If project information cannot be retrieved or initialized.
+        :raises TimeoutError: If GNS3 does not respond in time.
         """
 
         try:
@@ -52,7 +54,9 @@ class GNS3Connection(APIHandler):
 
         project = next((p for p in projects if p["name"] == name), None)
         if project is None:
-            return self._create_new_project(name)
+            return None if existing_only else self._create_new_project(name)
+        if existing_only:
+            return project
         if project.get("status") == "closed":
             try:
                 return self.post(f"{self.url}/v2/projects/{project['project_id']}/open", json={})

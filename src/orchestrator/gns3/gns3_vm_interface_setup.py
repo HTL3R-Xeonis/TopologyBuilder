@@ -55,8 +55,9 @@ class GNS3VMInterfaceSetup:
 
     def _get_existing_subinterfaces(self) -> dict[str, tuple[int, bool]]:
         """
-        Gets the current VLAN interfaces on the parent interface.
-        :return: Interface names mapped to VLAN IDs and UP states.
+        Returns running VLAN interfaces attached to the configured parent.
+        :return: VLAN names with their IDs and UP states.
+        :raises RuntimeError: If the network interface inventory cannot be read.
         """
         devices = json.loads(self._run_command("ip -d -j link show"))
         names_by_index = {device["ifindex"]: device["ifname"].split("@")[0] for device in devices}
@@ -66,23 +67,25 @@ class GNS3VMInterfaceSetup:
             info = device.get("linkinfo") or {}
             if info.get("info_kind") != "vlan":
                 continue
+            full_name = device["ifname"]
             parent = device.get("link") or device.get("link_index")
             if isinstance(parent, int):
                 parent = names_by_index.get(parent)
-            if parent != self.parent_interface:
+            if parent != self.parent_interface and not full_name.endswith(f"@{self.parent_interface}"):
                 continue
-            name = device["ifname"].split("@")[0]
-            existing[name] = (info["info_data"]["id"], "UP" in device.get("flags", []))
+            existing[full_name.split("@")[0]] = (int(info["info_data"]["id"]), "UP" in device.get("flags", []))
 
         return existing
 
     def _create_subinterface_deletion_commands(self, existing: dict[str, tuple[int, bool]]) -> list[str]:
         """
-        Identifies obsolete or incorrectly configured VLAN interfaces.
+        Identifies incorrect VLAN interfaces explicitly requested by the topology.
         :param existing: Current VLAN interfaces and their states.
-        :return: Interface names to remove.
+        :return: Interface names requiring replacement.
         """
-        return sorted(name for name, (vlan_id, _) in existing.items() if self.vlans.get(name) != vlan_id)
+        return sorted(
+            name for name, (vlan_id, _) in existing.items() if name in self.vlans and self.vlans[name] != vlan_id
+        )
 
     def _create_subinterface_creation_commands(self, graph: Graph) -> None:
         """
@@ -122,20 +125,86 @@ class GNS3VMInterfaceSetup:
 
     def initialize_yaml(self, graph: Graph) -> None:
         """
-        Prepares the required VLAN configuration.
+        Prepares the requested VLANs while preserving other managed interfaces.
         :param graph: Topology containing the VLAN assignments.
-        :raises ValueError: If the parent interface is invalid.
+        :raises ValueError: If the parent interface or a VLAN definition is invalid.
+        :raises RuntimeError: If the existing managed Netplan configuration is invalid.
         """
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,14}", self.parent_interface):
             raise ValueError(f"Invalid parent interface: {self.parent_interface!r}")
         self._create_subinterface_creation_commands(graph)
         self._requested_vlan_names = set(self.vlans)
 
+        previous = self._run_command(f"sudo sh -c 'if [ -f {self.NETPLAN_FILE} ]; then cat {self.NETPLAN_FILE}; fi'")
+        if previous:
+            if not previous.startswith(self.NETPLAN_MARKER):
+                raise RuntimeError(f"Refusing to overwrite unmanaged Netplan file: {self.NETPLAN_FILE}")
+            try:
+                document = yaml.safe_load(previous)
+                network = document["network"]
+                managed_vlans = network.get("vlans") or {}
+                if not isinstance(network, dict) or not isinstance(managed_vlans, dict):
+                    raise TypeError("Invalid managed network configuration")
+                requested_vlans = yaml.safe_load(self.netplan_yaml)["network"].get("vlans") or {}
+                network["vlans"] = {**managed_vlans, **requested_vlans}
+                self.netplan_yaml = self.NETPLAN_MARKER + yaml.safe_dump(document, sort_keys=False)
+            except (KeyError, TypeError, AttributeError, ValueError, yaml.YAMLError) as error:
+                raise RuntimeError(f"Invalid managed VLAN configuration: {error}") from error
+
         if Settings.IS_DRY_RUN:
             Verbosity.volumatic_print(
                 Verbosity.NORMAL,
-                f"Dry run: {len(self.vlans)} VLAN interfaces requested; no changes applied.",
+                f"Dry run: {len(self._requested_vlan_names)} VLAN interfaces requested; no changes applied.",
             )
+
+    def get_managed_vlan_names(self) -> set[str]:
+        """
+        Returns VLAN interface names defined in the managed Netplan file.
+        :return: Managed VLAN interface names.
+        :raises RuntimeError: If the configuration cannot be read or is invalid.
+        """
+        previous = self._run_command(f"sudo sh -c 'if [ -f {self.NETPLAN_FILE} ]; then cat {self.NETPLAN_FILE}; fi'")
+        if not previous:
+            return set()
+        if not previous.startswith(self.NETPLAN_MARKER):
+            raise RuntimeError(f"Refusing to inspect unmanaged Netplan file: {self.NETPLAN_FILE}")
+        try:
+            document = yaml.safe_load(previous) or {}
+            vlans = (document.get("network") or {}).get("vlans") or {}
+            if not isinstance(vlans, dict):
+                raise TypeError("VLAN definitions are not a mapping")
+        except (TypeError, AttributeError, yaml.YAMLError, ValueError) as error:
+            raise RuntimeError(f"Invalid managed VLAN configuration: {error}") from error
+        return set(vlans)
+
+    def remove_managed_vlans(self, vlan_names: set[str]) -> None:
+        """
+        Removes only the selected project-managed VLAN interfaces.
+        :param vlan_names: Managed VLAN interface names to remove.
+        :raises RuntimeError: If the managed configuration is invalid or cannot be updated.
+        """
+        if not vlan_names or Settings.IS_DRY_RUN:
+            return
+        if any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,14}", name) for name in vlan_names):
+            raise RuntimeError("Invalid managed VLAN interface name")
+        if not vlan_names.issubset(self.get_managed_vlan_names()):
+            raise RuntimeError("A requested VLAN is no longer managed by TopologyBuilder")
+        previous = self._run_command(f"sudo sh -c 'if [ -f {self.NETPLAN_FILE} ]; then cat {self.NETPLAN_FILE}; fi'")
+        document = yaml.safe_load(previous)
+        vlans = document["network"]["vlans"]
+        for name in vlan_names:
+            del vlans[name]
+        if vlans:
+            content = self.NETPLAN_MARKER + yaml.safe_dump(document, sort_keys=False)
+            self._run_command(f"sudo tee {self.NETPLAN_FILE} > /dev/null", content)
+            self._run_command(f"sudo chmod 600 {self.NETPLAN_FILE}")
+        else:
+            self._run_command(f"sudo rm -f {self.NETPLAN_FILE}")
+        self._run_command("sudo netplan generate")
+        current = self._get_existing_subinterfaces()
+        for name in sorted(vlan_names & current.keys()):
+            self._run_command(f"sudo ip link delete dev {name}")
+        self._run_command("sudo netplan apply")
 
     def apply_yaml(self) -> tuple[int, str, str]:
         """

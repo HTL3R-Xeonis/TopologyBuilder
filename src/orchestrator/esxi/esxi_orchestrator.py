@@ -81,17 +81,59 @@ class ESXiOrchestrator:
 
     def remove_port_groups(self, port_groups: set[str] | dict[str, Any]) -> None:
         """
-        Deletes all port groups from the virtual switch, except for those specified in ``Settings.Esxi.IGNORE_PORT_GROUPS``.
-        :param port_groups: Set of port groups names to remove.
-        :return:
-        :raises RuntimeError: Is thrown when there are issues with removing the port group, like it does not exist, or it is currently in use.
+        Deletes unused, unprotected port groups from the configured switch.
+        :param port_groups: Port-group names approved for deletion.
+        :raises RuntimeError: If the ESXi port-group inventory or removal fails.
         """
-        existing_port_groups = self.esxi_connection.get_all_port_groups()
-        for pg_name in port_groups:
-            if pg_name in Settings.ESXI.IGNORE_PORT_GROUPS:
+        protected = set(Settings.ESXI.IGNORE_PORT_GROUPS or ())
+        protected.update((Settings.ESXI.MANAGEMENT_PORT_GROUP, Settings.ESXI.TRUNK_PORT_GROUP))
+        if Settings.ESXI.VIRTUAL_SWITCH in (Settings.ESXI.IGNORE_VIRTUAL_SWITCHES or ()):
+            return
+
+        existing = self.esxi_connection.get_all_port_groups()
+        all_vms = self.esxi_connection.get_esxi_object(vim.VirtualMachine, get_all=True) or []
+        host = self.esxi_connection.get_esxi_object(vim.HostSystem)
+        if host is None:
+            raise RuntimeError("Cannot inspect ESXi VMkernel adapters before deleting port groups")
+        vmkernel_groups = {adapter.portgroup for adapter in (host.config.network.vnic or [])}
+        for name in sorted(port_groups):
+            current = existing.get(name)
+            if name in protected or current is None or current.spec.vswitchName != Settings.ESXI.VIRTUAL_SWITCH:
                 continue
-            if pg_name in existing_port_groups:
-                self.esxi_connection.remove_port_group(pg_name)
+            if name in vmkernel_groups:
+                logger.warning(f"Keeping port group {name}: used by an ESXi VMkernel adapter")
+                continue
+            users = [
+                vm.name
+                for vm in all_vms
+                if any(
+                    self.esxi_connection.get_nic_port_group(nic) == name
+                    for nic in self.esxi_connection.get_virtual_machine_nics(vm)
+                )
+            ]
+            if users:
+                logger.warning(f"Keeping port group {name}: used by VM(s) {', '.join(users)}")
+                continue
+            self.esxi_connection.remove_port_group(name)
+
+    def destroy_virtual_machines(self, virtual_machines: list[vim.VirtualMachine]) -> None:
+        """
+        Powers off and deletes explicitly selected graph-owned ESXi VMs.
+        :param virtual_machines: ESXi VMs approved for deletion.
+        :raises RuntimeError: If a protected VM is selected.
+        :raises vim.fault.VimFault: If a VM power-off or deletion task fails.
+        """
+        protected = set(Settings.ESXI.IGNORE_VIRTUAL_MACHINES or ())
+        protected.add(Settings.ESXI.GNS3_VM_NAME)
+        for vm in virtual_machines:
+            if ESXiConnection.compare_regular_to_esxi_name(protected, vm.name):
+                raise RuntimeError(f"Refusing to delete protected ESXi VM {vm.name}")
+        if Settings.IS_DRY_RUN:
+            return
+        for vm in virtual_machines:
+            if vm.runtime.powerState != vim.VirtualMachinePowerState.poweredOff:
+                WaitForTasks([vm.PowerOffVM_Task()])
+            WaitForTasks([vm.Destroy_Task()])
 
     # @TODO upgrade resetting vSwitch
     def destroy_old_vms(self, needed_port_groups: dict[str, int]) -> None:
