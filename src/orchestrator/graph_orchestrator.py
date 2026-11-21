@@ -61,16 +61,24 @@ class GraphOrchestrator:
 
     def execute_graph_deployment(self, graph: Graph) -> None:
         """
-        Deploys a graph completely or synchronizes an existing topology.
+        Synchronizes an existing infrastructure with the desired graph.
         :param graph: Desired topology.
+        :raises RuntimeError: If the topology contains conflicts or cannot be synchronized.
+        """
+        self.apply_topology_changes(self.plan_topology_deployment(graph))
+
+    def plan_topology_deployment(self, graph: Graph) -> TopologyChanges:
+        """
+        Returns the infrastructure changes required for a graph.
+        :param graph: Desired topology.
+        :return: Planned additions, updates, deletions, and conflicts.
+        :raises RuntimeError: If ESXi or GNS3 inspection fails.
         """
         state = TopologyState()
         state.get_topology_state(graph, self.esxi_orchestrator.esxi_connection, self.gns3_orchestrator.gns3_connection)
-
         changes = TopologyChanges(self.esxi_orchestrator, self.gns3_orchestrator)
         changes.init_topology_changes(graph, state)
-
-        self.apply_topology_changes(changes)
+        return changes
 
     def plan_topology_destruction(self, graph: Graph) -> TopologyChanges:
         """
@@ -95,9 +103,8 @@ class GraphOrchestrator:
         """
         if changes.conflicts:
             raise RuntimeError("Cannot destroy topology:\n- " + "\n- ".join(changes.conflicts))
-        if Settings.IS_DRY_RUN or not changes.has_changes:
+        if not changes.has_changes:
             return
-
         connection = self.gns3_orchestrator.gns3_connection
         if changes.to_delete["gns3_link"] or changes.to_delete["gns3_node"]:
             project = connection.project_gns3_info
@@ -110,7 +117,6 @@ class GraphOrchestrator:
                 connection.delete(f"{base}/links/{link_id}")
             for node in changes.to_delete["gns3_node"]:
                 connection.delete(f"{base}/nodes/{node.node_gns3_info['node_id']}")
-
         self.esxi_orchestrator.destroy_virtual_machines(changes.to_delete["esxi_vm"])
         if changes.to_delete["port_group"]:
             self.esxi_orchestrator.remove_port_groups(set(changes.to_delete["port_group"]))

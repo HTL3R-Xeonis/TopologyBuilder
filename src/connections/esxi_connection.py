@@ -196,14 +196,8 @@ class ESXiConnection(GenericConnection):
         """
         if pg_name in (Settings.ESXI.IGNORE_PORT_GROUPS or ()):
             return
-        # ----------------------------------------------------------------------------------------------------------
         action = "update" if update else "add"
-        if Settings.IS_DRY_RUN:
-            Verbosity.volumatic_print(Verbosity.NORMAL, f"Would {action} portgroup {pg_name} (VLAN {pg_id})")
-            return
         Verbosity.volumatic_print(Verbosity.NORMAL, f"{action.capitalize()}s portgroup {pg_name} (VLAN {pg_id})")
-        # ----------------------------------------------------------------------------------------------------------
-
         if update:
             current = self.get_all_port_groups().get(pg_name)
             if current is None:
@@ -267,13 +261,7 @@ class ESXiConnection(GenericConnection):
         :return:
         :raises RuntimeError: Is thrown when the portgroup does not exist, is currently in use or some other Exception occurs.
         """
-        # ----------------------------------------------------------------------------------------------------------
-        if Settings.IS_DRY_RUN:
-            Verbosity.volumatic_print(Verbosity.NORMAL, f"Would remove portgroup {port_group_name}")
-            return
         Verbosity.volumatic_print(Verbosity.NORMAL, f"Removes portgroup {port_group_name}")
-        # ----------------------------------------------------------------------------------------------------------
-
         host = self.get_esxi_object(vim.HostSystem)
         network = host.configManager.networkSystem
         try:

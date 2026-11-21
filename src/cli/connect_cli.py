@@ -57,28 +57,135 @@ def connection_main(
     apply_esxi_options(address, esxi_username, esxi_password, gns3_vm_name, datastore, virtual_switch, trunk_port_group)
 
 
-def deploy_graph(graph, dry_run: bool = False, incremental: bool = False) -> None:
-    """Deploys a graph or displays a safe deployment preview."""
+def _get_orchestrator(existing_project_only: bool = False):
+    """
+    Returns an orchestrator for deployment or read-only inspection.
+    :param existing_project_only: Do not create or open GNS3 projects.
+    :return: Configured graph orchestrator.
+    :raises ConnectionError: If an infrastructure connection fails.
+    :raises RuntimeError: If the GNS3 VM cannot be located.
+    """
     from src.orchestrator.graph_orchestrator import GraphOrchestrator
 
-    if incremental:
-        typer.secho("Incremental deployment is not implemented in this project version.", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=2)
-    if dry_run or Settings.IS_DRY_RUN:
-        typer.echo(f"DRY RUN: {len(graph.nodes)} node(s) in {Settings.GNS3.PROJECT_NAME}.")
-        for node in graph.nodes.values():
-            typer.echo(f"  {node.name}: {node.image} ({node.env.name})")
-        typer.echo("No ESXi or GNS3 resources changed.")
-        return
-    orchestrator = GraphOrchestrator(
+    return GraphOrchestrator(
         esxi_host=Settings.ESXI.IP,
         esxi_port=Settings.ESXI.PORT,
         esxi_username=Settings.ESXI.USERNAME,
         esxi_password=Settings.ESXI.PASSWORD,
         gns3_username=Settings.GNS3.USERNAME,
         gns3_password=Settings.GNS3.PASSWORD,
+        existing_project_only=existing_project_only,
     )
-    orchestrator.execute_graph_deployment(graph=graph)
+
+
+def _describe_change(kind: str, item, changes) -> str:
+    """
+    Returns a readable description of a planned topology change.
+    :param kind: Resource category.
+    :param item: Planned change entry.
+    :param changes: Topology change plan.
+    :return: Description of the affected resource.
+    """
+    if kind == "port_group" and isinstance(item, tuple):
+        return f"{item[0]} (VLAN {item[1]})"
+    if kind == "gns3_link" and isinstance(item, tuple):
+        first, second = item
+        first_interface = first.get_interface(second)
+        second_interface = second.get_interface(first)
+        left = first_interface.name if first_interface is not None else "?"
+        right = second_interface.name if second_interface is not None else "?"
+        return f"{first.name}[{left}] <-> {second.name}[{right}]"
+    if kind == "gns3_node":
+        if isinstance(item, tuple):
+            node, properties = item
+            return f"{node.name}: {properties}"
+        return f"{item.name} ({item.image})"
+    if kind == "esxi_vm":
+        return f"{item.name} ({item.image})" if hasattr(item, "image") else item.name
+    if kind == "gns3_vm_adapter":
+        vm, nic, group = item
+        return f"{vm.name}, {nic.deviceInfo.label} -> {group}"
+    if kind == "esxi_nic":
+        if len(item) == 2:
+            vm, groups = item
+            return f"{vm.name}: {', '.join(groups)}"
+        vm, nic, group = item
+        return f"{vm.name}, {nic.deviceInfo.label} -> {group}"
+    if kind == "vlans" and changes.gns3_vlan_setup is not None:
+        vlan_id = changes.gns3_vlan_setup.vlans.get(item)
+        if vlan_id is not None:
+            return f"{item} (VLAN {vlan_id})"
+    return str(item)
+
+
+def _show_changes(changes, only_deletions: bool = False) -> None:
+    """
+    Displays planned resource operations and detected conflicts.
+    :param changes: Topology change plan.
+    :param only_deletions: Display only removal operations.
+    :raises typer.Exit: If the plan contains conflicts.
+    """
+    labels = {
+        "virtual_switch": "ESXi virtual switch(es)",
+        "port_group": "ESXi port group(s)",
+        "esxi_vm": "ESXi VM(s)",
+        "esxi_nic": "ESXi VM adapter(s)",
+        "gns3_vm_adapter": "GNS3 host VM adapter(s)",
+        "gns3_node": "GNS3 node(s)",
+        "gns3_link": "GNS3 link(s)",
+        "vlans": "GNS3 VLAN interface(s)",
+    }
+    pools = (
+        [("Delete", changes.to_delete)]
+        if only_deletions
+        else [
+            ("Add", changes.to_add),
+            ("Update", changes.to_change),
+            ("Delete", changes.to_delete),
+        ]
+    )
+    for action, pool in pools:
+        for kind, items in pool.items():
+            if not items:
+                continue
+            typer.echo(f"  {action} {labels.get(kind, kind)} ({len(items)}):")
+            for item in items:
+                typer.echo(f"    - {_describe_change(kind, item, changes)}")
+    if changes.conflicts:
+        typer.secho("Conflicts prevent execution:", fg=typer.colors.RED, err=True)
+        for conflict in changes.conflicts:
+            typer.echo(f"  - {conflict}", err=True)
+        raise typer.Exit(code=1)
+
+
+def deploy_graph(graph, dry_run: bool = False, incremental: bool = False) -> None:
+    """
+    Deploys a graph or displays its infrastructure change plan.
+    :param graph: Desired topology.
+    :param dry_run: Preview changes without modifying infrastructure.
+    :param incremental: Unavailable incremental deployment option.
+    :raises typer.Exit: If incremental deployment is requested or conflicts exist.
+    :raises RuntimeError: If infrastructure inspection or deployment fails.
+    """
+    if incremental:
+        typer.secho("Incremental deployment is not implemented in this project version.", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
+    preview = dry_run or Settings.IS_DRY_RUN
+    orchestrator = _get_orchestrator(existing_project_only=preview)
+    changes = orchestrator.plan_topology_deployment(graph)
+    if preview:
+        typer.echo(f"DRY RUN: Deployment plan for {Settings.GNS3.PROJECT_NAME}:")
+        project = orchestrator.gns3_orchestrator.gns3_connection.project_gns3_info
+        if project is None:
+            typer.echo(f"  Add GNS3 project: {Settings.GNS3.PROJECT_NAME}")
+        elif project.get("status") == "closed":
+            typer.echo(f"  Open GNS3 project: {Settings.GNS3.PROJECT_NAME}")
+        _show_changes(changes)
+        if not changes.has_changes and project is not None and project.get("status") != "closed":
+            typer.echo("  No changes required.")
+        typer.echo("No ESXi or GNS3 resources changed.")
+        return
+    orchestrator.apply_topology_changes(changes)
     typer.secho("Deployment complete.", fg=typer.colors.GREEN)
 
 
@@ -99,7 +206,7 @@ def deploy(
     ),
     incremental: bool = typer.Option(False, "--incremental", "-i", help="Unavailable in this project version."),
 ) -> None:
-    """Validates and deploys the configured topology to ESXi and GNS3."""
+    """Validates and deploys the configured topology or previews its changes."""
     from .generator import load_graph
 
     apply_esxi_options(address, esxi_username, esxi_password, gns3_vm_name, datastore, virtual_switch, trunk_port_group)
@@ -136,24 +243,8 @@ def destroy(
     dry_run: bool = typer.Option(False, "--dry-run", "--dry_run", "-d", help="Preview without deleting resources."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Confirm deletion without prompting."),
 ) -> None:
-    """
-    Removes resources belonging to the configured topology.
-    :param address: ESXi host address override.
-    :param esxi_username: ESXi username override.
-    :param esxi_password: ESXi password override.
-    :param gns3_vm_name: GNS3 host VM name override.
-    :param datastore: ESXi datastore override.
-    :param virtual_switch: Managed ESXi switch override.
-    :param trunk_port_group: GNS3 trunk port-group override.
-    :param gns3_username: GNS3 SSH username override.
-    :param gns3_password: GNS3 SSH password override.
-    :param dry_run: Print the destruction plan without deleting anything.
-    :param yes: Skip interactive confirmation.
-    :raises RuntimeError: If infrastructure inspection or deletion fails.
-    """
+    """Removes resources belonging to the configured topology."""
     from loguru import logger
-
-    from src.orchestrator.graph_orchestrator import GraphOrchestrator
 
     from .generator import load_graph
 
@@ -162,35 +253,11 @@ def destroy(
         Settings.GNS3.USERNAME = gns3_username
     if gns3_password is not None:
         Settings.GNS3.PASSWORD = gns3_password
-
     graph = load_graph(Path(Settings.TOPOLOGY_FILE))
-    orchestrator = GraphOrchestrator(
-        esxi_host=Settings.ESXI.IP,
-        esxi_port=Settings.ESXI.PORT,
-        esxi_username=Settings.ESXI.USERNAME,
-        esxi_password=Settings.ESXI.PASSWORD,
-        gns3_username=Settings.GNS3.USERNAME,
-        gns3_password=Settings.GNS3.PASSWORD,
-        existing_project_only=True,
-    )
+    orchestrator = _get_orchestrator(existing_project_only=True)
     changes = orchestrator.plan_topology_destruction(graph)
-    if changes.conflicts:
-        raise RuntimeError("Cannot destroy topology:\n- " + "\n- ".join(changes.conflicts))
-
-    labels = {
-        "gns3_link": "GNS3 links",
-        "gns3_node": "GNS3 nodes",
-        "esxi_vm": "ESXi VMs",
-        "port_group": "ESXi port groups",
-        "vlans": "GNS3 VLAN interfaces",
-    }
     typer.echo("Topology destruction plan:")
-    for key in ("gns3_link", "gns3_node", "esxi_vm", "port_group", "vlans"):
-        items = changes.to_delete[key]
-        typer.echo(f"  {labels[key]} ({len(items)}):")
-        for item in items:
-            name = item.name if key in ("gns3_node", "esxi_vm") else str(item)
-            typer.echo(f"    - {name}")
+    _show_changes(changes, only_deletions=True)
     if not changes.has_changes:
         typer.echo("No graph-owned resources found; nothing to delete.")
         return

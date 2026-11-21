@@ -22,17 +22,16 @@ class ESXiOrchestrator:
         """
         self.esxi_connection = esxi_connection
 
-    def ensure_virtual_switch(self, virtual_switch_name: str) -> vim.host.VirtualSwitch | None:
+    def ensure_virtual_switch(self, virtual_switch_name: str) -> vim.host.VirtualSwitch:
         """
         Ensures the ESXi virtual switch exists and has the required security policy.
-        :param virtual_switch_name: Name of the virtual Switch.
-        :return: The switch, or ``None`` for a missing switch in dry-run.
+        :param virtual_switch_name: Virtual switch name.
+        :return: Existing or created switch.
+        :raises RuntimeError: If the ESXi host network cannot be configured.
+        :raises ValueError: If the virtual switch name is invalid.
         """
         virtual_switch = self.esxi_connection.get_virtual_switch(virtual_switch_name)
         if virtual_switch is None:
-            if Settings.IS_DRY_RUN:
-                Verbosity.volumatic_print(Verbosity.NORMAL, f"Would create virtual switch: {virtual_switch_name}")
-                return None
             Verbosity.volumatic_print(Verbosity.NORMAL, f"Creates virtual switch: {virtual_switch_name}")
             virtual_switch = self.esxi_connection.create_virtual_switch(virtual_switch_name)
         self._ensure_virtual_switch_policy(virtual_switch)
@@ -50,7 +49,6 @@ class ESXiOrchestrator:
             update_spec.policy = vim.host.NetworkPolicy()
         if update_spec.policy.security is None:
             update_spec.policy.security = vim.host.NetworkPolicy.SecurityPolicy()
-
         is_change_needed = False
         if not update_spec.policy.security.allowPromiscuous:
             update_spec.policy.security.allowPromiscuous = True
@@ -62,16 +60,10 @@ class ESXiOrchestrator:
             update_spec.policy.security.macChanges = True
             is_change_needed = True
         if is_change_needed:
-            if Settings.IS_DRY_RUN:
-                Verbosity.volumatic_print(
-                    Verbosity.NORMAL, f"Would update virtual switch policy: {virtual_switch.name}"
-                )
-                return
             host = self.esxi_connection.get_esxi_object(vim.HostSystem)
             if host is None:
                 logger.error(msg := f"Hostsystem not found on ESXi host: {self.esxi_connection.ip}")
                 raise RuntimeError(msg)
-
             network_system = host.configManager.networkSystem
             if network_system is None:
                 logger.error(msg := f"NetworkSystem not found on ESXi host: {self.esxi_connection.ip}")
@@ -128,8 +120,6 @@ class ESXiOrchestrator:
         for vm in virtual_machines:
             if ESXiConnection.compare_regular_to_esxi_name(protected, vm.name):
                 raise RuntimeError(f"Refusing to delete protected ESXi VM {vm.name}")
-        if Settings.IS_DRY_RUN:
-            return
         for vm in virtual_machines:
             if vm.runtime.powerState != vim.VirtualMachinePowerState.poweredOff:
                 WaitForTasks([vm.PowerOffVM_Task()])
@@ -263,18 +253,17 @@ class ESXiOrchestrator:
         Creates or updates port groups while preserving VM connections.
         :param needed_port_groups: Port-group names mapped to VLAN IDs.
         :param update: Whether to update existing port groups.
+        :raises RuntimeError: If a port group or its connected adapters cannot be configured.
         """
-        existing = self.esxi_connection.get_all_port_groups() if update and not Settings.IS_DRY_RUN else {}
+        existing = self.esxi_connection.get_all_port_groups() if update else {}
         for pg_name, pg_id in needed_port_groups.items():
             current = existing.get(pg_name)
             if current is None or current.spec.vswitchName == Settings.ESXI.VIRTUAL_SWITCH:
                 self.esxi_connection.add_port_group(pg_name, pg_id, update=update)
                 continue
-
             host = self.esxi_connection.get_esxi_object(vim.HostSystem)
             if any(nic.portgroup == pg_name for nic in (host.config.network.vnic or [])):
                 raise RuntimeError(f"Cannot move port group {pg_name}: used by an ESXi VMkernel adapter")
-
             adapters = [
                 (
                     vm,
@@ -341,16 +330,11 @@ class ESXiOrchestrator:
         Deploys the virtual machine on the ESXi host.
         :param node: Node which represents the virtual machine to be deployed.
         :param datastore: Name of the datastore, to store the virtual machine on.
-        :return:
-        :raises TimeoutError: Is thrown when it took too long to receive a response.
+        :raises TypeError: If the datastore is not available.
+        :raises RuntimeError: If VLAN mapping or VM deployment fails.
+        :raises TimeoutError: If VM deployment times out.
         """
-        # --------------------------------------------------------------------------------------------------------------
-        if Settings.IS_DRY_RUN:
-            Verbosity.volumatic_print(Verbosity.NORMAL, f"Would deploy {node.name} on ESXi: {node.image}")
-            return
         Verbosity.volumatic_print(Verbosity.NORMAL, f"Deploys {node.name} on ESXi: {node.image}")
-        # --------------------------------------------------------------------------------------------------------------
-
         datastore_object = self.esxi_connection.get_esxi_object(vim.Datastore, datastore)
         if not isinstance(datastore_object, vim.Datastore):
             raise TypeError(f"No datastore found with name: {datastore}")

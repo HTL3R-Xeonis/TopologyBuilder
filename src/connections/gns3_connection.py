@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 import requests
 
-from src.settings import Settings, Verbosity
+from src.settings import Verbosity
 
 if TYPE_CHECKING:
     from src.graph.blocks import GenericNode, Interface
@@ -132,11 +132,11 @@ class GNS3Connection(APIHandler):
                 connected.append(port)
         return (connected or ports[:1]) if connected_only else ports
 
-    def create_node(self, node: GenericNode) -> dict[str, Any] | None:
+    def create_node(self, node: GenericNode) -> dict[str, Any]:
         """
         Creates a new GNS3 node on the GNS3 project.
         :param node: Node to be generated.
-        :return: Returns the newly generated GNS3 node information. ``None`` is returned, if the ``Settings.IS_DRY_RUN`` value is True.
+        :return: Newly created GNS3 node information.
         :raises ValueError: Is thrown when the image of the node does not exist on the GNS3 instance.
         :raises TimeoutError: Is thrown when it takes too long to receive a response.
         :raises RuntimeError: Is thrown when it fails to collect GNS3 template information. May also be thrown when it fails to create the node or provide the Cloud port.
@@ -148,17 +148,10 @@ class GNS3Connection(APIHandler):
             return self._create_builtin_nodes(node, "Cloud", [{**initial_port, "port_number": 0}])
 
         template = self._get_template(node.image)
-
-        # --------------------------------------------------------------------------------------------------------------
-        if Settings.IS_DRY_RUN:
-            Verbosity.volumatic_print(Verbosity.NORMAL, f"Would deploy {node.name} on GNS3: {node.image}")
-            return None
         Verbosity.volumatic_print(Verbosity.NORMAL, f"Deploys {node.name} on GNS3: {node.image}")
-        # --------------------------------------------------------------------------------------------------------------
         # If the template is a builtin (e.g.: VPC, Cloud or NAT) it requires special treatment
         if template["builtin"]:
             return self._create_builtin_nodes(node, template)
-
         payload = {"name": node.name, "x": 100, "y": 100}
         try:
             response = self.post(
@@ -170,7 +163,6 @@ class GNS3Connection(APIHandler):
                 logger.error(msg := "Invalid GET request was made.")
                 raise RuntimeError(msg) from exc
             raise RuntimeError("Something went wrong with the creation of the node request.") from exc
-
         node.node_gns3_info = response
         return response
 
@@ -179,27 +171,21 @@ class GNS3Connection(APIHandler):
         node: GenericNode,
         template: str | dict[str, Any],
         ports_mapping: list | None = None,
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, Any]:
         """
         Creates new GNS3 built-in nodes in the GNS3 project.
         :param node: Node to be generated.
         :param template: Name of the GNS3 template or already the GNS3 template.
         :param ports_mapping: Only used for nodes, whose environment is ``ON_ESXI`` and which are represented with the 'Cloud'-node,
         since this will alter the interface selection of the node. May not work with all node templates.
-        :return: Returns the newly generated GNS3 node information. ``None`` is returned, when the IS_DRY_RUN option is set.
+        :return: Newly created GNS3 node information.
         :raises ValueError: Is thrown when the image of the node does not exist on the GNS3 instance.
         :raises TimeoutError: Is thrown when it takes too long to receive a response.
         :raises RuntimeError: Is thrown when it fails to collect GNS3 template information. May also be thrown when it fails to create the node.
         """
         if isinstance(template, str):
-            # ----------------------------------------------------------------------------------------------------------
-            if Settings.IS_DRY_RUN:
-                Verbosity.volumatic_print(Verbosity.NORMAL, f"Would deploy {node.name} on GNS3: {template}")
-                return None
             Verbosity.volumatic_print(Verbosity.NORMAL, f"Deploys {node.name} on GNS3: {template}")
-            # ----------------------------------------------------------------------------------------------------------
             template = self._get_template(template)
-
         payload = {
             "name": node.name,
             "node_type": template["template_type"],
@@ -210,7 +196,6 @@ class GNS3Connection(APIHandler):
 
         if ports_mapping is not None:
             payload["properties"] = {"ports_mapping": ports_mapping}
-
         try:
             response = self.post(
                 f"{self.url}/v2/projects/{self.project_gns3_info['project_id']}/nodes",
@@ -221,7 +206,6 @@ class GNS3Connection(APIHandler):
                 logger.error(msg := "Invalid GET request was made.")
                 raise RuntimeError(msg) from exc
             raise RuntimeError("Something went wrong with the creation of the node request.") from exc
-
         node.node_gns3_info = response
         if ports_mapping is not None:
             return self.ensure_cloud_ports(node, ports_mapping)
@@ -353,36 +337,25 @@ class GNS3Connection(APIHandler):
             f"Interface {intf.name} on {intf.parent.name} cannot be associated to any adapter of the {gns3_node_info['name']} template."
         )
 
-    def connect_nodes(self, node_1: GenericNode, node_2: GenericNode) -> dict[str, Any] | None:
+    def connect_nodes(self, node_1: GenericNode, node_2: GenericNode) -> dict[str, Any]:
         """
         Connects two GNS3 nodes from the same GNS3 project together.
         :param node_1: Node to connect to ``node_2``.
         :param node_2: Node to connect to ``node_1``.
-        :return: Returns the newly generated GNS3 link information. `None`` is returned, if the ``Settings.IS_DRY_RUN`` value is True.
+        :return: Newly created GNS3 link information.
         :raises ValueError: Is thrown when no adapter can be associated with the given interface.
         This may happen because the names are not the same.
         :raises RuntimeError: Is thrown when both nodes have no connection in the graph to each other.
         May also be thrown when one of the nodes does not exist in GNS3.
         """
-
         intf_1 = node_1.get_interface(node_2)
         intf_2 = node_2.get_interface(node_1)
-
         if intf_1 is None or intf_2 is None:
             raise RuntimeError(f"Node {node_1.name} has no internal connection to {node_2.name}")
-        # --------------------------------------------------------------------------------------------------------------
-        if Settings.IS_DRY_RUN:
-            Verbosity.volumatic_print(
-                Verbosity.NORMAL,
-                f"Would connect {node_1.name}[{intf_1.name}] to {node_2.name}[{intf_2.name}]",
-            )
-            return None
         Verbosity.volumatic_print(
             Verbosity.NORMAL,
             f"Connects {node_1.name}[{intf_1.name}] to {node_2.name}[{intf_2.name}]",
         )
-        # --------------------------------------------------------------------------------------------------------------
-
         gns3_info_1 = node_1.node_gns3_info
         gns3_info_2 = node_2.node_gns3_info
 
@@ -393,7 +366,6 @@ class GNS3Connection(APIHandler):
 
         adapter_1 = self._get_adapter(gns3_info_1, intf_1)
         adapter_2 = self._get_adapter(gns3_info_2, intf_2)
-
         payload = {
             "nodes": [
                 {

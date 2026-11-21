@@ -11,7 +11,7 @@ from loguru import logger
 
 from src.connections import SSHConnection
 from src.graph import Graph
-from src.settings import Settings, Verbosity
+from src.settings import Verbosity
 
 
 class GNS3VMInterfaceSetup:
@@ -134,7 +134,6 @@ class GNS3VMInterfaceSetup:
             raise ValueError(f"Invalid parent interface: {self.parent_interface!r}")
         self._create_subinterface_creation_commands(graph)
         self._requested_vlan_names = set(self.vlans)
-
         previous = self._run_command(f"sudo sh -c 'if [ -f {self.NETPLAN_FILE} ]; then cat {self.NETPLAN_FILE}; fi'")
         if previous:
             if not previous.startswith(self.NETPLAN_MARKER):
@@ -150,12 +149,6 @@ class GNS3VMInterfaceSetup:
                 self.netplan_yaml = self.NETPLAN_MARKER + yaml.safe_dump(document, sort_keys=False)
             except (KeyError, TypeError, AttributeError, ValueError, yaml.YAMLError) as error:
                 raise RuntimeError(f"Invalid managed VLAN configuration: {error}") from error
-
-        if Settings.IS_DRY_RUN:
-            Verbosity.volumatic_print(
-                Verbosity.NORMAL,
-                f"Dry run: {len(self._requested_vlan_names)} VLAN interfaces requested; no changes applied.",
-            )
 
     def get_managed_vlan_names(self) -> set[str]:
         """
@@ -183,7 +176,7 @@ class GNS3VMInterfaceSetup:
         :param vlan_names: VLAN interfaces approved for deletion.
         :raises RuntimeError: If a VLAN cannot be safely removed or removal fails.
         """
-        if not vlan_names or Settings.IS_DRY_RUN:
+        if not vlan_names:
             return
         if any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,14}", name) for name in vlan_names):
             raise RuntimeError("Invalid managed VLAN interface name")
@@ -231,8 +224,6 @@ class GNS3VMInterfaceSetup:
         :return: Exit code, status message and error output.
         :raises RuntimeError: If remote configuration fails.
         """
-        if Settings.IS_DRY_RUN:
-            return 0, "", ""
         if not self.netplan_yaml:
             raise RuntimeError("The VLAN configuration has not been initialized.")
 
