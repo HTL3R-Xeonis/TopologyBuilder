@@ -14,6 +14,10 @@ from src.graph.environment import Environment
 from src.graph.layout import render_graph
 
 
+DEFAULT_ESXI_INTERFACE = "eth0"
+"""name of the interface an ESXi-hosted node gets when no edge touches it (see ``Graph._ensure_esxi_interfaces``)"""
+
+
 class Graph:
     """
     Object which represents a graph of nodes.
@@ -32,6 +36,7 @@ class Graph:
         ]
         self._build_nodes(nodes)
         self._build_edges(edges)
+        self._ensure_esxi_interfaces()
         self._assign_vlans()
 
     @property
@@ -92,6 +97,18 @@ class Graph:
 
             if_1.connect_to(node_2, if_2)
             if_2.connect_to(node_1, if_1)
+
+    def _ensure_esxi_interfaces(self) -> None:
+        """
+        Gives every ESXi-hosted node that has no interface at all (no edge in the config file touches it) one default
+        interface, so that it still gets a network adapter on a port group of its own and a Cloud node on GNS3: the VM
+        is then reachable from GNS3 and a link to it can be added later without redeploying the VM. Without it such a VM
+        would have no adapter and no Cloud node. Nodes with at least one edge are left as they are.
+        :return:
+        """
+        for node in self.nodes.values():
+            if node.env == Environment.ON_ESXI and not node.interfaces:
+                node.add_interface(DEFAULT_ESXI_INTERFACE)
 
     def _assign_vlans(self) -> None:
         """

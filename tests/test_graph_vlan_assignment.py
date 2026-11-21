@@ -270,3 +270,76 @@ def graph_vlan_010() -> None:
     graph.adopt_vlan_ids({**_DEPLOYED_IDS, "LEFTOVER_eth0": 5})
 
     assert _ids(graph)["PC1_eth1"] == 6
+
+
+@allure.title(
+    "Eine ESXi-Node ohne Verbindung bekommt eine Standard-Schnittstelle mit eigener VLAN"
+)
+@allure.description(
+    "Überprüft, dass eine ESXi-gehostete Node, die in keiner Edge vorkommt, eine Schnittstelle eth0 mit einer eigenen "
+    "VLAN erhält (sonst hätte die VM keine Netzwerkkarte und in GNS3 keinen Cloud-Knoten), eine GNS3-Node ohne "
+    "Verbindung aber nicht"
+)
+@allure.tag("positiv-test", "graph")
+@allure.feature("graph")
+@allure.severity(allure.severity_level.CRITICAL)
+def graph_vlan_011() -> None:
+    Settings.API.LITERAL_API_VALUES = True
+    edges = [["VM1", "ens160", "R1", "gi0/0"]]  # VM2 and ... have no edge
+    graph = Graph(_NODES, edges)
+
+    assert list(graph.nodes["VM1"].interfaces) == ["ens160"]  # linked: unchanged
+    lonely = graph.nodes["VM2"].interfaces
+    assert list(lonely) == ["eth0"]
+    assert lonely["eth0"].vlan is not None
+    assert lonely["eth0"].vlan.id != graph.nodes["VM1"].interfaces["ens160"].vlan.id
+    assert lonely["eth0"].neighbour is None
+    assert list(graph.nodes["R1"].interfaces) == ["gi0/0"]  # a GNS3 node never gets one
+
+    alone = Graph([{"image": "VPCS", "role": "ROUTER", "names": ["R9"]}], [])
+    assert alone.nodes["R9"].interfaces == {}
+
+
+@allure.title(
+    "Der Cloud-Knoten und die Unterschnittstelle für eine unverbundene ESXi-VM entstehen"
+)
+@allure.description(
+    "Überprüft, dass für die Standard-Schnittstelle einer unverbundenen ESXi-VM ein Port im Cloud-Knoten, ein "
+    "create_node-Aufruf für einen Cloud-Knoten und eine VLAN-Unterschnittstelle auf der GNS3-VM vorgesehen sind"
+)
+@allure.tag("positiv-test", "graph")
+@allure.feature("graph")
+@allure.severity(allure.severity_level.CRITICAL)
+def graph_vlan_012() -> None:
+    from unittest.mock import patch
+
+    from src.connections import GNS3Connection
+    from src.vm_orchestrator.gns3_vm_interface_setup import GNS3VMInterfaceSetup
+
+    Settings.API.LITERAL_API_VALUES = True
+    Settings.IS_DRY_RUN = False
+    Settings.ONLY_ON_ESXI = False
+    graph = Graph([{"image": "Ubuntu-Server", "role": "VM", "names": ["LONELY"]}], [])
+    node = graph.nodes["LONELY"]
+    vlan = node.interfaces["eth0"].vlan
+
+    ports = GNS3Connection._create_ports_mapping(node)
+    assert ports == [
+        {
+            "interface": vlan.subinterface_name,
+            "name": "eth0",
+            "port_number": 0,
+            "type": "ethernet",
+        }
+    ]
+    assert GNS3VMInterfaceSetup.expected_subinterfaces(graph) == {
+        vlan.subinterface_name: vlan.id
+    }
+
+    connection = GNS3Connection.__new__(GNS3Connection)
+    connection.incremental = False
+    with patch.object(
+        GNS3Connection, "_create_builtin_nodes", return_value={"node_id": "n"}
+    ) as create:
+        assert connection.create_node(node) == {"node_id": "n"}
+    create.assert_called_once_with(node, "Cloud", ports)
