@@ -7,6 +7,7 @@ from loguru import logger
 
 from src.graph.blocks import GenericNode
 from src.graph.blocks.formatter import nested_formatter
+from src.graph.topology_layout import TopologyLayout, TopologyPattern
 
 
 class Graph:
@@ -16,12 +17,15 @@ class Graph:
 
     def __init__(self, nodes: list[dict[str, str]], edges: list[list[str]]):
         """
-        :param nodes: dict of nodes from the config file
-        :param edges: list of edges from the config file
-        :raises ValueError: Is thrown when the image is not found on ESXi or GNS3. May also be thrown when an interface already exists with the given name on the node or too many interfaces with a vlan were created.
+        :param nodes: Node definitions from the topology file.
+        :param edges: Links with the interfaces at both endpoints.
+        :raises RuntimeError: If a link references an unknown node.
+        :raises ValueError: If a node image or interface is invalid.
+        :raises IndexError: If a link definition is incomplete.
         """
 
         self._nodes: dict[str, GenericNode] = {}
+        self._edges: list[tuple[str, str, str, str]] = []
         self._build_nodes(nodes)
         self._build_edges(edges)
         self._ensure_esxi_interfaces()
@@ -54,10 +58,10 @@ class Graph:
     def _build_edges(self, edges_config: list[list[str]]) -> None:
         """
         Creates all the needed interfaces for each edge and connects both nodes with each other.
-        :param edges_config: list of edges from the config file
-        :return:
-        :raise RuntimeError: Is thrown when a node which should have existed in the graph doesn't exist.
-        :raises ValueError: Is thrown when an interface already exists with the given name on the node or too many interfaces with a vlan were created.
+        :param edges_config: Links with their source and target interfaces.
+        :raises RuntimeError: If a referenced node does not exist.
+        :raises ValueError: If an interface is invalid or already in use.
+        :raises IndexError: If a link definition is incomplete.
         """
         for edge in edges_config:
             if edge[0] not in self.nodes:
@@ -74,6 +78,7 @@ class Graph:
 
             if_1.connect_to(node_2)
             if_2.connect_to(node_1)
+            self._edges.append((edge[0], edge[1], edge[2], edge[3]))
 
     def _ensure_esxi_interfaces(self) -> None:
         """
@@ -86,55 +91,42 @@ class Graph:
             if node.env == Environment.ON_ESXI and not node.interfaces:
                 node.add_interface("Gi0/0")
 
-    # @TODO THIS IS FAULTY
-    def visualize(self) -> None:
+    def _create_layout(self) -> TopologyLayout:
         """
-        Visualizes the graph in the terminal.
-        :return:
+        Creates a layout engine for the current topology.
+        :return: Structure-aware topology layout instance.
         """
-        import networkx as nx
-        from phart import ASCIIRenderer, LayoutOptions, NodeStyle
+        return TopologyLayout(self.nodes, ((source, target) for source, _, target, _ in self._edges))
 
-        G = nx.Graph()
+    def get_node_positions(
+        self, spacing: tuple[int, int] = (180, 110), origin: tuple[int, int] = (0, 0)
+    ) -> dict[str, tuple[int, int]]:
+        """
+        Returns stable graph node coordinates for visualization or GNS3.
+        :param spacing: Horizontal and vertical distances per layout unit.
+        :param origin: Offset added to all node positions.
+        :return: Dictionary mapping node names to integer coordinates.
+        :raises ValueError: If the coordinate spacing is invalid.
+        """
+        return self._create_layout().get_positions(spacing=spacing, origin=origin)
 
-        for node_name in self.nodes:
-            G.add_node(node_name)
+    def get_topology_patterns(self) -> list[TopologyPattern]:
+        """
+        Returns recognized structures of the topology graph.
+        :return: Detected whole-graph and subgraph patterns.
+        """
+        return self._create_layout().get_patterns()
 
-        node_names = {id(node): name for name, node in self.nodes.items()}
+    def visualize(self, show_interfaces: bool = False, interactive: bool = True) -> None:
+        """
+        Displays the structure-aware graph in the terminal.
+        :param show_interfaces: Whether to label link endpoints with their interfaces.
+        :param interactive: Whether to navigate oversized diagrams in a viewport.
+        :raises OSError: If interactive terminal input cannot be configured.
+        """
+        from src.graph.visualizer import GraphVisualizer
 
-        seen = set()
-
-        for node_name, node in self.nodes.items():
-            for interface_name, interface in node.interfaces.items():
-                neighbour = interface.neighbour
-
-                if neighbour is None:
-                    continue
-
-                neighbour_name = node_names.get(id(neighbour))
-
-                if neighbour_name is None:
-                    continue
-
-                edge_key = frozenset((node_name, neighbour_name))
-
-                if edge_key in seen:
-                    continue
-
-                seen.add(edge_key)
-
-                G.add_edge(
-                    node_name,
-                    neighbour_name,
-                    interface=interface_name,
-                )
-
-        renderer = ASCIIRenderer(
-            G,
-            options=LayoutOptions(node_style=NodeStyle.SQUARE),
-        )
-
-        print(renderer.render())
+        GraphVisualizer(self).render(show_interfaces=show_interfaces, interactive=interactive)
 
     def __str__(self) -> str:
         """

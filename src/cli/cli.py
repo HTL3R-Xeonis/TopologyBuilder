@@ -122,13 +122,17 @@ def validate() -> None:
 @cli_errors
 def visualize(
     detailed: bool = typer.Option(False, "--detail", "-d", help="Print graph details."),
+    interfaces: bool = typer.Option(False, "--interfaces", help="Show interface labels beside links in the diagram."),
+    interactive: bool = typer.Option(
+        True, "--interactive/--no-interactive", help="Navigate oversized diagrams in the terminal."
+    ),
 ) -> None:
-    """Displays the topology graph in the terminal."""
+    """Displays the structure-aware topology in the terminal."""
     graph = load_graph(Path(Settings.TOPOLOGY_FILE))
     if detailed:
         typer.echo(repr(graph))
     else:
-        graph.visualize()
+        graph.visualize(show_interfaces=interfaces, interactive=interactive)
 
 
 def _read_prompt(prompt: str | None, prompt_file: Path | None) -> str:
