@@ -13,10 +13,23 @@ echo "Code Formatieren ..."
 "$PYTHON" -m ruff check --fix --target-version=py312 .
 "$PYTHON" -m ruff format --target-version=py312 .
 
-echo "requirements.txt wird erstellt ..."
-"$PYTHON" -m pip freeze > requirements.txt
+echo "Prüfe installierte Abhängigkeiten ..."
 
-git add -u
+if ! "$PYTHON" -m pip check; then
+    echo "Fehler: Fehlende oder inkompatible Packages!" >&2
+    exit 1
+fi
+
+echo "requirements.txt wird aktualisiert ..."
+
+if ! "$PYTHON" -m piptools compile \
+    --quiet \
+    --output-file=requirements.txt \
+    pyproject.toml; then
+    echo "Fehler beim Erstellen der requirements.txt!" >&2
+    exit 1
+fi
+
 git add requirements.txt
 
 echo "Hook erfolgreich."

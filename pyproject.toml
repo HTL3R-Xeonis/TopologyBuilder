@@ -1,3 +1,18 @@
+[project]
+name = "xeonis-topologybuilder"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = [
+    "loguru",
+    "networkx",
+    "paramiko",
+    "python-dotenv",
+    "PyYAML",
+    "requests",
+    "typer",
+    "pyvmomi"
+]
+
 [tool.ruff]
 line-length = 120
 lint.flake8-bugbear.extend-immutable-calls = ["typer.Option"]
@@ -10,3 +25,6 @@ testpaths = [
 markers = [
     "testlink: Custom metadata for TestLink-testcases"
 ]
+
+[tool.deptry]
+requirements_files = []
