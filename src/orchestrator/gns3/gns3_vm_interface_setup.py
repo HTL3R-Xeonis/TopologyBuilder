@@ -10,7 +10,7 @@ import yaml
 from loguru import logger
 
 from src.connections import SSHConnection
-from src.graph import Graph
+from src.graph import Environment, Graph
 from src.settings import Verbosity
 
 
@@ -105,7 +105,7 @@ class GNS3VMInterfaceSetup:
         for node in graph.nodes.values():
             for interface in node.interfaces.values():
                 vlan = interface.vlan
-                if vlan is None:
+                if vlan is None or interface.neighbour is None or interface.neighbour.env == Environment.ON_ESXI:
                     continue
                 if not isinstance(vlan.name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,14}", vlan.name):
                     raise ValueError(f"Invalid VLAN interface name: {vlan.name!r}")

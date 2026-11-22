@@ -134,11 +134,12 @@ class ESXiOrchestrator:
             if ESXiConnection.compare_regular_to_esxi_name(protected, vm.name):
                 raise RuntimeError(f"Refusing to delete protected ESXi VM {vm.name}")
         for vm in virtual_machines:
-            logger.info("Deleting ESXi VM: name={}", vm.name)
+            vm_name = vm.name
+            logger.info("Deleting ESXi VM: name={}", vm_name)
             if vm.runtime.powerState != vim.VirtualMachinePowerState.poweredOff:
                 WaitForTasks([vm.PowerOffVM_Task()])
             WaitForTasks([vm.Destroy_Task()])
-            logger.info("ESXi VM deleted: name={}", vm.name)
+            logger.info("ESXi VM deleted: name={}", vm_name)
 
     # @TODO upgrade resetting vSwitch
     def destroy_old_vms(self, needed_port_groups: dict[str, int]) -> None:
@@ -277,6 +278,10 @@ class ESXiOrchestrator:
             if current is None or current.spec.vswitchName == Settings.ESXI.VIRTUAL_SWITCH:
                 self.esxi_connection.add_port_group(pg_name, pg_id, update=update)
                 continue
+            logger.info(
+                "Moving ESXi port group: name={}, from={}, to={}, vlan={}",
+                pg_name, current.spec.vswitchName, Settings.ESXI.VIRTUAL_SWITCH, pg_id,
+            )
             host = self.esxi_connection.get_esxi_object(vim.HostSystem)
             if any(nic.portgroup == pg_name for nic in (host.config.network.vnic or [])):
                 raise RuntimeError(f"Cannot move port group {pg_name}: used by an ESXi VMkernel adapter")
@@ -297,6 +302,9 @@ class ESXiOrchestrator:
                 self.esxi_connection.remove_port_group(pg_name)
                 try:
                     self.esxi_connection.add_port_group(pg_name, pg_id)
+                    moved = self.esxi_connection.get_all_port_groups().get(pg_name)
+                    if moved is None or moved.spec.vswitchName != Settings.ESXI.VIRTUAL_SWITCH or int(moved.spec.vlanId) != pg_id:
+                        raise RuntimeError(f"Port group {pg_name} could not be verified on {Settings.ESXI.VIRTUAL_SWITCH}")
                 except Exception as exc:
                     logger.warning("ESXi port group move failed; restoring original configuration: name={}", pg_name)
                     if pg_name not in self.esxi_connection.get_all_port_groups():

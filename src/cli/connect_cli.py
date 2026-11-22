@@ -224,18 +224,24 @@ def destroy(
 @cli_errors
 def cleanup(
     all_resources: bool = typer.Option(
-        False, "--all", help="Also remove orphan VMs, GNS3 resources and empty, non-excluded projects."
+        False, "--all", help="Also remove non-excluded VMs, GNS3 nodes and projects outside the topology."
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Confirm deletion without prompting."),
 ) -> None:
-    """Removes unused networks and optionally orphan infrastructure."""
+    """Removes unused networks, or non-excluded infrastructure outside the topology."""
     from .generator import load_graph
 
     graph = load_graph(Path(Settings.TOPOLOGY_FILE))
     orchestrator = _get_orchestrator(existing_project_only=True)
     changes = orchestrator.plan_topology_cleanup(graph, all_resources=all_resources)
+    if all_resources:
+        project = orchestrator.gns3_orchestrator.gns3_connection.project_gns3_info or {}
+        typer.echo(
+            f"Cleanup scope: topology={Settings.TOPOLOGY_FILE}, "
+            f"GNS3 project={Settings.GNS3.PROJECT_NAME} ({project.get('project_id', 'not found')})"
+        )
     typer.echo(
-        "Cleanup plan (including empty GNS3 projects):" if all_resources else "Unused ESXi network cleanup plan:"
+        "Cleanup plan (including orphan resources):" if all_resources else "Unused networks and GNS3 VLAN cleanup plan:"
     )
     _show_changes(changes, only_deletions=True)
     if Settings.IS_DRY_RUN:
@@ -246,7 +252,8 @@ def cleanup(
         return
     if all_resources:
         typer.secho(
-            "WARNING: Orphan VMs, GNS3 nodes and empty projects may be permanently deleted!", fg=typer.colors.YELLOW
+            "WARNING: VMs, GNS3 nodes and projects outside the topology may be permanently deleted!",
+            fg=typer.colors.YELLOW
         )
     if not yes and not typer.confirm("Delete the listed resources?", default=False):
         raise typer.Abort()

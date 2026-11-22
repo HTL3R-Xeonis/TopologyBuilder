@@ -17,16 +17,17 @@ class GNS3Orchestrator:
         self.gns3_connection = gns3_connection
         self.gns3_ssh_connection = gns3_ssh_connection
 
-    def create_node(self, node: GenericNode) -> dict[str, Any] | None:
+    def create_node(self, node: GenericNode, position: tuple[int, int] | None = None) -> dict[str, Any] | None:
         """
         Creates a new GNS3 node on the GNS3 project.
         :param node: Node to be generated.
+        :param position: Optional position on the GNS3 canvas.
         :return: Returns the newly generated GNS3 node information. ``None`` is returned, if the ``Settings.IS_DRY_RUN`` value is True.
         :raises ValueError: Is thrown when the image of the node does not exist on the GNS3 instance.
         :raises TimeoutError: Is thrown when it takes too long to receive a response.
         :raises RuntimeError: Is thrown when it fails to collect GNS3 template information. May also be thrown when it fails to create the node.
         """
-        return self.gns3_connection.create_node(node)
+        return self.gns3_connection.create_node(node, position=position)
 
     def partially_link_gns3_nodes(self, node: GenericNode) -> None:
         """

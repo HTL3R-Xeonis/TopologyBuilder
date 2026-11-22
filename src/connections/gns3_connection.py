@@ -107,23 +107,39 @@ class GNS3Connection(APIHandler):
             raise TypeError(f"GNS3 link inventory is unavailable for project {project_id}")
         return links
 
-    def _remove_project(self, project_id: str) -> None:
+    def _remove_project(
+        self,
+        project_id: str,
+        expected_node_ids: set[str] | None = None,
+        expected_link_ids: set[str] | None = None,
+    ) -> None:
         """
-        Removes an empty, non-excluded GNS3 project.
+        Removes a selected non-excluded GNS3 project after rechecking its contents.
         :param project_id: Project identifier.
-        :raises RuntimeError: If the project is missing, protected or no longer empty.
+        :param expected_node_ids: Node IDs approved by the cleanup plan.
+        :param expected_link_ids: Link IDs approved by the cleanup plan.
+        :raises RuntimeError: If the project is protected or has changed since planning.
         :raises TimeoutError: If GNS3 does not respond in time.
         :raises requests.exceptions.HTTPError: If deleting the project fails.
         """
         project = next((p for p in self.get_projects() if p.get("project_id") == project_id), None)
         if project is None:
             raise RuntimeError(f"GNS3 project {project_id} no longer exists")
-        if project.get("name") in (Settings.GNS3.IGNORE_PROJECTS or ()):
-            raise RuntimeError(f"GNS3 project {project['name']} is excluded from cleanup")
-        if project.get("status") != "opened":
-            raise RuntimeError(f"GNS3 project {project['name']} is not open; refusing to delete it")
-        if self.get_project_nodes(project_id) or self.get_project_links(project_id):
-            raise RuntimeError(f"GNS3 project {project['name']} is not empty; refusing to delete it")
+        if project.get("name") == Settings.GNS3.PROJECT_NAME or project.get("name") in (Settings.GNS3.IGNORE_PROJECTS or ()):
+            raise RuntimeError(f"GNS3 project {project['name']} is protected from cleanup")
+        nodes = self.get_project_nodes(project_id)
+        links = self.get_project_links(project_id)
+        protected = (
+            set(Settings.GNS3.IGNORE_NODES or ())
+            | set(Settings.ESXI.IGNORE_VIRTUAL_MACHINES or ())
+            | {Settings.ESXI.GNS3_VM_NAME}
+        )
+        if any(node.get("name") in protected for node in nodes):
+            raise RuntimeError(f"GNS3 project {project['name']} contains protected nodes")
+        if expected_node_ids is None or expected_link_ids is None:
+            raise RuntimeError("GNS3 project cleanup requires a verified inventory snapshot")
+        if {node["node_id"] for node in nodes} != expected_node_ids or {link["link_id"] for link in links} != expected_link_ids:
+            raise RuntimeError(f"GNS3 project {project['name']} changed since cleanup planning")
         self.delete(f"{self.url}/v2/projects/{project_id}")
         logger.info("GNS3 project removed: name={}, id={}", project["name"], project_id)
 
@@ -157,33 +173,34 @@ class GNS3Connection(APIHandler):
         """
         Returns VLAN port mappings for an ESXi-backed Cloud.
         :param node: ESXi node represented by the Cloud.
-        :param connected_only: Prefer linked ports, falling back to the first port.
+        :param connected_only: Compatibility flag; only GNS3-facing interfaces are exposed.
         :return: VLAN mappings for the selected graph interfaces.
         :raises ValueError: If the node has no interfaces.
         :raises RuntimeError: If an interface has no VLAN.
         """
         if not node.interfaces:
             raise ValueError(f"{node.name}: an ESXi-backed Cloud requires an interface")
+        from src.graph import Environment
+
         ports = []
-        connected = []
         for interface in node.interfaces.values():
+            if interface.neighbour is None or interface.neighbour.env == Environment.ON_ESXI:
+                continue
             if interface.vlan is None:
                 raise RuntimeError(f"{node.name}.{interface.name}: no VLAN assigned to Cloud interface")
-            port = {
+            ports.append({
                 "interface": interface.vlan.name,
                 "name": interface.vlan.name,
                 "port_number": len(ports),
                 "type": "ethernet",
-            }
-            ports.append(port)
-            if interface.neighbour is not None:
-                connected.append(port)
-        return (connected or ports[:1]) if connected_only else ports
+            })
+        return ports
 
-    def create_node(self, node: GenericNode) -> dict[str, Any]:
+    def create_node(self, node: GenericNode, position: tuple[int, int] | None = None) -> dict[str, Any]:
         """
         Creates a new GNS3 node on the GNS3 project.
         :param node: Node to be generated.
+        :param position: Optional position on the GNS3 canvas.
         :return: Newly created GNS3 node information.
         :raises ValueError: Is thrown when the image of the node does not exist on the GNS3 instance.
         :raises TimeoutError: Is thrown when it takes too long to receive a response.
@@ -192,15 +209,17 @@ class GNS3Connection(APIHandler):
         from src.graph import Environment
 
         if node.env == Environment.ON_ESXI:
-            initial_port = self._create_ports_mapping(node, connected_only=True)[0]
-            return self._create_builtin_nodes(node, "Cloud", [{**initial_port, "port_number": 0}])
+            ports = self._create_ports_mapping(node, connected_only=True)
+            initial = [{**ports[0], "port_number": 0}] if ports else []
+            return self._create_builtin_nodes(node, "Cloud", initial, position)
 
         template = self._get_template(node.image)
         Verbosity.volumatic_print(Verbosity.NORMAL, f"Deploys {node.name} on GNS3: {node.image}")
         # If the template is a builtin (e.g.: VPC, Cloud or NAT) it requires special treatment
         if template["builtin"]:
-            return self._create_builtin_nodes(node, template)
-        payload = {"name": node.name, "x": 100, "y": 100}
+            return self._create_builtin_nodes(node, template, position=position)
+        x, y = position if position is not None else (100, 100)
+        payload = {"name": node.name, "x": x, "y": y}
         try:
             response = self.post(
                 f"{self.url}/v2/projects/{self.project_gns3_info['project_id']}/templates/{template['template_id']}",
@@ -220,6 +239,7 @@ class GNS3Connection(APIHandler):
         node: GenericNode,
         template: str | dict[str, Any],
         ports_mapping: list | None = None,
+        position: tuple[int, int] | None = None,
     ) -> dict[str, Any]:
         """
         Creates new GNS3 built-in nodes in the GNS3 project.
@@ -227,6 +247,7 @@ class GNS3Connection(APIHandler):
         :param template: Name of the GNS3 template or already the GNS3 template.
         :param ports_mapping: Only used for nodes, whose environment is ``ON_ESXI`` and which are represented with the 'Cloud'-node,
         since this will alter the interface selection of the node. May not work with all node templates.
+        :param position: Optional position on the GNS3 canvas.
         :return: Newly created GNS3 node information.
         :raises ValueError: Is thrown when the image of the node does not exist on the GNS3 instance.
         :raises TimeoutError: Is thrown when it takes too long to receive a response.
@@ -235,12 +256,13 @@ class GNS3Connection(APIHandler):
         if isinstance(template, str):
             Verbosity.volumatic_print(Verbosity.NORMAL, f"Deploys {node.name} on GNS3: {template}")
             template = self._get_template(template)
+        x, y = position if position is not None else (100, 100)
         payload = {
             "name": node.name,
             "node_type": template["template_type"],
             "compute_id": "local",
-            "x": 100,
-            "y": 100,
+            "x": x,
+            "y": y,
         }
 
         if ports_mapping is not None:
@@ -437,7 +459,22 @@ class GNS3Connection(APIHandler):
             )
             return response
         except requests.exceptions.HTTPError as exc:
-            if getattr(exc.response, "status_code", None) == 400:
-                logger.error(msg := "Invalid GET request was made.")
-                raise RuntimeError(msg) from exc
-            raise RuntimeError(f"Something went wrong while linking two nodes on {self.ip}")
+            status = getattr(exc.response, "status_code", "unknown")
+            details = ""
+            if exc.response is not None:
+                try:
+                    body = exc.response.json()
+                    if isinstance(body, dict):
+                        details = str(body.get("message") or body.get("error") or "")
+                except ValueError:
+                    pass
+                if not details:
+                    details = exc.response.text
+            details = " ".join(details.split())[:400]
+            message = (
+                f"GNS3 link {node_1.name}[{intf_1.name}] <-> {node_2.name}[{intf_2.name}] "
+                f"rejected (HTTP {status}; ports={adapter_1['adapter_number']}/{adapter_1['port_number']}, "
+                f"{adapter_2['adapter_number']}/{adapter_2['port_number']}): {details or 'no server details'}"
+            )
+            logger.error(message)
+            raise RuntimeError(message) from exc
