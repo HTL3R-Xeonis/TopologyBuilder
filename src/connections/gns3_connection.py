@@ -59,7 +59,9 @@ class GNS3Connection(APIHandler):
             return project
         if project.get("status") == "closed":
             try:
-                return self.post(f"{self.url}/v2/projects/{project['project_id']}/open", json={})
+                reopened = self.post(f"{self.url}/v2/projects/{project['project_id']}/open", json={})
+                logger.info("GNS3 project opened: name={}, id={}", name, project["project_id"])
+                return reopened
             except requests.exceptions.HTTPError as exc:
                 raise RuntimeError(f"Failed to open GNS3 project {name}.") from exc
         return project
@@ -123,6 +125,7 @@ class GNS3Connection(APIHandler):
         if self.get_project_nodes(project_id) or self.get_project_links(project_id):
             raise RuntimeError(f"GNS3 project {project['name']} is not empty; refusing to delete it")
         self.delete(f"{self.url}/v2/projects/{project_id}")
+        logger.info("GNS3 project removed: name={}, id={}", project["name"], project_id)
 
     def _create_new_project(self, name) -> dict[str, Any]:
         """
@@ -135,6 +138,7 @@ class GNS3Connection(APIHandler):
         """
         try:
             response = self.post(f"{self.url}/v2/projects", json={"name": name})
+            logger.info("GNS3 project created: name={}, id={}", name, response.get("project_id"))
             return response
         except requests.exceptions.HTTPError as exc:
             if getattr(exc.response, "status_code", None) == 409:
@@ -208,6 +212,7 @@ class GNS3Connection(APIHandler):
                 raise RuntimeError(msg) from exc
             raise RuntimeError("Something went wrong with the creation of the node request.") from exc
         node.node_gns3_info = response
+        logger.info("GNS3 node created: name={}, id={}", node.name, response.get("node_id"))
         return response
 
     def _create_builtin_nodes(
@@ -251,6 +256,7 @@ class GNS3Connection(APIHandler):
                 raise RuntimeError(msg) from exc
             raise RuntimeError("Something went wrong with the creation of the node request.") from exc
         node.node_gns3_info = response
+        logger.info("GNS3 node created: name={}, id={}", node.name, response.get("node_id"))
         if ports_mapping is not None:
             return self.ensure_cloud_ports(node, ports_mapping)
         return response
@@ -425,10 +431,11 @@ class GNS3Connection(APIHandler):
             ]
         }
         try:
-            return self.post(
+            response = self.post(
                 f"{self.url}/v2/projects/{self.project_gns3_info['project_id']}/links",
                 json=payload,
             )
+            return response
         except requests.exceptions.HTTPError as exc:
             if getattr(exc.response, "status_code", None) == 400:
                 logger.error(msg := "Invalid GET request was made.")

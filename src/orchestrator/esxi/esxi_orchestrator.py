@@ -32,6 +32,7 @@ class ESXiOrchestrator:
         """
         virtual_switch = self.esxi_connection.get_virtual_switch(virtual_switch_name)
         if virtual_switch is None:
+            logger.info("Creating ESXi virtual switch: name={}", virtual_switch_name)
             Verbosity.volumatic_print(Verbosity.NORMAL, f"Creates virtual switch: {virtual_switch_name}")
             virtual_switch = self.esxi_connection.create_virtual_switch(virtual_switch_name)
         self._ensure_virtual_switch_policy(virtual_switch)
@@ -60,6 +61,7 @@ class ESXiOrchestrator:
             update_spec.policy.security.macChanges = True
             is_change_needed = True
         if is_change_needed:
+            logger.info("Updating ESXi virtual switch security policy: name={}", virtual_switch.name)
             host = self.esxi_connection.get_esxi_object(vim.HostSystem)
             if host is None:
                 logger.error(msg := f"Hostsystem not found on ESXi host: {self.esxi_connection.ip}")
@@ -116,6 +118,7 @@ class ESXiOrchestrator:
             if users:
                 logger.warning(f"Keeping port group {name}: used by VM(s) {', '.join(users)}")
                 continue
+            logger.info("Removing ESXi port group: name={}", name)
             self.esxi_connection.remove_port_group(name)
 
     def destroy_virtual_machines(self, virtual_machines: list[vim.VirtualMachine]) -> None:
@@ -131,9 +134,11 @@ class ESXiOrchestrator:
             if ESXiConnection.compare_regular_to_esxi_name(protected, vm.name):
                 raise RuntimeError(f"Refusing to delete protected ESXi VM {vm.name}")
         for vm in virtual_machines:
+            logger.info("Deleting ESXi VM: name={}", vm.name)
             if vm.runtime.powerState != vim.VirtualMachinePowerState.poweredOff:
                 WaitForTasks([vm.PowerOffVM_Task()])
             WaitForTasks([vm.Destroy_Task()])
+            logger.info("ESXi VM deleted: name={}", vm.name)
 
     # @TODO upgrade resetting vSwitch
     def destroy_old_vms(self, needed_port_groups: dict[str, int]) -> None:
@@ -267,6 +272,7 @@ class ESXiOrchestrator:
         """
         existing = self.esxi_connection.get_all_port_groups() if update else {}
         for pg_name, pg_id in needed_port_groups.items():
+            logger.info("Configuring ESXi port group: name={}, vlan={}, update={}", pg_name, pg_id, update)
             current = existing.get(pg_name)
             if current is None or current.spec.vswitchName == Settings.ESXI.VIRTUAL_SWITCH:
                 self.esxi_connection.add_port_group(pg_name, pg_id, update=update)
@@ -292,6 +298,7 @@ class ESXiOrchestrator:
                 try:
                     self.esxi_connection.add_port_group(pg_name, pg_id)
                 except Exception as exc:
+                    logger.warning("ESXi port group move failed; restoring original configuration: name={}", pg_name)
                     if pg_name not in self.esxi_connection.get_all_port_groups():
                         try:
                             self.esxi_connection.add_port_group(
@@ -344,6 +351,7 @@ class ESXiOrchestrator:
         :raises RuntimeError: If VLAN mapping or VM deployment fails.
         :raises TimeoutError: If VM deployment times out.
         """
+        logger.info("Deploying ESXi VM: name={}, image={}, datastore={}", node.name, node.image, datastore)
         Verbosity.volumatic_print(Verbosity.NORMAL, f"Deploys {node.name} on ESXi: {node.image}")
         datastore_object = self.esxi_connection.get_esxi_object(vim.Datastore, datastore)
         if not isinstance(datastore_object, vim.Datastore):
@@ -356,12 +364,14 @@ class ESXiOrchestrator:
             network_mapping=self._create_mapped_network(node),
         )
         importer.deploy_ova()
+        logger.info("ESXi VM deployment completed: name={}", node.name)
 
     def _add_virtual_machine_adapters(self, vm: vim.VirtualMachine, groups: list[str]) -> None:
         """
         Adds ESXi adapters connected to the specified port groups.
         :param vm: Existing ESXi virtual machine.
         :param groups: Port groups for new adapters.
+        :raises TypeError: If a port group cannot be found.
         """
         changes = []
         for index, name in enumerate(groups):
@@ -388,6 +398,7 @@ class ESXiOrchestrator:
         :param group: Target port-group name.
         :param connected: Connection state to restore, or ``None`` to connect a running VM.
         :param start_connected: Startup connection state, or ``None`` to enable it.
+        :raises TypeError: If the requested port group is missing.
         """
         network = self.esxi_connection.get_esxi_object(vim.Network, group)
         if not isinstance(network, vim.Network):

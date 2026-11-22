@@ -221,13 +221,14 @@ def destroy(
     typer.secho("Topology resources removed.", fg=typer.colors.GREEN)
 
 
+@cli_errors
 def cleanup(
     all_resources: bool = typer.Option(
         False, "--all", help="Also remove orphan VMs, GNS3 resources and empty, non-excluded projects."
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Confirm deletion without prompting."),
 ) -> None:
-    """Removes unused ESXi networks and optional orphan resources and empty projects."""
+    """Removes unused networks and optionally orphan infrastructure."""
     from .generator import load_graph
 
     graph = load_graph(Path(Settings.TOPOLOGY_FILE))

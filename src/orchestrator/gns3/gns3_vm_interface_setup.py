@@ -48,9 +48,15 @@ class GNS3VMInterfaceSetup:
 
         output = stdout.read().decode()
         errors = stderr.read().decode()
-        if stdout.channel.recv_exit_status() != 0:
-            logger.error(msg := f"GNS3 VM command failed: {command}")
-            raise RuntimeError(f"{msg}\n{errors}")
+        exit_code = stdout.channel.recv_exit_status()
+        if exit_code != 0:
+            logger.error(
+                "GNS3 VM command failed: host={}, operation={}, exit_code={}",
+                self.gns3_ssh_connection.ip,
+                " ".join(command.split()[:2]),
+                exit_code,
+            )
+            raise RuntimeError(f"GNS3 VM command failed (exit code {exit_code}): {command}\n{errors}")
         return output
 
     def _get_existing_subinterfaces(self) -> dict[str, tuple[int, bool]]:
@@ -292,5 +298,6 @@ class GNS3VMInterfaceSetup:
             changes.append(f"{len(activated)} activated")
 
         message = "VLAN configuration updated: " + ", ".join(changes) + "."
+        logger.info("{}", message)
         Verbosity.volumatic_print(Verbosity.NORMAL, message)
         return 0, message, ""

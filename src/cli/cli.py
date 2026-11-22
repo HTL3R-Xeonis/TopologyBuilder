@@ -5,6 +5,7 @@ from pathlib import Path
 import typer
 
 from src.settings import Settings, Verbosity
+from src.settings.logging_config import configure_logging
 
 from .connect_cli import cleanup, deploy, destroy
 from .doctor_cli import doctor_app
@@ -85,6 +86,7 @@ def main(
 
     if verbosity is not None:
         Settings.VERBOSITY_LEVEL = verbosity
+    configure_logging()
     if topology is not None:
         Settings.TOPOLOGY_FILE = str(topology)
     if literal_api_values:
@@ -203,11 +205,12 @@ def templates() -> None:
 @cli_errors
 def logs(
     lines: int = typer.Option(50, "--lines", "-n", min=1, help="Number of recent lines."),
+    errors: bool = typer.Option(False, "--errors", "-e", help="Show only warnings and errors."),
 ) -> None:
-    """Displays the most recent application log lines."""
+    """Displays recent application or warning/error log entries."""
     from collections import deque
 
-    log_path = Path(Settings.LOG_FILE_PATH)
+    log_path = Path(Settings.ERROR_LOG_FILE_PATH if errors else Settings.LOG_FILE_PATH)
     if not log_path.is_file():
         typer.secho(f"No log file found at {log_path}.", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)

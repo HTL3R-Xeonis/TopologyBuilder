@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 
 import typer
+from loguru import logger
 
 from src.connections.topology_generator_connection import TopologyGeneratorConnection
 from src.settings import Settings
@@ -66,16 +67,19 @@ def generate_topology(prompt: str, output: Path, url: str | None = None):
 
     api_url = generator_url(url)
     retries = Settings.API.GENERATOR.MAX_RETRIES
+    logger.info("Topology generation started: output={}, max_attempts={}", output, retries + 1)
     for attempt in range(1, retries + 2):
         result = TopologyGeneratorConnection.generate_topology(prompt, url=api_url)
         warnings = result.get("warnings") or []
         if not isinstance(warnings, list):
             warnings = [warnings]
         for warning in warnings:
+            logger.warning("Generator attempt {}/{}: {}", attempt, retries + 1, warning)
             typer.secho(f"Warning: {warning}", fg=typer.colors.YELLOW, err=True)
 
         generated_yaml = result.get("yaml")
         if result.get("valid") is not True or not isinstance(generated_yaml, str) or not generated_yaml.strip():
+            logger.warning("Generator attempt {}/{} returned invalid topology", attempt, retries + 1)
             typer.secho(
                 f"Attempt {attempt}/{retries + 1}: generator did not return valid YAML.",
                 fg=typer.colors.YELLOW,
@@ -98,6 +102,7 @@ def generate_topology(prompt: str, output: Path, url: str | None = None):
             try:
                 graph = load_graph(temporary_path)
             except Exception as exc:  # noqa: BLE001
+                logger.warning("Generator attempt {}/{} failed validation: {}", attempt, retries + 1, exc)
                 typer.secho(
                     f"Attempt {attempt}/{retries + 1}: topology validation failed: {exc}",
                     fg=typer.colors.YELLOW,
@@ -105,12 +110,14 @@ def generate_topology(prompt: str, output: Path, url: str | None = None):
                 )
                 continue
             temporary_path.replace(output)
+            logger.info("Topology generation completed: output={}, attempt={}", output, attempt)
             typer.secho(f"Topology saved to {output}", fg=typer.colors.GREEN)
             return graph
         finally:
             if temporary_path is not None:
                 temporary_path.unlink(missing_ok=True)
 
+    logger.error("Topology generation exhausted {} attempts; output unchanged: {}", retries + 1, output)
     typer.secho(
         f"No valid topology after {retries + 1} attempts; existing output was not changed.",
         fg=typer.colors.RED,

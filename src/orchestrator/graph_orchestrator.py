@@ -17,9 +17,31 @@ from src.orchestrator.esxi.esxi_orchestrator import ESXiOrchestrator
 from src.settings import Settings
 
 
+def log_change_plan(changes: TopologyChanges, operation: str) -> None:
+    """
+    Records a consistent summary of planned infrastructure changes.
+    :param changes: Planned resource changes and conflicts.
+    :param operation: Name of the planned operation.
+    """
+    totals = [
+        sum(len(items) for items in pool.values()) for pool in (changes.to_add, changes.to_change, changes.to_delete)
+    ]
+    logger.info(
+        "Topology plan: operation={}, add={}, update={}, delete={}, conflicts={}",
+        operation,
+        *totals,
+        len(changes.conflicts),
+    )
+    for action, pool in (("add", changes.to_add), ("update", changes.to_change), ("delete", changes.to_delete)):
+        counts = {kind: len(items) for kind, items in pool.items() if items}
+        if counts:
+            logger.debug("Topology plan details: operation={}, action={}, counts={}", operation, action, counts)
+    if changes.conflicts:
+        logger.warning("Topology plan blocked: operation={}, conflicts={}", operation, len(changes.conflicts))
+
+
 # @TODO ExceptionHandling
 # @TODO Complete and recursive Exception Documentation.
-# @TODO upgrade Logging
 class GraphOrchestrator:
     """Inspects and synchronizes graph resources on ESXi and GNS3."""
 
@@ -78,6 +100,7 @@ class GraphOrchestrator:
         state.get_topology_state(graph, self.esxi_orchestrator.esxi_connection, self.gns3_orchestrator.gns3_connection)
         changes = TopologyChanges(self.esxi_orchestrator, self.gns3_orchestrator)
         changes.init_topology_changes(graph, state)
+        log_change_plan(changes, "deployment")
         return changes
 
     def plan_topology_cleanup(self, graph: Graph, all_resources: bool = False) -> TopologyChanges:
@@ -93,6 +116,7 @@ class GraphOrchestrator:
         state.get_gns3_projects_state(self.gns3_orchestrator.gns3_connection)
         changes = TopologyChanges(self.esxi_orchestrator, self.gns3_orchestrator)
         changes.init_topology_cleanup(graph, state, all_resources=all_resources)
+        log_change_plan(changes, "cleanup-all" if all_resources else "cleanup-networks")
         return changes
 
     def apply_topology_cleanup(self, changes: TopologyChanges) -> None:
@@ -107,6 +131,7 @@ class GraphOrchestrator:
             raise RuntimeError("Cannot clean infrastructure:\n- " + "\n- ".join(changes.conflicts))
         if not changes.has_changes:
             return
+        logger.info("Topology Cleanup started")
         self._remove_graph_instances(changes)
         if changes.to_delete["port_group"]:
             self.esxi_orchestrator.remove_port_groups(set(changes.to_delete["port_group"]), managed_only=False)
@@ -116,14 +141,13 @@ class GraphOrchestrator:
             remaining = set(self.esxi_orchestrator.esxi_connection.get_all_port_groups())
             kept = set(changes.to_delete["vlans"]) & remaining
             if kept:
-                from loguru import logger
-
-                logger.warning(f"Keeping VLANs still used by ESXi port groups: {sorted(kept)}")
+                logger.warning("Keeping VLANs still used by ESXi port groups: {}", sorted(kept))
             removable = set(changes.to_delete["vlans"]) - remaining
             if removable:
                 changes.gns3_vlan_setup.remove_managed_vlans(removable)
         for project in changes.to_delete["gns3_project"]:
             self.gns3_orchestrator.gns3_connection._remove_project(project["project_id"])
+        logger.info("Topology Cleanup completed")
 
     def plan_topology_destruction(self, graph: Graph) -> TopologyChanges:
         """
@@ -136,6 +160,7 @@ class GraphOrchestrator:
         state.get_topology_state(graph, self.esxi_orchestrator.esxi_connection, self.gns3_orchestrator.gns3_connection)
         changes = TopologyChanges(self.esxi_orchestrator, self.gns3_orchestrator)
         changes.init_topology_destruction(graph, state)
+        log_change_plan(changes, "destruction")
         return changes
 
     def apply_topology_destruction(self, changes: TopologyChanges) -> None:
@@ -150,11 +175,13 @@ class GraphOrchestrator:
             raise RuntimeError("Cannot destroy topology:\n- " + "\n- ".join(changes.conflicts))
         if not changes.has_changes:
             return
+        logger.info("Topology Destruction started")
         self._remove_graph_instances(changes)
         if changes.to_delete["port_group"]:
             self.esxi_orchestrator.remove_port_groups(set(changes.to_delete["port_group"]))
         if changes.to_delete["vlans"]:
             changes.gns3_vlan_setup.remove_managed_vlans(set(changes.to_delete["vlans"]))
+        logger.info("Topology Destruction completed")
 
     def _remove_graph_instances(self, changes: TopologyChanges) -> None:
         """
@@ -176,6 +203,7 @@ class GraphOrchestrator:
                 connection.delete(f"{base}/links/{link_id}")
             for node in changes.to_delete["gns3_node"]:
                 node_id = node["node_id"] if isinstance(node, dict) else node.node_gns3_info["node_id"]
+                logger.info("Deleting GNS3 node: id={}", node_id)
                 connection.delete(f"{base}/nodes/{node_id}")
         if changes.to_delete["esxi_vm"]:
             self.esxi_orchestrator.destroy_virtual_machines(changes.to_delete["esxi_vm"])
@@ -193,6 +221,7 @@ class GraphOrchestrator:
             raise RuntimeError("Cannot synchronize topology:\n- " + "\n- ".join(changes.conflicts))
         if not changes.has_changes:
             return
+        logger.info("Topology Deployment started")
 
         if changes.to_add["virtual_switch"] or changes.to_change["virtual_switch"]:
             self.esxi_orchestrator.ensure_virtual_switch(Settings.ESXI.VIRTUAL_SWITCH)
@@ -239,6 +268,7 @@ class GraphOrchestrator:
             unused_vlans = set(changes.to_delete["vlans"]) - remaining_groups
             if unused_vlans:
                 changes.gns3_vlan_setup.remove_managed_vlans(unused_vlans)
+        logger.info("Topology Deployment completed")
 
     def _get_gns3_ip(self, gns3_name: str) -> str:
         """

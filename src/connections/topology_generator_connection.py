@@ -1,18 +1,21 @@
 """Client for the Generator Topology Generator API."""
 
+from time import perf_counter
+
 import requests
 from loguru import logger
 
 from src.settings import Settings
+from src.settings.logging_config import safe_endpoint
 
 
 class TopologyGeneratorConnection:
-    """Requests topology configurations from the Mimyr service."""
+    """Requests topology configurations from the topology generator service."""
 
     @staticmethod
     def generate_topology(prompt: str, url: str | None = None) -> dict:
         """
-        Requests a topology YAML configuration from the LLM.
+        Requests a topology YAML configuration from the generator service.
         :param prompt: Natural-language topology description.
         :param url: Optional generator API URL overriding the settings.
         :return: API result with valid, yaml, and warnings fields.
@@ -27,25 +30,36 @@ class TopologyGeneratorConnection:
             raise ValueError("The topology description must not be empty.")
 
         base_url = base_url.strip().rstrip("/")
-        logger.info(f"Requesting topology generation from {base_url}")
+        endpoint = safe_endpoint(base_url)
+        timeout = Settings.API.GENERATOR.TOPOLOGY_GENERATOR_TIMEOUT_SECONDS
+        started = perf_counter()
         try:
             response = requests.post(
                 f"{base_url}/api/generate-topology",
                 json={"prompt": prompt},
-                timeout=Settings.API.GENERATOR.TOPOLOGY_GENERATOR_TIMEOUT_SECONDS,
+                timeout=timeout,
             )
             response.raise_for_status()
         except requests.Timeout as exc:
-            logger.error("Topology generation request timed out.")
+            logger.error(
+                "Generator request timed out: endpoint={}, elapsed={:.2f}s", endpoint, perf_counter() - started
+            )
             raise TimeoutError("Topology generation request timed out.") from exc
         except requests.RequestException as exc:
-            logger.error("Topology generation request failed.")
+            logger.error(
+                "Generator request failed: endpoint={}, status={}, exception={}",
+                endpoint,
+                getattr(getattr(exc, "response", None), "status_code", None),
+                type(exc).__name__,
+            )
             raise RuntimeError("Topology generation request failed.") from exc
 
         try:
             result = response.json()
         except ValueError as exc:
+            logger.error("Generator response is invalid JSON: endpoint={}", endpoint)
             raise RuntimeError("Topology generator returned invalid JSON.") from exc
         if not isinstance(result, dict):
+            logger.error("Generator response has invalid structure: endpoint={}", endpoint)
             raise TypeError("Topology generator returned an unexpected response.")
         return result

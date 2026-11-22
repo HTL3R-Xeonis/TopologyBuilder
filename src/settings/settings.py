@@ -181,6 +181,10 @@ class Settings:
                     Settings.IS_DRY_RUN = check_value_type(value, bool)
                 case "new":
                     Settings.NEW = check_value_type(value, bool)
+                case "log_file_path":
+                    Settings.LOG_FILE_PATH = Path(check_value_type(value, str))
+                case "error_log_file_path":
+                    Settings.ERROR_LOG_FILE_PATH = Path(check_value_type(value, str))
                 case "esxi":
                     Settings._initialise_esxi_settings(check_value_type(value, dict))
                 case "gns3":
@@ -325,11 +329,11 @@ class Settings:
                     if retries is None or retries < 0:
                         raise ValueError("api.generator.max_retries must be zero or greater.")
                     Settings.API.GENERATOR.MAX_RETRIES = retries
-                case "topology_generator_timeout_secounds":
+                case "topology_generator_timeout_seconds":
                     timeout = check_value_type(value, int, 1800)
                     if timeout is None or timeout <= 0:
                         raise ValueError("api.generator.topology_generator_timeout_seconds must be greater than 0.")
-                    Settings.API.TOPOLOGY_GENERATOR_TIMEOUT_SECONDS = timeout
+                    Settings.API.GENERATOR.TOPOLOGY_GENERATOR_TIMEOUT_SECONDS = timeout
                 case _:
                     logger.warning(f"Unrecognized setting: Settings.API.GENERATOR.{key.upper()}")
 
@@ -342,8 +346,10 @@ class Settings:
     """If True, only prints what would happen. May still execute API requests."""
     NEW: bool = False
     """If True, replaces graph-owned VMs and GNS3 nodes during deployment."""
-    LOG_FILE_PATH: Path = "./logs/app.log"
-    """Path to the logs file."""
+    LOG_FILE_PATH: Path = Path("./logs/app.log")
+    """Path to the complete application log."""
+    ERROR_LOG_FILE_PATH: Path = Path("./logs/errors.log")
+    """Path to warnings, errors and critical messages."""
 
     class ESXI:
         """Settings related to ESXi."""

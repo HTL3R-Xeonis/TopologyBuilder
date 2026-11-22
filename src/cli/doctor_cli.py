@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 from pathlib import Path
 
 import typer
+from loguru import logger
 
 from src.doctor.status import Status, StatusList
 from src.settings import Settings
@@ -29,9 +30,13 @@ def _connection() -> ESXiConnection:
 
 
 def _report(results: StatusList) -> None:
-    """Displays check results and exits with failure when problems exist."""
+    """Displays and records health-check results, failing for unhealthy services."""
     for result in results:
         typer.echo(f"[{result.status.value}] {result.topic}: {result.message}")
+        if result.status in Status.FAILURE_STATES:
+            logger.warning(
+                "Doctor check failed: topic={}, state={}, message={}", result.topic, result.status.value, result.message
+            )
     passed = sum(item.status not in Status.FAILURE_STATES for item in results)
     typer.echo(f"{passed}/{len(results)} checks passed")
     if results.has_failures:

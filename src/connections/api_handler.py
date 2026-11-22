@@ -1,9 +1,11 @@
 import json
+from time import perf_counter
 
 import requests
 from loguru import logger
 
 from src.settings import Settings
+from src.settings.logging_config import safe_endpoint
 
 from .generic_connection import GenericConnection
 
@@ -31,74 +33,84 @@ class APIHandler:
         self.port = port
 
     @staticmethod
+    def _request(method: str, url: str, parsing_method: str = "json", **kwargs) -> dict | None:
+        """
+        Executes and records an HTTP request without logging its payload or credentials.
+        :param method: HTTP method (GET, POST or DELETE).
+        :param url: Target API URL.
+        :param parsing_method: Expected response format.
+        :param kwargs: Arguments forwarded to Requests.
+        :return: Parsed API response.
+        :raises TimeoutError: If the request times out.
+        :raises requests.RequestException: If transport or HTTP status fails.
+        :raises ValueError: If the API response cannot be parsed.
+        """
+        endpoint = safe_endpoint(url)
+        request = {"GET": requests.get, "POST": requests.post, "DELETE": requests.delete}[method]
+        started = perf_counter()
+        try:
+            response = request(url, **kwargs)
+            response.raise_for_status()
+        except requests.Timeout as exc:
+            logger.error("HTTP {} timed out: {} ({:.2f}s)", method, endpoint, perf_counter() - started)
+            raise TimeoutError(f"{method} request timed out: {endpoint}") from exc
+        except requests.RequestException as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            logger.error(
+                "HTTP {} failed: endpoint={}, status={}, elapsed={:.2f}s, exception={}",
+                method,
+                endpoint,
+                status,
+                perf_counter() - started,
+                type(exc).__name__,
+            )
+            raise
+        result = APIHandler.parse_response(response, parsing_method)
+        return result
+
+    @staticmethod
     def get(url: str, parsing_method: str = "json", **kwargs) -> dict | None:
         """
-        General method to make an API GET request
-        :param parsing_method: Method of parsing the response.
-        :param url: url to the API endpoint
-        :param kwargs: Keyword arguments for the get request.
-        :return: The parsed response from the GET request.
-        :raises HTTPError: Is thrown when something went wrong with the API call.
-        :raises TimeoutError: Is thrown when it takes too long to receive a response.
-        :raises RuntimeError: Is thrown when the response is not parseable to JSON.
+        Retrieves and parses an HTTP API resource.
+        :param url: Target API URL.
+        :param parsing_method: Expected response format.
+        :param kwargs: Arguments forwarded to Requests.
+        :return: Parsed API response.
+        :raises TimeoutError: If the request times out.
+        :raises requests.RequestException: If the HTTP request fails.
+        :raises ValueError: If the response is invalid.
         """
-        try:
-            response = requests.get(url, timeout=5, **kwargs)
-            response.raise_for_status()
-            return APIHandler.parse_response(response, parsing_method)
-        except requests.Timeout:
-            logger.error(msg := f"GET request timed out to: {url}")
-            raise TimeoutError(msg)
-        except requests.HTTPError as err:
-            logger.error(msg := f"GET request failed: {url}. Exception: {err}")
-            raise
+        kwargs.setdefault("timeout", 5)
+        return APIHandler._request("GET", url, parsing_method, **kwargs)
 
     @staticmethod
     def post(url: str, parsing_method: str = "json", **kwargs) -> dict | None:
         """
-        General method to make an API POST request
-        :param url: url to the API endpoint
-        :param parsing_method: Method of parsing the response.
-        :param kwargs: Keyword arguments for the post request.
-        :return: The parsed response from the POST request.
-        :raises HTTPError: Is thrown when something went wrong with the API call.
-        :raises TimeoutError: Is thrown when it takes too long to receive a response.
-        :raises RuntimeError: Is thrown when the response is not parseable to JSON.
+        Submits and parses an HTTP API request.
+        :param url: Target API URL.
+        :param parsing_method: Expected response format.
+        :param kwargs: Arguments forwarded to Requests; POST timeouts are caller-controlled.
+        :return: Parsed API response.
+        :raises TimeoutError: If the request times out.
+        :raises requests.RequestException: If the HTTP request fails.
+        :raises ValueError: If the response is invalid.
         """
-        try:
-            # @TODO ADD TIMEOUT. CURRENTLY RUNS INTO ERROR WHILST DEPLOYING VM. PERIODICALL RESPONSES FROM API SERVER ARE MISSING.
-            response = requests.post(url, **kwargs)
-            response.raise_for_status()
-            return APIHandler.parse_response(response, parsing_method)
-        except requests.Timeout:
-            logger.error(msg := f"POST request timed out to: {url}")
-            raise TimeoutError(msg)
-        except requests.HTTPError as err:
-            logger.error(msg := f"POST request failed: {url}. Exception: {err}")
-            raise
+        return APIHandler._request("POST", url, parsing_method, **kwargs)
 
     @staticmethod
     def delete(url: str, parsing_method: str = "json", **kwargs) -> dict | None:
         """
-        General method to make an API DELETE request
-        :param url: url to the API endpoint
-        :param parsing_method: Method of parsing the response.
-        :param kwargs: Keyword arguments for the delete request.
-        :return: The parsed response from the DELETE request.
-        :raises HTTPError: Is thrown when something went wrong with the API call.
-        :raises TimeoutError: Is thrown when it takes too long to receive a response.
-        :raises RuntimeError: Is thrown when the response is not parseable to JSON.
+        Deletes and parses an HTTP API resource.
+        :param url: Target API URL.
+        :param parsing_method: Expected response format.
+        :param kwargs: Arguments forwarded to Requests.
+        :return: Parsed API response, if available.
+        :raises TimeoutError: If the request times out.
+        :raises requests.RequestException: If the HTTP request fails.
+        :raises ValueError: If the response is invalid.
         """
-        try:
-            response = requests.delete(url, timeout=5, **kwargs)
-            response.raise_for_status()
-            return APIHandler.parse_response(response, parsing_method)
-        except requests.Timeout:
-            logger.error(msg := f"DELETE request timed out to: {url}")
-            raise TimeoutError(msg)
-        except requests.HTTPError as err:
-            logger.error(msg := f"DELETE request failed: {url}. Exception: {err}")
-            raise
+        kwargs.setdefault("timeout", 5)
+        return APIHandler._request("DELETE", url, parsing_method, **kwargs)
 
     @staticmethod
     def parse_response(response: requests.Response, parsing_method: str = "json") -> None | dict:
@@ -115,8 +127,13 @@ class APIHandler:
             if parsing_method == "json":
                 return response.json()
             return NotImplemented
-        except json.decoder.JSONDecodeError as e:
-            logger.error("An error occurred trying to parse the response to using json: " + e.msg)
+        except (json.decoder.JSONDecodeError, requests.exceptions.JSONDecodeError) as exc:
+            logger.error(
+                "Invalid API JSON: endpoint={}, status={}, exception={}",
+                safe_endpoint(response.url),
+                response.status_code,
+                type(exc).__name__,
+            )
             raise
 
     @staticmethod

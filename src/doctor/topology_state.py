@@ -490,37 +490,30 @@ class TopologyChanges:
 
     def _plan_cleanup_links(self, graph: Graph, state: TopologyState, excluded_ids: set[str]) -> None:
         """
-        Plans removal of GNS3 links not represented by the topology.
-        :param graph: Topology defining the expected links.
-        :param state: Current GNS3 inventory.
-        :param excluded_ids: Node IDs excluded from cleanup.
+        Plans deletion of links attached to orphan nodes selected for removal.
+        :param graph: Topology whose existing connections must be preserved.
+        :param state: Current GNS3 project inventory.
+        :param excluded_ids: Node IDs protected from cleanup.
+        :raises RuntimeError: If a GNS3 link cannot be inspected safely.
         """
-        expected: set[frozenset[tuple[str, int, int]]] = set()
-        gns3 = self.gns3_orchestrator.gns3_connection
-        for first, first_if, second, second_if in self._get_expected_connections(graph):
-            if first.node_gns3_info is None or second.node_gns3_info is None:
-                continue
-            endpoints: set[tuple[str, int, int]] = set()
-            for node, interface in ((first, first_if), (second, second_if)):
-                try:
-                    adapter = gns3._get_adapter(node.node_gns3_info, interface)
-                    endpoints.add((node.node_gns3_info["node_id"], adapter["adapter_number"], adapter["port_number"]))
-                except (KeyError, ValueError) as exc:
-                    self.conflicts.append(f"Cannot verify GNS3 link {first.name} - {second.name}: {exc}")
-            if len(endpoints) == 2:
-                expected.add(frozenset(endpoints))
-
         removed_ids = {node["node_id"] for node in self.to_delete["gns3_node"]}
+        if not removed_ids:
+            return
+
+        graph_ids = {node["node_id"] for node in state.gns3_all_nodes if node["name"] in graph.nodes}
         for link in state.gns3_links:
-            nodes = {end["node_id"] for end in link["nodes"]}
-            if nodes & excluded_ids:
+            try:
+                link_id = link["link_id"]
+                endpoints = link["nodes"]
+                node_ids = {endpoint["node_id"] for endpoint in endpoints}
+            except (KeyError, TypeError) as exc:
+                raise RuntimeError("Cannot safely inspect GNS3 links; cleanup cancelled") from exc
+            if not isinstance(endpoints, list) or len(endpoints) != 2 or not node_ids:
+                raise RuntimeError(f"Invalid endpoints on GNS3 link {link_id}; cleanup cancelled")
+            if node_ids & excluded_ids or node_ids.issubset(graph_ids):
                 continue
-            if nodes & removed_ids:
-                self.to_delete["gns3_link"].append(link["link_id"])
-                continue
-            actual = frozenset((end["node_id"], end["adapter_number"], end["port_number"]) for end in link["nodes"])
-            if actual not in expected:
-                self.to_delete["gns3_link"].append(link["link_id"])
+            if node_ids & removed_ids:
+                self.to_delete["gns3_link"].append(link_id)
 
     @staticmethod
     def _get_cloud_interfaces(state: TopologyState, excluded_node_ids: set[str] | None = None) -> set[str]:
