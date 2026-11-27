@@ -510,11 +510,11 @@ def gns3_vm_deploy_901() -> None:
 
 
 @allure.title(
-    "deploy_fresh_gns3_vm gibt der neuen VM standardmäßig 4 vCPUs und 8 GB RAM"
+    "deploy_fresh_gns3_vm gibt der neuen VM standardmäßig 8 vCPUs und 16 GB RAM"
 )
 @allure.description(
     "Überprüft, dass die frisch importierte GNS3-VM vor dem Einschalten auf "
-    "4 vCPUs und 8192 MB gesetzt wird, egal was die OVA selbst vorgibt, und "
+    "8 vCPUs und 16384 MB gesetzt wird, egal was die OVA selbst vorgibt, und "
     "dass beide Werte überschrieben werden können"
 )
 @allure.tag("positiv-test", "gns3_vm_deploy")
@@ -522,7 +522,7 @@ def gns3_vm_deploy_901() -> None:
 @allure.severity(allure.severity_level.NORMAL)
 def gns3_vm_deploy_902() -> None:
     for kwargs, expected in (
-        ({}, (4, 8192)),
+        ({}, (8, 16384)),
         ({"cpus": 2, "memory_mb": 4096}, (2, 4096)),
     ):
         esxi_connection = MagicMock()
@@ -608,3 +608,55 @@ def gns3_vm_deploy_904() -> None:
 
     assert _deploy_with(esxi_connection, new_vm) == "10.20.20.233"
     esxi_connection.power_on_vm.assert_called_once_with(new_vm)
+
+
+@allure.title(
+    "deploy_fresh_gns3_vm gibt der VM höchstens so viele vCPUs, wie der Host logische Prozessoren hat"
+)
+@allure.description(
+    "Überprüft, dass die gewünschte vCPU-Anzahl auf die logischen Prozessoren des Hosts begrenzt wird (ESXi lehnt mehr "
+    "ab), dass ein größerer Host den Wunsch unverändert lässt, und dass ein Host, der nicht antwortet, den Wunsch behält"
+)
+@allure.tag("positiv-test", "gns3_vm_deploy")
+@allure.feature("gns3_vm_deploy")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_vm_deploy_905() -> None:
+    from src.gns3_vm_deploy import _cpus_the_host_can_give
+
+    small_host = MagicMock()
+    small_host.get_host_system.return_value.hardware.cpuInfo.numCpuThreads = 4
+    assert _cpus_the_host_can_give(small_host, 8) == 4
+
+    big_host = MagicMock()
+    big_host.get_host_system.return_value.hardware.cpuInfo.numCpuThreads = 24
+    assert _cpus_the_host_can_give(big_host, 8) == 8
+
+    silent_host = MagicMock()
+    silent_host.get_host_system.side_effect = RuntimeError("host unreachable")
+    assert _cpus_the_host_can_give(silent_host, 8) == 8
+
+
+@allure.title(
+    "deploy_fresh_gns3_vm gibt der VM höchstens die Hälfte des Host-Arbeitsspeichers"
+)
+@allure.description(
+    "Überprüft, dass der gewünschte Arbeitsspeicher auf die Hälfte des Hosts begrenzt wird, dass ein großer Host den Wunsch "
+    "unverändert lässt, und dass ein Host, der nicht antwortet, den Wunsch behält"
+)
+@allure.tag("positiv-test", "gns3_vm_deploy")
+@allure.feature("gns3_vm_deploy")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_vm_deploy_906() -> None:
+    from src.gns3_vm_deploy import _memory_the_host_can_give
+
+    small_host = MagicMock()
+    small_host.get_host_system.return_value.hardware.memorySize = 24 * 1024**3
+    assert _memory_the_host_can_give(small_host, 16384) == 12288
+
+    big_host = MagicMock()
+    big_host.get_host_system.return_value.hardware.memorySize = 128 * 1024**3
+    assert _memory_the_host_can_give(big_host, 16384) == 16384
+
+    silent_host = MagicMock()
+    silent_host.get_host_system.side_effect = RuntimeError("host unreachable")
+    assert _memory_the_host_can_give(silent_host, 16384) == 16384

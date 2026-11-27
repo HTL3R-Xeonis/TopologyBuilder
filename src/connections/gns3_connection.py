@@ -986,6 +986,19 @@ class GNS3Connection(APIHandler):
                 return True  # no port information to tell links apart: same as before, one link per pair
         return False
 
+    def _pair_link_without_port_information(
+        self, node_id_a: str, node_id_b: str
+    ) -> bool:
+        """True if an existing link between exactly these two nodes carries no adapter/port numbers (so it is one per pair)."""
+        wanted = {node_id_a, node_id_b}
+        return any(
+            {endpoint["node_id"] for endpoint in link["nodes"]} == wanted
+            and any(
+                endpoint.get("adapter_number") is None for endpoint in link["nodes"]
+            )
+            for link in self._existing_links
+        )
+
     def connect_nodes(
         self,
         node_1: GenericNode,
@@ -1031,13 +1044,20 @@ class GNS3Connection(APIHandler):
         ):
             # Some link between the two exists. It is only THIS one if it uses the same ports; a
             # parallel link over other interfaces is still missing and has to be created.
+            if self._pair_link_without_port_information(
+                gns3_info_1["node_id"], gns3_info_2["node_id"]
+            ):
+                return None  # the existing link cannot be told apart by ports: one link per pair, as before
+            # An interface name that matches no port is an error here exactly as it is when no link exists yet (see below):
+            # answering "None" ("already linked") for it used to report success for a link that was never made.
             try:
                 found_1 = self._get_adapter(gns3_info_1, intf_1)
                 found_2 = self._get_adapter(gns3_info_2, intf_2)
-            except KeyError:
-                return None
-            except ValueError:
-                return None
+            except KeyError as exc:
+                raise RuntimeError(
+                    f"GNS3 gave no port list for {node_1.name} or {node_2.name} (missing {exc}), "
+                    f"so {intf_1.name}/{intf_2.name} cannot be matched to a port."
+                ) from exc
             if self._link_exists(
                 gns3_info_1["node_id"],
                 gns3_info_2["node_id"],

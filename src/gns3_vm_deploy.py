@@ -27,9 +27,57 @@ from src.pull_importer import PullImporter
 _IP_WAIT_POLL_INTERVAL_SECONDS = 5
 
 # What a freshly deployed GNS3 VM gets, whatever the OVA itself declares (the stock
-# GNS3 VM OVA comes with 1 vCPU / 2 GB, far too little for a handful of IOSv nodes).
-DEFAULT_GNS3_VM_CPUS = 4
-DEFAULT_GNS3_VM_MEMORY_MB = 8192
+# GNS3 VM OVA comes with 1 vCPU / 2 GB, far too little for a handful of IOSv nodes: every IOSv
+# node boots on its own CPU time, and with 4 vCPUs a topology of a dozen routers kept the VM at
+# 100 % for minutes). A host with fewer logical processors gets what it has (_cpus_the_host_can_give).
+DEFAULT_GNS3_VM_CPUS = 8
+# An IOSv node holds about 0.5 GB, an IOSvL2 about 0.8 GB, plus GNS3 itself: 8 GB was full with a dozen routers (the VM's memory graph
+# sat at its limit while the topology booted). A host with little memory gives at most half of what it has (_memory_the_host_can_give).
+DEFAULT_GNS3_VM_MEMORY_MB = 16384
+
+
+def _memory_the_host_can_give(esxi_connection: ESXiConnection, wanted_mb: int) -> int:
+    """
+    A GNS3 VM that takes most of the host's memory starves everything else on it (and ESXi starts swapping), so it gets at most
+    half of the host's physical memory. The reduction is logged; if the host cannot be asked, the wanted amount is kept and a
+    warning is logged.
+    """
+    try:
+        host_mb = esxi_connection.get_host_system().hardware.memorySize // (1024 * 1024)
+    except Exception as exc:  # noqa: BLE001 - only the cap is lost; the VM is still deployed with the wanted amount
+        logger.warning(
+            f"Could not read the host's memory, keeping {wanted_mb} MB for the GNS3 VM: {exc}"
+        )
+        return wanted_mb
+    limit = host_mb // 2
+    if isinstance(host_mb, int) and 0 < limit < wanted_mb:
+        logger.warning(
+            f"The host has {host_mb} MB of memory; the GNS3 VM gets at most half of it ({limit} MB) instead of the {wanted_mb} MB wanted"
+        )
+        return limit
+    return wanted_mb
+
+
+def _cpus_the_host_can_give(esxi_connection: ESXiConnection, wanted: int) -> int:
+    """
+    A VM cannot have more virtual CPUs than the host has logical processors, and ESXi refuses to reconfigure it if it is asked
+    for more. So the wanted count is reduced to what the host has (and the reduction is logged), never silently dropped on
+    the floor by a failing reconfiguration. If the host cannot be asked, the wanted count is kept and a warning is logged.
+    """
+    try:
+        available = esxi_connection.get_host_system().hardware.cpuInfo.numCpuThreads
+    except Exception as exc:  # noqa: BLE001 - only the cap is lost; the VM is still deployed with the wanted count
+        logger.warning(
+            f"Could not read the host's CPU count, keeping {wanted} vCPU(s) for the GNS3 VM: {exc}"
+        )
+        return wanted
+    if isinstance(available, int) and 0 < available < wanted:
+        logger.warning(
+            f"The host has {available} logical processor(s), fewer than the {wanted} vCPUs wanted for the GNS3 VM - "
+            f"using {available}"
+        )
+        return available
+    return wanted
 
 
 def _set_autostart(
@@ -119,9 +167,9 @@ def deploy_fresh_gns3_vm(
         this ESXi host (e.g. a real device out in the lab already using
         a MAC in this range) - keep the range dedicated to VMs this
         tool manages.
-    :param cpus: number of virtual CPUs the new VM gets (default 4), set after
+    :param cpus: number of virtual CPUs the new VM gets (default 8, at most what the host has), set after
         the import and before the VM is powered on
-    :param memory_mb: memory the new VM gets in MB (default 8192 = 8 GB)
+    :param memory_mb: memory the new VM gets in MB (default 16384 = 16 GB, at most half of the host's)
     :return: IP address of the new GNS3 VM
     :raises TimeoutError: if the new VM never reports an IP within
         ip_wait_timeout_seconds - the old VM (if any) is left as its
@@ -211,6 +259,8 @@ def deploy_fresh_gns3_vm(
         logger.info(f"Set new '{vm_name}' VM's MAC to {final_mac_address}")
 
     stage("setting CPU and memory")
+    cpus = _cpus_the_host_can_give(esxi_connection, cpus)
+    memory_mb = _memory_the_host_can_give(esxi_connection, memory_mb)
     logger.info(f"Setting '{vm_name}' VM to {cpus} vCPU(s) and {memory_mb} MB memory")
     esxi_connection.set_vm_resources(new_vm, cpus, memory_mb)
 

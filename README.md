@@ -176,7 +176,7 @@ kept as-is if it's already in range). Not yet in this repo's own
 [`settings.example.yml`](settings.example.yml) since the CLI never reads
 them - see Igdrasyl's own `settings.example.yml` and README for
 the full picture, including the GUI's delete-old-VM option. A freshly deployed
-GNS3 VM always gets **4 vCPUs and 8 GB RAM** (the stock OVA's 1 vCPU / 2 GB is far
+GNS3 VM always gets **8 vCPUs and 16 GB RAM** (at most as many vCPUs as the host has logical processors, at most half of the host's memory) (the stock OVA's 1 vCPU / 2 GB is far
 too little for a few IOSv nodes); `deploy_fresh_gns3_vm` takes `cpus` and
 `memory_mb` to choose otherwise.
 

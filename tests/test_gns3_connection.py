@@ -1808,3 +1808,62 @@ def gns3_connection_064() -> None:
         pytest.raises(RuntimeError),
     ):
         GNS3Connection.delete_link("10.20.20.231", 80, "proj-1", "link-1")
+
+
+@allure.title(
+    "connect_nodes meldet im incremental-Modus einen Interface-Namen ohne passenden Port, statt Erfolg vorzutäuschen"
+)
+@allure.description(
+    "Überprüft, dass connect_nodes bei einem schon bestehenden Link zwischen denselben Nodes einen Interface-Namen, "
+    'der zu keinem Port passt, als ValueError meldet - früher kam hier None zurück ("Link existiert schon"), so dass '
+    "ein falsch benannter zweiter Link weder angelegt noch gemeldet wurde"
+)
+@allure.tag("negativ-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_065() -> None:
+    existing_project = {"project_id": "p1", "name": "lab", "status": "opened"}
+    existing_link = {
+        "nodes": [
+            {"node_id": "n1", "adapter_number": 0, "port_number": 0},
+            {"node_id": "n2", "adapter_number": 0, "port_number": 0},
+        ]
+    }
+    with patch.object(GNS3Connection, "delete"), patch.object(GNS3Connection, "post"):
+        conn = _make_incremental_connection(existing_project, [], [existing_link])
+    node_1, node_2 = _nodes_with_ports()
+
+    with patch.object(GNS3Connection, "post") as mock_post:
+        with pytest.raises(ValueError, match="cannot be associated to any adapter"):
+            conn.connect_nodes(
+                node_1, node_2, _interface("Serial9/9"), _interface("Serial9/9")
+            )
+
+    mock_post.assert_not_called()
+
+
+@allure.title(
+    "connect_nodes meldet im incremental-Modus eine fehlende Port-Liste von GNS3"
+)
+@allure.description(
+    "Überprüft, dass eine GNS3-Node-Info ohne 'ports' im incremental-Modus als RuntimeError mit den Node-Namen "
+    "gemeldet wird, statt den Link stillschweigend zu überspringen"
+)
+@allure.tag("negativ-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_connection_066() -> None:
+    existing_project = {"project_id": "p1", "name": "lab", "status": "opened"}
+    existing_link = {
+        "nodes": [
+            {"node_id": "n1", "adapter_number": 0, "port_number": 0},
+            {"node_id": "n2", "adapter_number": 0, "port_number": 0},
+        ]
+    }
+    with patch.object(GNS3Connection, "delete"), patch.object(GNS3Connection, "post"):
+        conn = _make_incremental_connection(existing_project, [], [existing_link])
+    node_1, node_2 = _nodes_with_ports()
+    node_1.gns3_node_info = {"node_id": "n1", "name": "R1"}  # no "ports"
+
+    with pytest.raises(RuntimeError, match="gave no port list for R1 or R2"):
+        conn.connect_nodes(node_1, node_2, _interface("Gi0/1"), _interface("Gi0/1"))
