@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "topologybuilder"
-version = "1.0.2"
+version = "1.0.3"
 description = "Mjonyr (repository TopologyBuilder): builds and deploys network topologies to GNS3/ESXi from a YAML config file."
 readme = "README.md"
 requires-python = ">=3.12"
