@@ -64,6 +64,15 @@ class TopologyBackend:
         self._gns3_password = gns3_password
         self._gns3_port = gns3_port
 
+    def take_warnings(self) -> list[str]:
+        """
+        Notes about interface names that were corrected automatically during the last deploy, add_node or add_link (for
+        example 'gi0/2' wired to the port 'Ethernet2'). Returns them once and clears them, so a caller can show them to
+        the user after the call.
+        :return: The warning messages, oldest first.
+        """
+        return self._orchestrator.take_link_warnings()
+
     def _load(self, topology_file: str) -> tuple[TopologyFileValidation, Graph]:
         validator = TopologyFileValidation(topology_file)
         validator.validate_file()

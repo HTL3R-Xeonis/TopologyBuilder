@@ -120,6 +120,8 @@ class GNS3Connection(APIHandler):
         self.url = f"http://{ip}:{port}"
         self.incremental = incremental
         self._positions: dict[str, tuple[int, int]] = {}
+        # Notes about interface names that did not match a port and were corrected by an unambiguous rule (only port, same port number).
+        self.warnings: list[str] = []
 
         self.project_name = project_name
         self.project = self._init_project(project_name)
@@ -892,8 +894,28 @@ class GNS3Connection(APIHandler):
         match = re.search(r"(\d+)$", name)
         return int(match.group(1)) if match else None
 
+    def _warnings_list(self) -> list[str]:
+        """The warnings list of this connection (created on demand for instances built without ``__init__``)."""
+        if not hasattr(self, "warnings"):
+            self.warnings = []
+        return self.warnings
+
+    def take_warnings(self) -> list[str]:
+        """
+        Returns the warnings collected so far (e.g. an interface name that matched no port and was wired to the only
+        port of its node) and clears the list, so that a caller can show them once.
+        :return: The collected warning messages, oldest first.
+        """
+        collected = list(self._warnings_list())
+        self.warnings = []
+        return collected
+
     @staticmethod
-    def _get_adapter(gns3_node_info: dict[str, Any], intf: Interface) -> dict[str, Any]:
+    def _get_adapter(
+        gns3_node_info: dict[str, Any],
+        intf: Interface,
+        warnings: list[str] | None = None,
+    ) -> dict[str, Any]:
         """
         Looks for a GNS3 adapter matching the given interface. Tries, in
         order: exact name match (case-insensitive); if the node has
@@ -905,9 +927,13 @@ class GNS3Connection(APIHandler):
         one candidate matches - different GNS3 templates have been
         observed to use different naming conventions entirely (e.g.
         'gi0/2' vs. plain 'Ethernet2'), but both still encode the same
-        port index at the end.
+        port index at the end. These are corrections of a name, not
+        invented values, so they stay automatic; each one is logged and,
+        if ``warnings`` is given, also appended to it (once per distinct
+        message) so that a caller can show what was corrected.
         :param gns3_node_info: GNS3 node information.
         :param intf: Interface of the node.
+        :param warnings: List that receives a message when a name was corrected by one of the two fallbacks (optional).
         :return: Returns the GNS3 adapter information.
         :raises ValueError: Is thrown when no adapter can be associated with the given interface.
         This may happen because the names are not the same.
@@ -918,11 +944,14 @@ class GNS3Connection(APIHandler):
                 return adapter
 
         if len(ports) == 1:
-            logger.warning(
+            message = (
                 f"Node '{gns3_node_info['name']}' has no port named "
                 f"'{intf.name}', using its only port "
                 f"'{ports[0].get('name')}' instead"
             )
+            logger.warning(message)
+            if warnings is not None and message not in warnings:
+                warnings.append(message)
             return ports[0]
 
         requested_number = GNS3Connection._trailing_number(intf.name)
@@ -934,15 +963,20 @@ class GNS3Connection(APIHandler):
                 == requested_number
             ]
             if len(matches) == 1:
-                logger.warning(
+                message = (
                     f"Node '{gns3_node_info['name']}' has no port named "
                     f"'{intf.name}', using port '{matches[0].get('name')}' "
                     f"instead (matched by port number)"
                 )
+                logger.warning(message)
+                if warnings is not None and message not in warnings:
+                    warnings.append(message)
                 return matches[0]
 
+        available = ", ".join(str(port.get("name")) for port in ports) or "none"
         raise ValueError(
-            f"Interface {intf.name} on {intf.parent.name} cannot be associated to any adapter of the {gns3_node_info['name']} template."
+            f"Interface {intf.name} on {intf.parent.name} cannot be associated to any adapter of the {gns3_node_info['name']} template. "
+            f"Available ports: {available}."
         )
 
     def _link_exists(
@@ -1011,6 +1045,9 @@ class GNS3Connection(APIHandler):
         Two nodes can be linked more than once over different interfaces: pass the interfaces of the
         link to create (``intf_1`` on ``node_1``, ``intf_2`` on ``node_2``). Without them the first interface
         of each node that leads to the other one is used.
+        An interface name that matches no port is corrected when that is unambiguous (the only port of the node, or the one port with
+        the same trailing number); the correction is logged and recorded in ``self.warnings`` (see ``take_warnings``), anything
+        else is an error.
         :param node_1: Node to connect to ``node_2``.
         :param node_2: Node to connect to ``node_1``.
         :param intf_1: Interface of ``node_1`` of the link (optional)
@@ -1051,8 +1088,8 @@ class GNS3Connection(APIHandler):
             # An interface name that matches no port is an error here exactly as it is when no link exists yet (see below):
             # answering "None" ("already linked") for it used to report success for a link that was never made.
             try:
-                found_1 = self._get_adapter(gns3_info_1, intf_1)
-                found_2 = self._get_adapter(gns3_info_2, intf_2)
+                found_1 = self._get_adapter(gns3_info_1, intf_1, self._warnings_list())
+                found_2 = self._get_adapter(gns3_info_2, intf_2, self._warnings_list())
             except KeyError as exc:
                 raise RuntimeError(
                     f"GNS3 gave no port list for {node_1.name} or {node_2.name} (missing {exc}), "
@@ -1079,8 +1116,8 @@ class GNS3Connection(APIHandler):
         )
         # --------------------------------------------------------------------------------------------------------------
 
-        adapter_1 = self._get_adapter(gns3_info_1, intf_1)
-        adapter_2 = self._get_adapter(gns3_info_2, intf_2)
+        adapter_1 = self._get_adapter(gns3_info_1, intf_1, self._warnings_list())
+        adapter_2 = self._get_adapter(gns3_info_2, intf_2, self._warnings_list())
 
         payload = {
             "nodes": [

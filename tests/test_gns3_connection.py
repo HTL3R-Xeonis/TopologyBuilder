@@ -445,15 +445,19 @@ def gns3_connection_015() -> None:
 @allure.description(
     "Überprüft, dass _get_adapter bei mehreren Ports ohne Namens-Match "
     "einen Port über die übereinstimmende, eindeutige Trailing-Portnummer "
-    "findet (z.B. Config 'gi0/2' vs. Template-Port 'Ethernet2')"
+    "findet (z.B. Config 'gi0/2' vs. Template-Port 'Ethernet2'); die "
+    "automatische Korrektur wird in der übergebenen Warnungsliste vermerkt"
 )
 @allure.tag("positiv-test", "gns3-connection")
 @allure.feature("gns3_connection")
 @allure.severity(allure.severity_level.CRITICAL)
 def gns3_connection_016() -> None:
     node_info = _make_node_info("R1", ["Ethernet0", "Ethernet1", "Ethernet2"])
-    adapter = GNS3Connection._get_adapter(node_info, _make_interface("gi0/2"))
+    warnings: list[str] = []
+    adapter = GNS3Connection._get_adapter(node_info, _make_interface("gi0/2"), warnings)
     assert adapter["name"] == "Ethernet2"
+    assert len(warnings) == 1
+    assert "gi0/2" in warnings[0] and "Ethernet2" in warnings[0]
 
 
 @allure.title("_get_adapter wirft einen Fehler, wenn kein Port zugeordnet werden kann")
@@ -1867,3 +1871,168 @@ def gns3_connection_066() -> None:
 
     with pytest.raises(RuntimeError, match="gave no port list for R1 or R2"):
         conn.connect_nodes(node_1, node_2, _interface("Gi0/1"), _interface("Gi0/1"))
+
+
+@allure.title(
+    "connect_nodes meldet im Nicht-incremental-Modus einen Interface-Namen ohne passenden Port"
+)
+@allure.description(
+    "Überprüft, dass connect_nodes bei mehreren Ports und einem Interface-Namen, der weder dem Namen noch einer "
+    "eindeutigen Portnummer entspricht, einen ValueError mit Node, Interface und den vorhandenen Port-Namen wirft "
+    "und keinen Link anlegt"
+)
+@allure.tag("negativ-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_067() -> None:
+    conn = GNS3Connection.__new__(GNS3Connection)
+    conn.incremental = False
+    conn.url = "http://10.20.20.231:80"
+    conn.project = {"project_id": "p1"}
+    conn.warnings = []
+    node_1, node_2 = _nodes_with_ports()
+
+    with patch.object(GNS3Connection, "post") as mock_post:
+        with pytest.raises(ValueError, match=r"Available ports: Gi0/0, Gi0/1") as error:
+            conn.connect_nodes(
+                node_1, node_2, _interface("uplink"), _interface("Gi0/1")
+            )
+
+    assert "uplink" in str(error.value)
+    assert "R1" in str(error.value)
+    mock_post.assert_not_called()
+    assert conn.take_warnings() == []
+
+
+@allure.title(
+    "connect_nodes merkt sich den Fallback auf den einzigen Port in take_warnings"
+)
+@allure.description(
+    "Überprüft, dass ein Node mit genau einem Port bei nicht passendem Interface-Namen weiterhin verbunden wird, die "
+    "Ersetzung aber zusätzlich zum Log-Eintrag in der Warnungsliste der Connection landet und take_warnings sie "
+    "einmal zurückgibt und danach leert"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_068() -> None:
+    conn = GNS3Connection.__new__(GNS3Connection)
+    conn.incremental = False
+    conn.url = "http://10.20.20.231:80"
+    conn.project = {"project_id": "p1"}
+    conn.warnings = []
+    node_1, node_2 = _nodes_with_ports()
+    node_1.gns3_node_info["ports"] = [
+        {"name": "Ethernet0", "adapter_number": 0, "port_number": 0}
+    ]
+
+    with patch.object(GNS3Connection, "post", return_value={"link_id": "l1"}) as post:
+        conn.connect_nodes(node_1, node_2, _interface("gi0/0"), _interface("Gi0/1"))
+
+    payload = post.call_args.kwargs["json"]
+    assert payload["nodes"][0]["adapter_number"] == 0
+    warnings = conn.take_warnings()
+    assert len(warnings) == 1
+    assert "R1" in warnings[0]
+    assert "gi0/0" in warnings[0]
+    assert "Ethernet0" in warnings[0]
+    assert conn.take_warnings() == []
+
+
+@allure.title(
+    "_get_adapter trägt den Fallback auf den einzigen Port nur einmal in die Warnungsliste ein"
+)
+@allure.description(
+    "Überprüft, dass _get_adapter die übergebene Warnungsliste nur beim Fallback auf den einzigen Port füllt, bei "
+    "einem exakten Namens-Match leer lässt und dieselbe Meldung bei wiederholtem Aufruf nicht doppelt einträgt"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.NORMAL)
+def gns3_connection_069() -> None:
+    warnings: list[str] = []
+    GNS3Connection._get_adapter(
+        _make_node_info("R1", ["Gi0/0", "Gi0/1"]), _make_interface("gi0/1"), warnings
+    )
+    assert warnings == []
+
+    single = _make_node_info("PC1", ["Ethernet0"])
+    GNS3Connection._get_adapter(single, _make_interface("gi0/0", "PC1"), warnings)
+    GNS3Connection._get_adapter(single, _make_interface("gi0/0", "PC1"), warnings)
+    assert len(warnings) == 1
+
+
+@allure.title(
+    "connect_nodes behandelt einen bestehenden Link ohne Port-Angaben weiterhin als verbunden"
+)
+@allure.description(
+    "Überprüft den Legacy-Fall im incremental-Modus: Trägt ein bestehender Link zwischen denselben Nodes keine "
+    "Adapter-/Portnummern, gilt er als schon verbunden (None, kein Link, keine Namensprüfung), auch wenn der "
+    "Interface-Name zu keinem Port passt"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_070() -> None:
+    existing_project = {"project_id": "p1", "name": "lab", "status": "opened"}
+    legacy_link = {"nodes": [{"node_id": "n1"}, {"node_id": "n2"}]}
+    with patch.object(GNS3Connection, "delete"), patch.object(GNS3Connection, "post"):
+        conn = _make_incremental_connection(existing_project, [], [legacy_link])
+    node_1, node_2 = _nodes_with_ports()
+
+    with patch.object(GNS3Connection, "post") as mock_post:
+        result = conn.connect_nodes(
+            node_1, node_2, _interface("Serial9/9"), _interface("Serial9/9")
+        )
+
+    assert result is None
+    mock_post.assert_not_called()
+    assert conn.take_warnings() == []
+
+
+@allure.title(
+    "take_warnings gibt die Warnungen zurück und leert die Liste auch ohne __init__"
+)
+@allure.description(
+    "Überprüft, dass take_warnings die gesammelten Meldungen in der Reihenfolge des Eintrags zurückgibt, die Liste "
+    "danach leer ist und eine ohne __init__ gebaute Connection mit einer leeren Liste startet"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.MINOR)
+def gns3_connection_071() -> None:
+    conn = GNS3Connection.__new__(GNS3Connection)
+    assert conn.take_warnings() == []
+    conn.warnings = ["a", "b"]
+    assert conn.take_warnings() == ["a", "b"]
+    assert conn.warnings == []
+
+
+@allure.title(
+    "connect_nodes korrigiert einen Interface-Namen über die Portnummer und vermerkt es in take_warnings"
+)
+@allure.description(
+    "Überprüft, dass connect_nodes einen Namen wie 'Ethernet1' gegen die Template-Ports 'Gi0/0', 'Gi0/1' über die "
+    "eindeutige Portnummer automatisch dem Port 'Gi0/1' zuordnet (kein Fehler) und die Korrektur in take_warnings "
+    "einmal zurückgibt"
+)
+@allure.tag("positiv-test", "gns3-connection")
+@allure.feature("gns3_connection")
+@allure.severity(allure.severity_level.CRITICAL)
+def gns3_connection_072() -> None:
+    conn = GNS3Connection.__new__(GNS3Connection)
+    conn.incremental = False
+    conn.url = "http://10.20.20.231:80"
+    conn.project = {"project_id": "p1"}
+    conn.warnings = []
+    node_1, node_2 = _nodes_with_ports()
+
+    with patch.object(GNS3Connection, "post", return_value={"link_id": "l1"}) as post:
+        conn.connect_nodes(node_1, node_2, _interface("Ethernet1"), _interface("Gi0/1"))
+
+    payload = post.call_args.kwargs["json"]
+    assert payload["nodes"][0]["adapter_number"] == 1
+    warnings = conn.take_warnings()
+    assert len(warnings) == 1
+    assert "Ethernet1" in warnings[0] and "Gi0/1" in warnings[0]
+    assert conn.take_warnings() == []

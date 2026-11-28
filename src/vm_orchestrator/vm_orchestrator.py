@@ -64,6 +64,7 @@ class VMOrchestrator:
         ):
             raise TypeError
 
+        self._gns3_conn: GNS3Connection | None = None
         self.esxi_connection = ESXiConnection(
             esxi_host, esxi_port, esxi_username, esxi_password
         )
@@ -156,6 +157,7 @@ class VMOrchestrator:
             Settings.GNS3.PROJECT_NAME,
             incremental=incremental,
         )
+        self._gns3_conn = gns3_conn  # kept so that take_link_warnings can report automatic port-name corrections
         gns3_conn.set_node_positions(graph)
 
         datastore_name = Settings.ESXI.DATASTORE
@@ -1095,6 +1097,17 @@ class VMOrchestrator:
 
         actions.extend(self._repair_trunk_security_policy())
         return actions
+
+    def take_link_warnings(self) -> list[str]:
+        """
+        Returns (and clears) the notes the GNS3 connection of the last deploy collected about interface names that were
+        corrected automatically while linking (see ``GNS3Connection.take_warnings``).
+        :return: The warning messages, oldest first; empty when nothing was corrected or nothing was deployed yet.
+        """
+        connection = getattr(self, "_gns3_conn", None)
+        if connection is None:
+            return []
+        return connection.take_warnings()
 
     @staticmethod
     def _partially_link_gns3_nodes(gns3_connection: GNS3Connection, node) -> None:
