@@ -1837,11 +1837,13 @@ def gns3_connection_065() -> None:
         conn = _make_incremental_connection(existing_project, [], [existing_link])
     node_1, node_2 = _nodes_with_ports()
 
-    with patch.object(GNS3Connection, "post") as mock_post:
-        with pytest.raises(ValueError, match="cannot be associated to any adapter"):
-            conn.connect_nodes(
-                node_1, node_2, _interface("Serial9/9"), _interface("Serial9/9")
-            )
+    with (
+        patch.object(GNS3Connection, "post") as mock_post,
+        pytest.raises(ValueError, match="cannot be associated to any adapter"),
+    ):
+        conn.connect_nodes(
+            node_1, node_2, _interface("Serial9/9"), _interface("Serial9/9")
+        )
 
     mock_post.assert_not_called()
 
@@ -1892,11 +1894,11 @@ def gns3_connection_067() -> None:
     conn.warnings = []
     node_1, node_2 = _nodes_with_ports()
 
-    with patch.object(GNS3Connection, "post") as mock_post:
-        with pytest.raises(ValueError, match=r"Available ports: Gi0/0, Gi0/1") as error:
-            conn.connect_nodes(
-                node_1, node_2, _interface("uplink"), _interface("Gi0/1")
-            )
+    with (
+        patch.object(GNS3Connection, "post") as mock_post,
+        pytest.raises(ValueError, match=r"Available ports: Gi0/0, Gi0/1") as error,
+    ):
+        conn.connect_nodes(node_1, node_2, _interface("uplink"), _interface("Gi0/1"))
 
     assert "uplink" in str(error.value)
     assert "R1" in str(error.value)

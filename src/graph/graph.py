@@ -13,7 +13,6 @@ from src.graph.blocks.vlan import VirtualLan
 from src.graph.environment import Environment
 from src.graph.layout import render_graph
 
-
 DEFAULT_ESXI_INTERFACE = "eth0"
 """name of the interface an ESXi-hosted node gets when no edge touches it (see ``Graph._ensure_esxi_interfaces``)"""
 

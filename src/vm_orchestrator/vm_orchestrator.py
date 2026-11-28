@@ -1366,8 +1366,10 @@ class VMOrchestrator:
                 f"Could not re-open the GNS3 project to rebind the Cloud node(s) of {names}: {exc}"
             ]
         actions = [
-            f"Re-opened the GNS3 project to rebind the running Cloud node(s) of {names} "
-            f"(this stopped {len(running)} running node(s); they are started again)"
+            (
+                f"Re-opened the GNS3 project to rebind the running Cloud node(s) of {names} "
+                f"(this stopped {len(running)} running node(s); they are started again)"
+            )
         ]
         # the Clouds first: the nodes behind them need their link, and the order of the others does not matter
         cloud_ids = {n["node_id"] for n in running if n.get("node_type") == "cloud"}
